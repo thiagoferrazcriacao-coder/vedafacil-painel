@@ -479,22 +479,9 @@ app.post('/api/orcamentos/:id/pdf', auth, async (req, res) => {
     else o = memStore.orcamentos.find(x => x._id === req.params.id);
     if (!o) return res.status(404).json({ error: 'Not found' });
 
-    // Dynamic import puppeteer (may not be available in all envs)
-    try {
-      const puppeteer = (await import('puppeteer')).default;
-      const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-      const page = await browser.newPage();
-      await page.setContent(buildOrcamentoPdfHtml(o), { waitUntil: 'networkidle0' });
-      const pdf = await page.pdf({ format: 'A4', margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' } });
-      await browser.close();
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="orcamento-${o.numero}.pdf"`);
-      return res.send(pdf);
-    } catch (e) {
-      // Puppeteer not available — return HTML
-      res.setHeader('Content-Type', 'text/html');
-      return res.send(buildOrcamentoPdfHtml(o));
-    }
+    // Return printable HTML — browser's Ctrl+P saves as PDF
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(buildOrcamentoPdfHtml(o));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
