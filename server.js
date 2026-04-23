@@ -13,6 +13,17 @@ import { createRequire } from 'module';
 import { google } from 'googleapis';
 import { readFileSync, existsSync } from 'fs';
 
+let puppeteerLauncher = null;
+const require = createRequire(import.meta.url);
+const IS_VERCEL = !!process.env.VERCEL;
+if (IS_VERCEL) {
+  try {
+    const chromium = require('@sparticuz/chromium');
+    const puppeteerCore = require('puppeteer-core');
+    puppeteerLauncher = { chromium, puppeteerCore };
+  } catch (e) { console.warn('chromium/puppeteer not available:', e.message); }
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -107,19 +118,32 @@ const contratoSchema = new mongoose.Schema({
   _id: { type: String, default: uuidv4 },
   numero: Number,
   orcamentoId: String,
-  status: { type: String, default: 'aguardando_assinatura' },
+  status: { type: String, default: 'rascunho' },
   createdAt: { type: Number, default: Date.now },
   updatedAt: { type: Number, default: Date.now },
   cliente: String, endereco: String, cidade: String, cep: String, ac: String, celular: String,
+  razaoSocial: String,
   cnpjCliente: String, cpfResponsavel: String, rgResponsavel: String,
+  sindico: String,
+  ie: String,
+  dataNasc: String,
   dataAssinatura: String, dataInicio: String, dataTermino: String,
-  foro: { type: String, default: 'Barra Mansa' },
-  zapsignDocId: String, zapsignSignUrl: String, assinadoEm: Number,
-  itens: [mongoose.Schema.Types.Mixed],
+  foro: { type: String, default: 'Rio de Janeiro' },
+  garantia: { type: Number, default: 15 },
+  prazoExecucao: { type: Number, default: 3 },
+  desconto: { type: Number, default: 0 },
+  descontoTipo: { type: String, default: 'percent' },
+  totalBruto: { type: Number, default: 0 },
   totalLiquido: { type: Number, default: 0 },
+  valorExtenso: String,
+  issPercent: { type: Number, default: 3 },
   parcelas: { type: Number, default: 1 },
   valorParcela: { type: Number, default: 0 },
+  parcelasContrato: [{ numero: Number, data: String, valor: Number }],
   locais: [mongoose.Schema.Types.Mixed],
+  itens: [mongoose.Schema.Types.Mixed],
+  cronograma: [{ local: String, dataInicio: String, dataFim: String }],
+  zapsignDocId: String, zapsignSignUrl: String, assinadoEm: Number,
 }, { _id: false });
 
 const userSchema = new mongoose.Schema({
@@ -832,134 +856,255 @@ function downloadPDF() {
 
 // ── Contrato PDF ─────────────────────────────────────────────────────────────
 
+function extenso(n) {
+  if (n === 0) return 'zero';
+  const unidades = ['','um','dois','três','quatro','cinco','seis','sete','oito','nove','dez','onze','doze','treze','quatorze','quinze','dezesseis','dezessete','dezoito','dezenove'];
+  const dezenas = ['','','vinte','trinta','quarenta','cinquenta','sessenta','setenta','oitenta','noventa'];
+  const centenas = ['','cento','duzentos','trezentos','quatrocentos','quinhentos','seiscentos','setecentos','oitocentos','novecentos'];
+  if (n < 20) return unidades[n];
+  if (n < 100) return dezenas[Math.floor(n/10)] + (n%10 ? ' e ' + unidades[n%10] : '');
+  if (n < 1000) return (n === 100 ? 'cem' : centenas[Math.floor(n/100)] + (n%100 ? ' e ' + extenso(n%100) : ''));
+  if (n < 1000000) return extenso(Math.floor(n/1000)) + (Math.floor(n/1000) > 1 ? ' mil' : ' mil') + (n%1000 ? (n%1000 < 100 ? ' e ' : ' ') + extenso(n%1000) : '');
+  if (n < 1000000000) return extenso(Math.floor(n/1000000)) + (Math.floor(n/1000000) > 1 ? ' milhões' : ' milhão') + (n%1000000 ? (n%1000000 < 100 ? ' e ' : ' ') + extenso(n%1000000) : '');
+  return n.toString();
+}
+
+function valorExtenso(valor) {
+  const reais = Math.floor(valor);
+  const centavos = Math.round((valor - reais) * 100);
+  let texto = extenso(reais) + (reais === 1 ? ' real' : ' reais');
+  if (centavos > 0) texto += ' e ' + extenso(centavos) + (centavos === 1 ? ' centavo' : ' centavos');
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
 function buildContratoPdfHtml(c) {
   const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-  const today = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
-  const dataAssinatura = c.dataAssinatura ? new Date(c.dataAssinatura + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : today;
+  const fmtDate = (d) => { if (!d) return '___'; const date = new Date(d.includes('-') && d.length === 10 ? d + 'T12:00:00' : d); return isNaN(date.getTime()) ? d : date.toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' }); };
+
+  const razaoSocial = c.razaoSocial || c.cliente || '___';
+  const cnpjCliente = c.cnpjCliente || '___';
+  const sindico = c.sindico || c.ac || '___';
+  const cpfResp = c.cpfResponsavel || '___';
+  const rgResp = c.rgResponsavel || '';
+  const endereco = c.endereco || '___';
+  const cidade = c.cidade || '___';
+  const cep = c.cep || '';
+  const clienteCompl = `${razaoSocial}${cnpjCliente !== '___' ? ', inscrita' + (cnpjCliente.match(/^0{3}/) ? 'o' : 'a') + ' no CNPJ sob número ' + cnpjCliente : ''}`;
+  const contratada = 'T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME';
+  const garantia = c.garantia || 15;
+  const totalBruto = c.totalBruto || c.totalLiquido || 0;
+  const totalLiquido = c.totalLiquido || 0;
+  const descontoValor = c.descontoTipo === 'percent' ? (totalBruto * (c.desconto || 0) / 100) : (c.desconto || 0);
+  const issPercent = c.issPercent || 3;
+  const prazo = c.prazoExecucao || 3;
+  const foro = c.foro || 'Rio de Janeiro';
+  const dataAssinatura = c.dataAssinatura ? fmtDate(c.dataAssinatura) : '___';
+  const dataInicio = c.dataInicio ? fmtDate(c.dataInicio) : '';
+  const dataTermino = c.dataTermino ? fmtDate(c.dataTermino) : '';
+  const nOrc = c.numero ? String(c.numero).padStart(4, '0') : '___';
+  const valorExt = valorExtenso(totalLiquido);
+
   const itensFiltrados = (c.itens || []).filter(i => i.quantidade > 0);
+  const itemRows = itensFiltrados.map((i, n) => `<tr><td>${n+1}</td><td>${i.descricao}</td><td style="text-align:center">${i.unidade || '-'}</td><td style="text-align:center">${i.quantidade}</td><td style="text-align:right">${fmt(i.valorUnit)}</td><td style="text-align:right">${fmt(i.subtotal)}</td></tr>`).join('');
 
-  const itemRows = itensFiltrados.map((i, n) => `
-    <tr>
-      <td>${n+1}</td>
-      <td>${i.descricao}</td>
-      <td style="text-align:center">${i.quantidade} ${i.unidade}</td>
-      <td style="text-align:right">${fmt(i.valorUnit)}</td>
-      <td style="text-align:right"><strong>${fmt(i.subtotal)}</strong></td>
-    </tr>`).join('');
+  const parcelasContrato = c.parcelasContrato && c.parcelasContrato.length > 0 ? c.parcelasContrato : [];
+  const parcelaRows = parcelasContrato.map((p, i) => `<tr><td style="text-align:center">${p.numero || i+1}</td><td style="text-align:center">${p.data || '___'}</td><td style="text-align:right">${fmt(p.valor || 0)}</td></tr>`).join('');
 
-  const entradaValor = c.totalLiquido * (Number(c.entrada) || 0) / 100;
-  const saldo = c.saldo || c.totalLiquido;
-  const parcelas = c.parcelas || 1;
-  const valorParcela = c.valorParcela || saldo;
+  const cronograma = c.cronograma || [];
+  const cronogramaRows = cronograma.map((cr, i) => `<tr><td style="text-align:center;width:30px">${i+1}</td><td>${cr.local || '___'}</td><td style="text-align:center">${cr.dataInicio || '___'}</td><td style="text-align:center">${cr.dataFim || '___'}</td></tr>`).join('');
 
-  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-  <title>Contrato Vedafácil #${c.numero || 1}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, sans-serif; font-size: 11px; color: #222; line-height: 1.55; }
-    .page { padding: 20mm 18mm; max-width: 210mm; margin: 0 auto; }
-    h1 { color: #e87722; font-size: 18px; }
-    h2 { color: #e87722; font-size: 11px; border-bottom: 2px solid #e87722; padding-bottom: 3px; margin: 14px 0 7px; text-transform: uppercase; letter-spacing: .5px; }
-    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #e87722; padding-bottom: 10px; margin-bottom: 14px; }
-    .doc-num { font-size: 16px; font-weight: bold; color: #e87722; text-align: right; }
-    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 20px; background: #f5f5f5; padding: 8px 10px; border-radius: 4px; margin: 6px 0 10px; font-size: 10.5px; }
-    .info-label { color: #888; font-size: 9px; text-transform: uppercase; }
-    table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 10px; }
-    th { background: #e87722; color: white; padding: 5px 6px; text-align: left; }
-    td { padding: 4px 6px; border-bottom: 1px solid #eee; }
-    tr:nth-child(even) td { background: #f9f9f9; }
-    .total-row td { background: #e8f0fb !important; font-weight: bold; }
-    .grand-total td { background: #e87722 !important; color: white !important; font-weight: bold; font-size: 12px; }
-    .clause { margin: 6px 0; font-size: 10.5px; }
-    .clause strong { color: #e87722; }
-    .payment-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; background: #f0f6ff; border-radius: 4px; padding: 10px; margin: 8px 0; text-align: center; }
-    .payment-item .label { font-size: 9px; color: #888; }
-    .payment-item .value { font-weight: bold; font-size: 13px; color: #e87722; }
-    .signature-area { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 35px; }
-    .sig-line { border-top: 1px solid #333; padding-top: 5px; text-align: center; font-size: 10px; }
-    .footer { margin-top: 16px; border-top: 1px solid #ccc; padding-top: 8px; font-size: 9px; color: #888; text-align: center; }
-    @media print { @page { margin: 15mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-  </style>
-  </head><body><div class="page">
+  const locais = c.locais || [];
+  const locaisStr = locais.map((l, i) => `${i+1}- ${l.nome || '___'}`).join(', ');
 
-  <div class="header">
-    <div>
-      <h1>Vedafácil</h1>
-      <div style="font-size:9.5px;color:#555;margin-top:3px">T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME<br>
-      CNPJ: 23.606.470/0001-07 · Rua Profª Margarida F. T. Leite, 670 · Barra Mansa/RJ</div>
-    </div>
-    <div class="doc-num">
-      CONTRATO DE PRESTAÇÃO DE SERVIÇOS<br>
-      Nº ${String(c.numero || 1).padStart(4,'0')}
-    </div>
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8">
+<title>Contrato_Vedafacil_${nOrc}_${(razaoSocial||'cliente').replace(/[^a-zA-Z0-9 ]/g,'').replace(/\s+/g,'_')}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,Helvetica,sans-serif;font-size:10.5px;color:#222;line-height:1.6}
+.pg{padding:12mm 16mm;max-width:210mm;margin:0 auto}
+.pb{page-break-before:always}
+h2.clause-title{background:#e87722;color:white;padding:5px 10px;margin:14px 0 8px;font-size:11px;font-weight:bold;border-radius:2px}
+.clause{margin:6px 0;text-align:justify;font-size:10.5px}
+.clause p{margin-bottom:6px;text-indent:20px}
+.clause p:first-child{text-indent:0}
+.clause .sub{margin-left:20px;margin-top:4px}
+.clause strong.org{color:#e87722}
+table.pt{width:100%;border-collapse:collapse;margin:8px 0;font-size:10px}
+table.pt th{background:#e87722;color:white;padding:5px 6px;text-align:center;font-weight:bold}
+table.pt td{border:1px solid #aaa;padding:4px 6px}
+table.pt .tl{text-align:left}
+table.pt tfoot td{font-weight:bold;background:#fff3e0}
+table.pay{width:100%;border-collapse:collapse;margin:8px 0;font-size:10.5px}
+table.pay td{border:1px solid #aaa;padding:5px 10px}
+.crono{width:100%;border-collapse:collapse;margin:8px 0;font-size:10px}
+.crono th{background:#e87722;color:white;padding:5px 6px;text-align:center}
+.crono td{border:1px solid #aaa;padding:4px 6px}
+.sig{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:40px;text-align:center;font-size:10px}
+.sig .line{border-top:1px solid #333;padding-top:5px;font-weight:bold}
+.sig .role{color:#555;margin-bottom:20px;font-size:9.5px}
+.foot{text-align:center;font-size:8.5px;color:#666;margin-top:12px;padding-top:5px;border-top:1px solid #ccc}
+.download-btn{position:fixed;top:12px;right:12px;z-index:9999;background:#e87722;color:white;border:none;padding:10px 20px;font-size:14px;font-weight:700;border-radius:8px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.download-btn:hover{background:#d06a1b}
+@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:0;size:A4}.download-btn{display:none!important}}
+</style>
+</head><body>
+<button class="download-btn" onclick="window.print()">⬇ Salvar como PDF</button>
+
+<div class="pg" style="text-align:center;padding-top:6mm">
+<h1 style="color:#e87722;font-size:16px;margin-bottom:4px">INSTRUMENTO PARTICULAR DE CONTRATO DE PRESTAÇÃO DE SERVIÇOS</h1>
+<div style="font-size:10px;color:#666;margin-bottom:14px">Correspondente ao Orçamento Nº ${nOrc}</div>
+</div>
+
+<div class="pg pb">
+<p style="text-align:justify;font-size:10.5px;margin-bottom:10px">Contrato de Prestação de serviços para fornecimento das tarefas de hidrojateamento, calafetação e selado de infiltrações utilizando o sistema de injeção que entre si celebram por um lado:</p>
+
+<p style="font-size:10.5px;text-align:justify;margin-bottom:8px"><strong>CONTRATADA:</strong> ${contratada} sita à Rua Professora Margarida Fialho Thompson Leite, 670, Residencial Cristo Redentor na cidade de Barra Mansa estado RJ, CEP 27323-755, inscrita no CNPJ sob número 23.606.470/0001-07, representado por Thiago Ramos Ferraz, inscrito no CPF sob n° 104.589.167-30 doravante denominada <strong style="color:#e87722">CONTRATADA</strong>.</p>
+
+<p style="font-size:10.5px;text-align:justify;margin-bottom:8px">E do outro lado <strong>${razaoSocial}</strong>${cnpjCliente ? ', inscrit' + (cnpjCliente.match(/^0{3}/) ? 'o' : 'a') + ' no CNPJ sob número ' + cnpjCliente : ''} sito à ${endereco}, na cidade de ${cidade}${cep ? ', CEP ' + cep : ''}${sindico ? ', presentado por ' + sindico : ''}${cpfResp && cpfResp !== '___' ? ', legalmente instituído em autos e com poderes de firma' : ''}${cpfResp && cpfResp !== '___' ? ', e inscrito no CPF sob n° ' + cpfResp : ''}${rgResp ? ', RG: ' + rgResp : ''}, doravante denominada <strong style="color:#e87722">CONTRATANTE</strong>.</p>
+
+<p style="font-size:10.5px;text-align:justify">O serviço será executado na garagem do(a) ${razaoSocial} sito à ${endereco}${cidade ? ', ' + cidade : ''}, estado RJ, conforme orçamento anexo.</p>
+
+<h2 class="clause-title">Cláusula 1ª - Objeto</h2>
+<div class="clause">
+<p>1.1 - Por este Instrumento Particular e na melhor forma de direito, a CONTRATANTE contrata com a CONTRATADA, a prestação dos serviços de fornecimento de material e mão de obra para hidrojateamento, calafetação e selado de infiltrações exclusivamente em estruturas de concreto maciço, utilizando o método de injeção.</p>
+</div>
+
+<h2 class="clause-title">Cláusula 2ª - Documentos Integrantes e Forma de Execução</h2>
+<div class="clause">
+<p>2.1 – Os serviços serão executados pela CONTRATADA em estrita conformidade com as Condições indicadas no Orçamento anexo, pontos 1. até o 9. que passa a formar parte deste contrato.</p>
+<p>2.2 – Passarão a integrar este Instrumento Particular, desde que assinadas pelas partes, ou por seus representantes autorizados, as atas de reuniões, novos orçamentos para eventuais extensões dos serviços e outros documentos posteriores à assinatura deste Instrumento.</p>
+</div>
+
+<h2 class="clause-title">Cláusula 3ª - Escopo dos Serviços</h2>
+<div class="clause">
+<p>3.1 - A CONTRATADA deverá realizar os serviços, com aplicação do produto, ora pactuados, observado as disposições contidas no orçamento anexo que dá origem a este Instrumento Particular e que passa a formar parte integrante do mesmo.</p>
+<p>3.2 - Os serviços serão realizados nas regiões delimitadas no ponto 6.- denominado Localização, no orçamento anexo.</p>
+</div>
+
+<h2 class="clause-title">Cláusula 4ª - Valor dos Serviços</h2>
+<div class="clause">
+<p>4.1- A CONTRATANTE aceita pagar pelo serviço contratado um valor total de: <strong>${fmt(totalLiquido)}</strong></p>
+<p>(${valorExt})</p>
+${descontoValor > 0 ? `<p>4.2 - Do valor total do contrato, ${issPercent}% refere-se ao pagamento do ISSQN (Imposto sobre serviço de qualquer natureza) que será de responsabilidade da CONTRATANTE e deverá ser recolhido no município da prestação do serviço. Outrossim, a CONTRATADA emitirá fatura com o valor líquido, com o desconto do valor do ISS.</p>` : ''}
+<p>4.${descontoValor > 0 ? '3' : '2'} - Sem prejuízo, em conformidade com o disposto pelo regime do SIMPLES, não correspondem as retenções de 1,5% (um e meio) referente ao Imposto de Renda sobre o valor total da fatura de serviço nem a retenção de 4,65% (quatro e sessenta e cinco) referente ao Pis, Cofins e Csll sobre o valor total da fatura.</p>
+<p>4.${descontoValor > 0 ? '4' : '3'} Outrossim, e devido à qualificação do serviço como Hidrojateamento, Calafetação e Selado de Infiltrações, o mesmo encontra-se isento do desconto de 11% de INSS. Conforme Art. 130, caput, 1ª da INSTRUÇÃO NORMATIVA RFB nº 2.110/2022.</p>
+${descontoValor > 0 ? `<p>4.5 - O valor contratado objeto deste Instrumento Particular abrange exclusivamente os serviços descritos nos pontos 3.1 - e 3.2 -, qualquer serviço extra não contemplado no orçamento anexo e integrante deste contrato formará parte de um novo orçamento, que após aprovado pela CONTRATANTE passará a formar parte, em caráter de aditivo, deste Instrumento particular.</p>` : ''}
+</div>
+
+<h2 class="clause-title">Cláusula 5ª - Condições de Pagamento</h2>
+<div class="clause">
+<p>5.1 - A CONTRATADA enviará boletos bancários e notas fiscais, de serviço e produto, correspondentes até no máximo 2 (dois) dias úteis antes da data do vencimento, conforme o seguinte plano de pagamento:</p>
+
+${parcelaRows ? `<table class="pay">
+<tr><td style="width:50%;font-style:italic"><em>Nº de Parcela</em></td><td style="width:25%;text-align:center"><em>Data</em></td><td style="width:25%;text-align:right"><em>Valor</em></td></tr>
+${parcelaRows}
+<tr><td style="font-style:italic;font-weight:bold"><strong>TOTAL</strong></td><td></td><td style="text-align:right;font-weight:bold;font-size:12px"><strong>${fmt(totalLiquido)}</strong></td></tr>
+</table>` : `<table class="pay">
+<tr><td style="font-style:italic;width:55%"><em>Total Orçamento</em></td><td style="text-align:right;font-weight:bold;font-size:12px">${fmt(totalLiquido)}</td></tr>
+</table>`}
+
+<p>5.2 - A CONTRATANTE compromete-se neste ato ao pagamento dos boletos bancários, nas datas estipuladas no ponto 5.1, incidindo multa de 2% (dois por cento) sobre o valor da parcela e juros de mora de 1% (um por cento) ao mês, no caso de inadimplência.</p>
+<p>5.3 - No caso de Inadimplência, para recebimento dos créditos devidos, a CONTRATADA utilizará de corpo jurídico terceirizado, no qual a CONTRATANTE arcará com honorários advocatícios e despesas judiciais.</p>
+<p>5.4 - O preço ora contratado reflete a total compensação da CONTRATADA pela execução dos serviços objeto do presente Instrumento, incluindo todos os custos de mão de obra direta, materiais, máquinas e equipamentos, ferramentas, combustíveis, equipamentos de segurança e quaisquer outros, bem como todas as despesas relativas às obrigações e encargos trabalhistas, fiscais e previdenciários.</p>
+</div>
+
+<h2 class="clause-title">Cláusula 6ª - Vigência, Prazos e Cronograma de Obras</h2>
+<div class="clause">
+<p>6.1 - Este Contrato tem início a partir de sua assinatura considerando um prazo de execução de <strong>${prazo} dia(s) útil(eis)</strong>${dataInicio && dataTermino ? ', a partir de ' + dataInicio + ' até ' + dataTermino : ''}.</p>
+</div>
+
+${cronograma.length > 0 ? `
+<p style="font-weight:bold;margin:8px 0 4px">LOCAIS A SEREM LIBERADOS CONFORME ANDAMENTO DA OBRA</p>
+<table class="crono">
+<thead><tr><th style="width:30px">Nº</th><th>Local</th><th>Data Inicial</th><th>Data Final</th></tr></thead>
+<tbody>${cronogramaRows}</tbody>
+</table>` : ''}
+
+<h2 class="clause-title">Cláusula 7ª - Obrigações e Responsabilidades da CONTRATADA</h2>
+<div class="clause">
+<p>7.1 - Será responsabilidade da CONTRATADA a remoção de detritos gerados no decorrer do serviço, caso seja necessário.</p>
+<p>7.2 - Outrossim, a CONTRATADA não se responsabiliza por despesas adicionais geradas para a coleta de gesso, calhas e materiais existentes no local, caso os mesmos sejam retirados para execução do trabalho.</p>
+<p>7.3 - A CONTRATADA realizará acabamento utilizando argamassa para reparo (tamponamento) aos furos realizados durante execução da obra, entretando, não inclui pintura do local.</p>
+<p>7.4 - Mobilizar um número de ferramentas e equipamentos suficientes e adequados para o cumprimento das metas estabelecidas, em bom estado de funcionamento e manutenção, comprometendo-se a substituir, qualquer equipamento que seja necessário, a fim de garantir a continuidade dos serviços, efetuando, inclusive, a manutenção preventiva e corretiva dos mesmos.</p>
+<p>7.5 - Efetuar por sua conta e responsabilidade todos os pagamentos de tributos federais, estaduais e municipais de qualquer natureza, incidentes sobre o contrato mantendo à CONTRATANTE isenta de responsabilidade sobre quaisquer falhas ou atrasos nos recolhimentos dos mesmos.</p>
+<p>7.6 - A CONTRATADA declara, para os devidos fins e efeitos de direito, estar devidamente credenciada e regularizada perante os órgãos públicos competentes, possuindo todos os certificados, licenças e quaisquer outros documentos necessários para a regular prestação dos serviços objeto do presente contrato. A CONTRATADA também declara estar apta ao cumprimento das obrigações ora avençadas, as quais serão prestadas com total observância à legislação vigente, nos âmbitos federal, estadual e municipal, sob pena de responsabilidade civil e criminal, sempre em caráter exclusivo, da CONTRATADA.</p>
+<p>7.7 - A CONTRATADA emitirá a competente ART (Anotação de Responsabilidade Técnica) referente aos serviços prestados.</p>
+<p>7.8 - Fornecer e dirigir sob sua responsabilidade toda mão de obra especializada, adequada e capacitada de que necessitar, bem como responsabilizar-se pelo pagamento de todas as despesas relativas ao seu pessoal, inclusive salários, subvenção de alimentação, transporte e serviços médicos, além daquelas decorrentes de obrigações fiscais, previdenciárias, trabalhistas e securitárias referentes à execução dos serviços.</p>
+<p>7.9 - Fornecer aos seus empregados uniformes, e todos os demais equipamentos de proteção individuais necessários para a realização dos serviços contratados, assim como tornar seu uso obrigatório pelos mesmos.</p>
+<p>7.10 - Fornecer todo o treinamento necessário e equipamentos de segurança conforme previsões da NR-35 (trabalho em altura), NR-07 (PCMSO – Programa de Controle Médico de Saúde Ocupacional), NR-09 (PPRA – Programa de Prevenção de Riscos Ambientais) aos seus funcionários, os quais devem estar devidamente registrados e segurados contra acidentes de trabalho, de acordo com os preceitos legais vigentes.</p>
+<p>7.11 - Responsabilizar-se integralmente por qualquer dano ou acidente sofrido pelos profissionais contratados ou por terceiros em decorrência de suas atividades, inclusive em caso de óbito, respondendo por si, seus funcionários, subcontratados e fornecedores; e pelos serviços realizados.</p>
+<p>7.12 - A CONTRATADA somente executará a impermeabilização para eliminação de infiltrações em áreas de concreto maciço. Caso constate-se outro tipo de construção dentro da área orçada, a CONTRATADA estará isenta de qualquer reparo como garantia.</p>
+</div>
+
+<h2 class="clause-title">Cláusula 8ª - Obrigações e Responsabilidades da CONTRATANTE</h2>
+<div class="clause">
+<p>8.1 - Será responsabilidade da CONTRATANTE permitir a entrada dos funcionários no local da obra no horário estipulado das 08:30 as 17:30, durante período de obra e assistência técnica.</p>
+<p>8.2 - Será de responsabilidade da CONTRATANTE providenciar a remoção de qualquer obstáculo, seja ele em chão, parede ou teto, que impossibilite a execução do serviço, bem como, a retirada de forro existente no local do serviço a ser executado, antes do início da obra, caso exista.</p>
+<p>8.3 - Será de responsabilidade da CONTRATANTE a realização da pintura ou colocação de forro no local trabalhado e especificado no ponto 6. do orçamento em anexo, visto que a CONTRATADA não realiza tais serviço e os mesmos não estão inclusos no escopo de trabalho.</p>
+<p>8.4 - Outrossim, a CONTRATADA orienta a CONTRATANTE a aguardar período de aproximadamente 30 (trinta) dias para avaliação do serviço antes de realizar a pintura ou colocação de forro ou gesso.</p>
+<p>8.5 - Obriga-se a CONTRATANTE a fornecer uma vaga para o veículo da CONTRATADA dentro do local da obra, podendo ser esta vaga alguma das interditadas durante a execução do serviço.</p>
+<p>8.6 - Será responsabilidade da CONTRATANTE fornecer água e energia elétrica para o correto desempenho dos serviços.</p>
+<p>8.7 - Caso seja necessário locação de máquinas ou equipamentos (andaime, plataformas, máquinas, etc.) para execução dos serviços, a CONTRATANTE deverá autorizar liberação para entrada dos equipamentos e providenciar local para seu armazenamento.</p>
+<p>8.8 - Caso haja na execução da obra, áreas de caixão perdido, enchimentos com entulhos, estruturas de alvenaria de tijolos cerâmicos ou blocos de concreto, canos e conduítes embutidos na laje, bem como problemas já existentes nas dependências da CONTRATANTE, incluindo canos com vazamentos, ralos entupidos, esgotos pluviais ou sanitários com vazamentos, defeitos nas instalações elétricas, conduítes, quadros de força, também produtos aplicados e/ou utilizados anteriormente que impeçam a realização do serviço, isentará a CONTRATADA de qualquer responsabilidade por danos decorrentes dessas condições.</p>
+<p>8.9 - É de responsabilidade da CONTRATANTE a troca ou reposição de piso de áreas superiores como cobertura, terraço e de piscina caso ocorra estufamento/desplacamento. As despesas para troca ou reposição de piso, bem como, esvaziamento e reabastecimento de água da piscina ocorrerá por conta da CONTRATANTE.</p>
+<p>8.10 - Será exclusiva responsabilidade da CONTRATANTE informar à CONTRATADA sobre os novos pontos de infiltração que possam aparecer posteriores à data da vistoria e antes da data de início do serviço.</p>
+<p>8.11 - A definição das áreas a serem trabalhadas, será feita pelo responsável técnico da CONTRATADA, o qual informará diariamente a CONTRATANTE os locais a serem liberados para o dia subsequente. Outrossim, obriga-se a CONTRATANTE manter as áreas indicadas no cronograma de obras da Cláusula 6ª, desimpedidas e livres nas datas estipuladas.</p>
+<p>8.12 - Não será permitido à CONTRATANTE, a qualquer pretexto, filmar e/ou tirar fotos, durante a prestação de serviço dos profissionais envolvidos, bem como, dos equipamentos e procedimentos utilizados na execução da prestação de serviço com o fito de se respeitar os direitos autorais e de imagem de todos os envolvidos, seja de suas marcas, direitos autorais, programas de computador, procedimentos técnicos, bem como demais direitos de propriedade intelectual.</p>
+</div>
+
+<h2 class="clause-title">Cláusula 9ª - Garantia</h2>
+<div class="clause">
+<p>9.1 - A CONTRATADA oferece garantia limitada por <strong>${garantia} (${garantia === 1 ? 'um' : extenso(garantia)}) ${garantia === 1 ? 'ano' : 'anos'}</strong>, nos locais tratados e especificados no ponto 6 do orçamento anexo e integrante deste contrato.</p>
+<p>9.2 - A CONTRATANTE declara estar ciente de que a garantia concedida contempla apenas o local mapeado, conforme orçamento e croqui anexos a este contrato (croqui será enviado após a finalização da obra). Infiltrações próximas ao local trabalhado serão tratadas como ponto novo, o qual a CONTRATANTE deverá solicitar a CONTRATADA novo orçamento.</p>
+<p>9.2.1 - Caso seja identificado infiltrações na área em período de garantia, a CONTRATADA deverá prestar o atendimento necessário para a regularização do problema. Outrossim obriga-se a CONTRATANTE comunicar à CONTRATADA sobre a existência de possível assistência técnica registrado por meio de nossos canais de comunicação como telefone, email, whatsapp. Caso isso não ocorra, a CONTRATANTE isenta a CONTRATADA de quaisquer responsabilidades de danos causados decorrentes do problema.</p>
+<p>9.3 - A CONTRATADA informará a data do agendamento de execução de garantia no prazo de até 5 (cinco) dias úteis, e a mesma se dará mediante disponibilidade de sua programação e agenda, num prazo de até 60 (sessenta) dias para execução.</p>
+<p>9.4 - A CONTRATADA somente executará trabalhos de impermeabilização em áreas de concreto maciço, dentro da área contratada. Caso constate-se, durante a execução, outro tipo de estrutura que seja diferente de concreto maciço, a CONTRATADA ficará isenta de prosseguir qualquer reparo bem como fornecer garantia.</p>
+<p>9.5 - Em ocorrências de assistência técnica, será de responsabilidade da CONTRATANTE, sem ônus a CONTRATADA, providenciar a retirada e recolocação de forro, locação de andaimes ou realização da pintura, caso seja necessário.</p>
+<p>9.6 - Caso sejam realizadas obras posteriores ao tratamento, sem anuência da CONTRATADA e estas obras afetem as condições da estrutura, nas regiões especificadas na Cláusula 9ª, a garantia perderá sua validade.</p>
+<p>9.7 - Caso as condições descritas na cláusula 5ª, em especial quanto aos pagamentos convencionados, não sejam devidamente cumpridas e enquanto perdurar o inadimplemento, ficará imediatamente SUSPENSA esta garantia contratual, retornando a vigorar quando do fiel cumprimento da obrigação.</p>
+</div>
+
+<h2 class="clause-title">Cláusula 10ª - Da Rescisão</h2>
+<div class="clause">
+<p>10.1 - Além das hipóteses legais, o CONTRATANTE poderá rescindir o contrato, sem que caiba à CONTRATADA qualquer direito a indenização, nas seguintes hipóteses:</p>
+<p class="sub">10.1.1 - Se a CONTRATADA entrar em falência, liquidação judicial ou extrajudicial ou concordata preventiva, requerida, homologada ou decretada.</p>
+<p class="sub">10.1.2 - A utilização de material diferente daquele especificado.</p>
+<p class="sub">10.1.3 - Se a CONTRATADA notoriamente deixar de apresentar condições técnicas, financeiras ou administrativas que possam comprometer ou inviabilizar a execução dos Serviços;</p>
+<p class="sub">10.1.4 - Se a CONTRATADA depois de notificada pelo CONTRATANTE para cumprir qualquer determinação pactuada no presente instrumento, quedar-se inerte.</p>
+<p>10.2 - Caso, durante a execução, seja constatada a existência de alvenaria de tijolo cerâmico, bloco de cimento ou qualquer outro tipo de estrutura diferente de concreto maciço nas áreas objeto do orçamento, a CONTRATADA ficará isenta de fornecer garantia sobre os serviços realizados nesses trechos, uma vez que tais condições inviabilizam a plena eficácia do método descrito na Cláusula 1ª deste contrato.</p>
+<p>10.3 - Na ocorrência de rescisão contratual, a CONTRATADA apresentará relatório completo dos Serviços executados até a data da rescisão e entregará à CONTRATANTE todos os documentos de propriedade desta:</p>
+<p class="sub">a) se os valores pagos pela CONTRATANTE à CONTRATADA constatarem-se superiores ao devido pelo efetivamente realizado, deverão ser restituídos pela CONTRATADA em favor da CONTRATANTE.</p>
+<p class="sub">b) se os valores pagos pela CONTRATANTE à CONTRATADA constatarem-se inferiores ao devido pelo efetivamente realizado, deverão ter o pagamento complementado pela CONTRATANTE em favor da CONTRATADA, até que se atinja a justa razoabilidade pelos serviços executados.</p>
+</div>
+
+<h2 class="clause-title">Cláusula 11ª - Disposições Gerais</h2>
+<div class="clause">
+<p>11.1 - Eventualmente, durante o andamento da obra e sem comprometer os prazos definidos na Cláusula 6ª, poderão ocorrer paradas técnicas, sejam estas para manutenção de equipamentos ou para observar a reação dos produtos na estrutura.</p>
+<p>11.2 - A CONTRATANTE declara expressamente, neste ato, estar ciente de todos os serviços a serem realizados e das regiões onde será aplicado o tratamento.</p>
+<p>11.3 - Os direitos e obrigações do CONTRATADO previstos neste Contrato não poderão ser cedidos, delegados ou de qualquer forma transferidos, total ou parcialmente sem o consentimento prévio e por escrito do CONTRATANTE.</p>
+<p>11.4 - A tolerância, por qualquer das partes, quanto ao não cumprimento das condições do presente contrato constituirá mera liberalidade, não significando novação ou alteração das condições ora pactuadas.</p>
+<p>11.5 - Este contrato somente poderá ser alterado mediante aditivo formal celebrado entre as partes.</p>
+<p>11.6 - Fica desde já eleito o foro da cidade do ${foro}, estado do Rio de Janeiro, para dirimir conflitos, ou dúvidas de interpretação oriundas deste contrato, em detrimento a qualquer outro, por mais privilegiado que o seja.</p>
+<p>11.7 - Por estarem justos e contratados, assinam o presente em duas vias de igual teor e forma, para os efeitos legais e de direito.</p>
+</div>
+
+<p style="text-align:center;margin-top:20px">${cidade || foro}, ${dataAssinatura}</p>
+
+<div class="sig">
+  <div>
+    <div class="role">CONTRATANTE</div>
+    <div class="line">${razaoSocial}<br>${sindico}${cpfResp && cpfResp !== '___' ? '<br>CPF: ' + cpfResp : ''}</div>
   </div>
-
-  <h2>Das Partes</h2>
-  <div class="clause">
-    <strong>CONTRATADA:</strong> T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME, inscrita no CNPJ sob nº 23.606.470/0001-07, com sede na Rua Professora Margarida Fialho Thompson Leite, 670, Barra Mansa/RJ, doravante denominada simplesmente <strong>VEDAFÁCIL</strong>.
+  <div>
+    <div class="role">CONTRATADA</div>
+    <div class="line">VEDAFACIL TECNOLOGIA EM IMPERMEABILIZAÇÃO<br>Thiago Ramos Ferraz<br>CPF: 104.589.167-30</div>
   </div>
-  <div class="clause" style="margin-top:6px">
-    <strong>CONTRATANTE:</strong> ${c.cliente || ''}${c.cnpjCliente ? ', inscrito no CNPJ sob nº ' + c.cnpjCliente : ''}${c.cpfResponsavel ? ', A/C ' + (c.ac || c.cliente) + ', portador do CPF nº ' + c.cpfResponsavel + (c.rgResponsavel ? ' e RG nº ' + c.rgResponsavel : '') : ''}, com endereço em ${c.endereco || ''}${c.cidade ? ', ' + c.cidade : ''}, doravante denominado simplesmente <strong>CONTRATANTE</strong>.
-  </div>
+</div>
 
-  <h2>Do Objeto</h2>
-  <div class="clause">
-    O presente contrato tem como objeto a prestação de serviços especializados de impermeabilização e tratamento de infiltrações, mediante a aplicação de tecnologia de injeção de gel hidroabsorvente <strong>GVF SEAL</strong>, nas áreas especificadas abaixo.
-  </div>
-
-  ${itensFiltrados.length > 0 ? `
-  <table>
-    <thead><tr><th>#</th><th>Descrição do Serviço</th><th style="text-align:center">Quantidade</th><th style="text-align:right">Valor Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
-    <tbody>${itemRows}</tbody>
-    <tfoot>
-      <tr class="grand-total"><td colspan="4">VALOR TOTAL DO CONTRATO</td><td style="text-align:right">${fmt(c.totalLiquido)}</td></tr>
-    </tfoot>
-  </table>` : ''}
-
-  <h2>Do Valor e Condições de Pagamento</h2>
-  <div class="payment-grid">
-    <div class="payment-item"><div class="label">Valor Total</div><div class="value">${fmt(c.totalLiquido)}</div></div>
-    <div class="payment-item"><div class="label">Entrada${entradaValor > 0 ? ' (' + (c.entrada || 0) + '%)' : ''}</div><div class="value">${fmt(entradaValor)}</div></div>
-    <div class="payment-item"><div class="label">Saldo${parcelas > 1 ? ' (' + parcelas + 'x)' : ''}</div><div class="value">${fmt(valorParcela)}</div></div>
-  </div>
-  <div class="clause">A entrada deverá ser paga na assinatura do contrato. ${parcelas > 1 ? `O saldo remanescente de ${fmt(saldo)} será dividido em ${parcelas} parcelas de ${fmt(valorParcela)}.` : `O saldo de ${fmt(saldo)} deverá ser pago na conclusão dos serviços.`}</div>
-
-  ${c.dataInicio || c.dataTermino ? `
-  <h2>Do Prazo</h2>
-  <div class="clause">
-    ${c.dataInicio ? `Início previsto: <strong>${new Date(c.dataInicio + 'T12:00:00').toLocaleDateString('pt-BR')}</strong>.` : ''}
-    ${c.dataTermino ? ` Término previsto: <strong>${new Date(c.dataTermino + 'T12:00:00').toLocaleDateString('pt-BR')}</strong>.` : ''}
-    O prazo poderá ser alterado em caso de condições climáticas adversas, força maior ou alteração do escopo contratado.
-  </div>` : ''}
-
-  <h2>Das Obrigações da Contratada</h2>
-  <div class="clause">A VEDAFÁCIL compromete-se a: (a) executar os serviços com mão de obra qualificada e materiais de primeira linha; (b) zelar pela segurança dos profissionais e do local de trabalho; (c) fornecer ART de engenharia quando aplicável; (d) garantir os serviços executados pelo prazo estipulado na cláusula de garantia.</div>
-
-  <h2>Das Obrigações do Contratante</h2>
-  <div class="clause">O CONTRATANTE compromete-se a: (a) proporcionar acesso livre ao local de execução dos serviços; (b) efetuar os pagamentos nas datas acordadas; (c) informar previamente sobre eventuais restrições de horário ou acesso; (d) manter o local vistoriado devidamente desocupado durante a execução.</div>
-
-  <h2>Da Garantia</h2>
-  <div class="clause">Os serviços de impermeabilização por injeção executados pela VEDAFÁCIL têm <strong>garantia de 5 (cinco) anos</strong>, a contar da data de conclusão dos serviços, contra infiltrações nas regiões tratadas, desde que observadas as condições normais de uso e ausência de danos estruturais supervenientes não relacionados ao escopo contratado.</div>
-
-  <h2>Do Foro</h2>
-  <div class="clause">As partes elegem o Foro da Comarca de <strong>${c.foro || 'Barra Mansa'}/RJ</strong> para dirimir quaisquer dúvidas ou litígios decorrentes deste contrato, com expressa renúncia de qualquer outro, por mais privilegiado que seja.</div>
-
-  <div class="clause" style="margin-top:14px;text-align:center">
-    Por estarem assim justas e contratadas, as partes assinam o presente instrumento em 2 (duas) vias de igual teor e forma.<br>
-    <strong>${c.cidade || 'Barra Mansa'}, ${dataAssinatura}.</strong>
-  </div>
-
-  <div class="signature-area">
-    <div class="sig-line">
-      Vedafácil — Thiago Ramos Ferraz<br>CPF: 104.589.167-30<br>CONTRATADA
-    </div>
-    <div class="sig-line">
-      ${c.cliente || ''}<br>${c.ac ? 'A/C: ' + c.ac + (c.cpfResponsavel ? ' · CPF: ' + c.cpfResponsavel : '') : (c.cpfResponsavel ? 'CPF: ' + c.cpfResponsavel : '')}<br>CONTRATANTE
-    </div>
-  </div>
-
-  <div class="footer">Vedafácil · T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME · CNPJ: 23.606.470/0001-07 · Barra Mansa/RJ</div>
-  </div></body></html>`;
+<div class="foot"><strong style="color:#e87722">Eliminamos Infiltrações Sem Quebrar!</strong><br>CNPJ: 23.606.470/0001-07 · Tel.: (21) 99984-1127 / (24) 2106-1015</div>
+</div></body></html>`;
 }
 
 app.get('/api/contratos/:id/pdf', async (req, res) => {
@@ -1186,20 +1331,36 @@ app.post('/api/contratos', auth, async (req, res) => {
     else o = memStore.orcamentos.find(x => x._id === orcamentoId);
     if (!o) return res.status(404).json({ error: 'Orçamento not found' });
 
+    const descontoValor = o.descontoTipo === 'percent' ? (o.totalBruto * (o.desconto || 0) / 100) : (o.desconto || 0);
+    const totalLiquido = o.totalLiquido || (o.totalBruto - descontoValor);
+    const parcelas = o.parcelas || 1;
+    const valorParcela = parcelas > 1 ? (totalLiquido / parcelas) : totalLiquido;
+
+    const n = (isConnected ? await Contrato.countDocuments() : memStore.contratos.length) + 1;
     const novoContrato = {
       _id: uuidv4(),
-      numero: (isConnected ? await Contrato.countDocuments() : memStore.contratos.length) + 1,
+      numero: n,
       orcamentoId,
-      status: 'aguardando_assinatura',
+      status: 'rascunho',
       createdAt: Date.now(), updatedAt: Date.now(),
-      cliente: o.cliente, endereco: o.endereco, cidade: o.cidade, cep: o.cep, ac: o.ac, celular: o.celular,
-      cnpjCliente: '', cpfResponsavel: '', rgResponsavel: '',
+      cliente: o.cliente || '', endereco: o.endereco || '', cidade: o.cidade || '', cep: o.cep || '',
+      ac: o.ac || '', celular: o.celular || '',
+      razaoSocial: o.razaoSocial || o.cliente || '',
+      cnpjCliente: o.cnpjCliente || '', cpfResponsavel: '', rgResponsavel: '', sindico: '', ie: '',
       dataAssinatura: '', dataInicio: '', dataTermino: '',
-      foro: 'Barra Mansa',
+      foro: 'Rio de Janeiro',
+      garantia: o.garantia || 15,
+      prazoExecucao: o.prazoExecucao || 3,
+      desconto: o.desconto || 0, descontoTipo: o.descontoTipo || 'percent',
+      totalBruto: o.totalBruto || 0,
+      totalLiquido,
+      issPercent: 3,
+      parcelas, valorParcela,
+      parcelasContrato: [],
+      locais: o.locais || [],
+      itens: (o.itens || []).filter(i => i.quantidade > 0),
+      cronograma: (o.locais || []).map(l => ({ local: l.nome || '', dataInicio: '', dataFim: '' })),
       zapsignDocId: null, zapsignSignUrl: null, assinadoEm: null,
-      itens: o.itens, totalLiquido: o.totalLiquido,
-      parcelas: o.parcelas, valorParcela: o.valorParcela,
-      locais: o.locais,
       ...req.body,
     };
 
@@ -1238,6 +1399,35 @@ app.put('/api/contratos/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+async function generatePdfBuffer(html) {
+  let browser;
+  try {
+    if (puppeteerLauncher) {
+      const { chromium, puppeteerCore } = puppeteerLauncher;
+      browser = await puppeteerCore.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+      });
+    } else {
+      const puppeteer = (await import('puppeteer-core')).default;
+      const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+      browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        executablePath,
+      });
+    }
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const buffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '0', bottom: '0', left: '0', right: '0' } });
+    return buffer;
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
 app.delete('/api/contratos/:id', auth, async (req, res) => {
   try {
     await connectDB();
@@ -1258,15 +1448,54 @@ app.post('/api/contratos/:id/zapsign', auth, async (req, res) => {
     const token = process.env.ZAPSIGN_API_TOKEN;
     if (!token) return res.status(400).json({ error: 'ZAPSIGN_API_TOKEN not configured' });
 
-    const pdfUrl = `${req.protocol}://${req.get('host')}/api/contratos/${req.params.id}/pdf`;
-    const response = await axios.post('https://app.zapsign.com.br/api/v1/docs/', {
+    const ZAPSIGN_BASE = process.env.ZAPSIGN_SANDBOX === 'true'
+      ? 'https://sandbox.api.zapsign.com.br/api/v1'
+      : 'https://api.zapsign.com.br/api/v1';
+
+    console.log('[ZapSign] Sending contrato', req.params.id, '- base URL:', ZAPSIGN_BASE);
+
+    let sendMethod = 'base64';
+    let base64Pdf = '';
+    try {
+      const html = buildContratoPdfHtml(c);
+      const pdfBuffer = await generatePdfBuffer(html);
+      base64Pdf = pdfBuffer.toString('base64');
+      console.log('[ZapSign] PDF generated, size:', pdfBuffer.length, 'bytes');
+    } catch (pdfErr) {
+      console.warn('[ZapSign] PDF generation failed:', pdfErr.message, '- falling back to url_pdf');
+      sendMethod = 'url_pdf';
+    }
+
+    const host = req.get('x-forwarded-host') || req.get('host');
+    const protocol = (req.get('x-forwarded-proto') || 'https').replace(/:$/, '');
+    const baseUrl = `${protocol}://${host}`;
+
+    const docPayload = {
       name: `Contrato Vedafácil - ${c.cliente}`,
-      url_pdf: pdfUrl,
-      signers: [{ name: c.ac || c.cliente, email: req.body.email || '' }]
-    }, { headers: { Authorization: `Bearer ${token}` } });
+      signers: [{ name: c.sindico || c.ac || c.cliente, email: req.body.email || c.emailCliente || '' }]
+    };
+    if (sendMethod === 'base64') {
+      docPayload.base64_pdf = base64Pdf;
+    } else {
+      const jwtToken = req.headers.authorization?.split(' ')[1] || '';
+      docPayload.url_pdf = `${baseUrl}/api/contratos/${req.params.id}/pdf?token=${encodeURIComponent(jwtToken)}`;
+    }
+    console.log('[ZapSign] send method:', sendMethod);
+
+    const response = await axios.post(`${ZAPSIGN_BASE}/docs/`, docPayload, {
+      headers: { Authorization: `Bearer ${token}` },
+      validateStatus: () => true
+    });
+
+    if (response.status !== 200 && response.status !== 201) {
+      console.error('[ZapSign] API error:', response.status, JSON.stringify(response.data));
+      const detail = typeof response.data === 'object' ? JSON.stringify(response.data) : String(response.data);
+      return res.status(response.status).json({ error: `ZapSign ${response.status}: ${detail}`, detail: response.data });
+    }
 
     const docToken = response.data.token;
     const signUrl = response.data.signers?.[0]?.sign_url;
+    console.log('[ZapSign] Document created:', docToken, 'signUrl:', signUrl);
 
     if (isConnected) {
       c = await Contrato.findByIdAndUpdate(req.params.id, { zapsignDocId: docToken, zapsignSignUrl: signUrl }, { new: true });
