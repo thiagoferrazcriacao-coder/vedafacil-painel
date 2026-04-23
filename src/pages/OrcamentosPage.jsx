@@ -158,7 +158,7 @@ export default function OrcamentosPage() {
                         <div className="flex items-center gap-2 justify-end">
                           <button
                             className="text-xs text-primary hover:underline"
-                            onClick={e => { e.stopPropagation(); window.open(api.getOrcamentoPdfUrl(o.id), '_blank') }}
+                            onClick={e => { e.stopPropagation(); const url = api.getOrcamentoPdfUrl(o.id); const fileName = `Orcamento_${o.numero || 1}_${(o.cliente || 'cliente').replace(/[^a-zA-Z0-9 ]/g,'').replace(/\s+/g,'_')}.html`; fetch(url).then(r => r.text()).then(html => { const blob = new Blob([html], { type: 'text/html' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fileName; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href); }).catch(() => window.open(url, '_blank')); }}
                           >
                             PDF
                           </button>

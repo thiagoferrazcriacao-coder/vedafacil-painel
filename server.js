@@ -28,6 +28,18 @@ const SELO15_B64 = existsSync(path.join(__dirname, 'anos15_b64.txt'))
   ? readFileSync(path.join(__dirname, 'anos15_b64.txt'), 'utf8').trim()
   : '';
 
+const GVF_SEAL_LOGO_B64 = existsSync(path.join(__dirname, 'gvf_seal_logo_b64.txt'))
+  ? readFileSync(path.join(__dirname, 'gvf_seal_logo_b64.txt'), 'utf8').trim()
+  : '';
+
+const GVF_GALAO_B64 = existsSync(path.join(__dirname, 'gvf_galao_b64.txt'))
+  ? readFileSync(path.join(__dirname, 'gvf_galao_b64.txt'), 'utf8').trim()
+  : '';
+
+const SIMBOLO_B64 = existsSync(path.join(__dirname, 'simbolo_b64.txt'))
+  ? readFileSync(path.join(__dirname, 'simbolo_b64.txt'), 'utf8').trim()
+  : '';
+
 const app = express();
 
 // MongoDB connection
@@ -427,7 +439,8 @@ app.post('/api/orcamentos/:id/approve', auth, async (req, res) => {
 
 // ── PDF Generation ────────────────────────────────────────────────────────────
 
-function buildOrcamentoPdfHtml(o) {
+
+export function buildOrcamentoPdfHtml(o) {
   const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
   const fmtDate = (d) => {
     if (!d) return '';
@@ -489,12 +502,11 @@ function buildOrcamentoPdfHtml(o) {
   const seloSrc = garantia <= 7 ? SELO7_B64 : SELO15_B64;
   const seloImg = seloSrc
     ? `<img src="data:image/png;base64,${seloSrc}" style="width:82px;height:auto;display:block;" alt="${garantia} anos">`
-    : `<div style="width:76px;height:76px;border-radius:50%;border:3px solid #c8942a;background:linear-gradient(135deg,#f5d060,#c8942a);display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font-weight:bold;margin:0 auto;">
+    : `<div style="width:76px;height:76px;border-radius:50%;border:3px solid #c8942a;background:linear-gradient(135deg,#f5d060,#c8942a);display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font-weight:bold;">
         <div style="font-size:8px;text-align:center;">★ SUA OBRA TEM ★</div>
         <div style="font-size:20px;font-weight:900;line-height:1;">${garantia}</div>
         <div style="font-size:8px;letter-spacing:1px;">ANOS DE</div>
         <div style="font-size:7px;font-style:italic;">Garantia</div>
-        <div style="font-size:7px;">★★★</div>
       </div>`;
 
   const logoImg = LOGO_B64
@@ -512,7 +524,18 @@ function buildOrcamentoPdfHtml(o) {
     T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME &nbsp;|&nbsp; CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
   </div>`;
 
-  const sec = (n, t) => `<div style="background:#e87722;color:white;padding:6px 14px;margin:12px 0 8px;font-size:11.5px;font-weight:700;letter-spacing:0.3px;border-radius:2px;">${n}. ${t}</div>`;
+  const SIMBOLO = SIMBOLO_B64
+    ? `<img src="data:image/png;base64,${SIMBOLO_B64}" style="width:22px;height:22px;margin-right:8px;flex-shrink:0;vertical-align:middle;display:inline-block;" alt="Vedafácil">`
+    : `<div style="width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,0.8);display:inline-flex;align-items:center;justify-content:center;margin-right:8px;flex-shrink:0;background:rgba(255,255,255,0.15);vertical-align:middle;"><div style="width:6px;height:6px;background:white;border-radius:1px;transform:skewX(-15deg);"></div></div>`;
+
+  const sec = (n, t) => `<div style="background:#e87722;color:white;padding:7px 12px;margin:14px 0 10px;font-size:12px;display:flex;align-items:center;border-radius:2px;">${SIMBOLO}<em><strong>${n}. ${t}</strong></em></div>`;
+
+  const gvfLogo = GVF_SEAL_LOGO_B64
+    ? `<img src="data:image/png;base64,${GVF_SEAL_LOGO_B64}" style="width:60px;height:auto;display:block;margin:0 auto 8px;" alt="GVF SEAL">`
+    : '';
+  const gvfGalao = GVF_GALAO_B64
+    ? `<img src="data:image/jpeg;base64,${GVF_GALAO_B64}" style="width:100%;max-width:440px;height:auto;display:block;margin:10px auto;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.1);" alt="GVF SEAL Galão">`
+    : '';
 
   const locaisComFotos = (o.locais || []).filter(l => l.fotos && l.fotos.length > 0);
   const photoPages = locaisComFotos.map((l) =>
@@ -532,76 +555,62 @@ function buildOrcamentoPdfHtml(o) {
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Orçamento Vedafácil #${o.numero || 1}</title>
+<title>Orcamento_${o.numero || 1}_${(o.cliente || 'cliente').replace(/[^a-zA-Z0-9 ]/g,'').replace(/\s+/g,'_')}</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: Arial, Helvetica, sans-serif; font-size: 10.5px; color: #222; }
-.pg { padding: 8mm 12mm 10mm; max-width: 210mm; margin: 0 auto; }
+body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #222; }
+.pg { padding: 10mm 14mm 14mm; max-width: 210mm; margin: 0 auto; }
 .pb { page-break-before: always; }
 .bt { font-size: 10.5px; line-height: 1.65; text-align: justify; }
-.bt p { margin-bottom: 6px; text-indent: 20px; }
-.feats { display:grid; grid-template-columns:1fr 1fr; gap:3px 16px; margin-top:8px; font-size:9.5px; font-weight:bold; font-style:italic; }
+.bt p { margin-bottom: 8px; text-indent: 20px; }
+.bt p + p { text-indent: 20px; }
+.feats { display:grid; grid-template-columns:1fr 1fr; gap:4px 20px; margin-top:12px; font-size:10px; font-weight:bold; font-style:italic; }
 .feats div::before { content:'✓ '; color:#e87722; }
-.info-table { width:100%; border-collapse:collapse; margin-bottom:10px; }
-.info-table td { border:1px solid #aaa; padding:5px 8px; font-size:10.5px; vertical-align:top; }
-.info-table .label-cell { background:#fff3e0; font-weight:600; width:30%; color:#333; font-size:9.5px; }
-.info-table .val-cell { font-size:10.5px; }
-table.loc { width:100%; border-collapse:collapse; font-size:9.5px; margin:6px 0; }
-table.loc th, table.loc td { border:1px solid #888; padding:3px 5px; text-align:center; }
+.hbox { display:grid; grid-template-columns:1fr 1fr; border:1px solid #999; margin-bottom:14px; }
+.hbox-l { padding:9px 12px; border-right:1px solid #999; font-size:10.5px; }
+.hbox-r { padding:9px 12px; font-size:10.5px; }
+table.loc { width:100%; border-collapse:collapse; font-size:9.5px; margin:8px 0; }
+table.loc th, table.loc td { border:1px solid #aaa; padding:4px 5px; text-align:center; }
 table.loc th { font-weight:bold; background:#e87722; color:white; }
 table.loc .tl { text-align:left; }
 table.loc tfoot td { font-weight:bold; background:#fff3e0; }
-table.val { width:100%; border-collapse:collapse; font-size:10.5px; margin:6px 0; }
-table.val th, table.val td { border:1px solid #888; padding:4px 8px; }
+table.val { width:100%; border-collapse:collapse; font-size:10.5px; margin:8px 0; }
+table.val th, table.val td { border:1px solid #aaa; padding:5px 8px; }
 table.val th { font-weight:bold; text-align:center; background:#e87722; color:white; }
-table.val td { background:white; }
-table.val tr:nth-child(even) td { background:#fffaf5; }
-table.pay { width:100%; border-collapse:collapse; font-size:10.5px; margin:6px 0 2px; }
-table.pay td { border:1px solid #888; padding:5px 10px; }
-table.pay tr.total-row td { background:#e87722; color:white; font-weight:bold; font-size:12px; }
-.obs-box { border:1px solid #888; padding:8px 10px; margin-top:8px; font-size:10px; background:#f9f9f9; }
-.sigs { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:20px; text-align:center; font-size:9px; }
-.sigs .role { color:#444; margin-bottom:30px; font-size:9px; }
-.sigs .line { border-top:1px solid #333; padding-top:4px; font-weight:bold; font-size:9.5px; }
-.gtee { display:flex; gap:12px; align-items:flex-start; margin:8px 0; }
-@media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } @page { margin:0; size:A4; } }
+table.pay { width:100%; border-collapse:collapse; font-size:10.5px; margin:8px 0 2px; }
+table.pay td { border:1px solid #aaa; padding:5px 10px; }
+.obs-box { border:1px solid #bbb; padding:8px 12px; margin-top:12px; font-size:10.5px; }
+.sigs { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:24px; text-align:center; font-size:9.5px; }
+.sigs .role { color:#444; margin-bottom:24px; }
+.sigs .line { border-top:1px solid #333; padding-top:4px; font-weight:bold; font-size:10px; }
+.gtee { display:flex; gap:14px; align-items:flex-start; margin:10px 0; }
+.download-btn { position:fixed; top:12px; right:12px; z-index:9999; background:#e87722; color:white; border:none; padding:10px 20px; font-size:14px; font-weight:700; border-radius:8px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.3); }
+.download-btn:hover { background:#d06a1b; }
+@media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } @page { margin:0; size:A4; } .download-btn { display:none; } }
 </style>
 </head>
 <body>
 
+<button class="download-btn" onclick="downloadPDF()">⬇ Baixar PDF</button>
+
 <!-- PAGE 1 -->
 <div class="pg">
 ${LOGO_HTML}
+<div class="hbox">
+  <div class="hbox-l">
+    <strong style="font-size:12px;display:block;margin-bottom:3px;">${o.cliente || ''}</strong>
+    ${o.endereco ? `<div>${o.endereco}${o.cidade ? ', ' + o.cidade : ''}${o.cep ? '/' + o.cep.replace('-','') : ''}</div>` : ''}
+    <div>${[o.ac, o.celular].filter(Boolean).join(' - ')}${o.validade ? ' - ' + fmtDate(o.validade) : ''}</div>
+  </div>
+  <div class="hbox-r">
+    <div style="font-size:13px;font-weight:bold;text-align:right;margin-bottom:6px;">ORÇAMENTO Nº ${o.numero || 1}</div>
+    <div style="display:flex;justify-content:space-between;"><span>Data Medição:</span><strong>${fmtDate(o.dataOrcamento)}</strong></div>
+    <div style="display:flex;justify-content:space-between;"><span>Validade Proposta:</span><strong>${fmtDate(o.validade)}</strong></div>
+  </div>
+</div>
 
-<table class="info-table">
-  <tr>
-    <td class="label-cell">CLIENTE / CONDOMÍNIO</td>
-    <td class="val-cell"><strong>${o.cliente || ''}</strong></td>
-    <td class="label-cell">ORÇAMENTO Nº</td>
-    <td class="val-cell" style="text-align:right;"><strong style="font-size:13px;">${o.numero || 1}</strong></td>
-  </tr>
-  <tr>
-    <td class="label-cell">ENDEREÇO</td>
-    <td class="val-cell">${o.endereco || ''}${o.cidade ? ' — ' + o.cidade : ''}</td>
-    <td class="label-cell">DATA</td>
-    <td class="val-cell" style="text-align:right;">${fmtDate(o.dataOrcamento)}</td>
-  </tr>
-  <tr>
-    <td class="label-cell">A/C</td>
-    <td class="val-cell">${o.ac || ''}</td>
-    <td class="label-cell">VALIDADE</td>
-    <td class="val-cell" style="text-align:right;">${fmtDate(o.validade) || '30 dias'}</td>
-  </tr>
-  <tr>
-    <td class="label-cell">CONTATO</td>
-    <td class="val-cell">${o.celular || ''}</td>
-    <td class="label-cell">CEP</td>
-    <td class="val-cell" style="text-align:right;">${o.cep || ''}</td>
-  </tr>
-</table>
-
-<p style="margin-bottom:4px;font-size:10.5px;">Prezado (a),&nbsp;&nbsp;&nbsp;<strong>${o.ac || o.cliente || ''}</strong></p>
-<p style="margin-bottom:10px;font-size:10.5px;">Temos o prazer de submeter a vossa consideração, nosso orçamento para a eliminação de infiltrações:</p>
+<p style="margin-bottom:4px;">Prezado (a),&nbsp;&nbsp;&nbsp;${o.ac || o.cliente || ''}</p>
+<p style="margin-bottom:14px;">Temos o prazer de submeter a vossa consideração, nosso orçamento para a eliminação de infiltrações:</p>
 
 ${sec('1','MÉTODO DE IMPERMEABILIZAÇÃO REPARATIVA')}
 <div class="bt">
@@ -610,6 +619,7 @@ ${sec('1','MÉTODO DE IMPERMEABILIZAÇÃO REPARATIVA')}
 </div>
 
 ${sec('2','PROPRIEDADES DO GVF SEAL')}
+${gvfGalao}
 <div class="bt">
   <p>O GVF Seal possui viscosidade ultra baixa que possui altíssima penetração em trincas capilares. Após a cura, o gel forma uma barreira flexível e impermeável que preenche trincas, rachaduras, buracos, nichos de concretagem, fissuras, etc.</p>
   <p>O gel formado é inalterável ao ataque de agentes químicos ou biológicos, assim como também aos sais presentes nas estruturas. Além disso, é hidroexpansivo: Em períodos de seca, diminui seu volume, mas sem afetar a membrana impermeável.</p>
@@ -626,13 +636,14 @@ ${FOOTER}
 <!-- PAGE 2 -->
 <div class="pg pb">
 ${LOGO_HTML}
+
 ${sec('3','GARANTIA')}
 <div class="gtee">
   <div style="width:90px;flex-shrink:0;text-align:center;">
     ${seloImg}
   </div>
   <div>
-    <p class="bt" style="margin-bottom:8px;">A Vedafacil - Tecnologia em Impermeabilização oferece garantia de <strong>${garantia} anos</strong> nos pontos tratados e especificados no ítem LOCALIZAÇÃO deste orçamento. Após o término da obra os pontos tratados serão descritos em croqui e relatório PDF com imagens do antes e depois das áreas trabalhadas.</p>
+    <p class="bt" style="margin-bottom:10px;">A Vedafacil - Tecnologia em Impermeabilização oferece garantia de <strong>${garantia} anos</strong> nos pontos tratados e especificados no ítem LOCALIZAÇÃO deste orçamento. Após o término da obra os pontos tratados serão descritos em croqui e relatório PDF com imagens do antes e depois das áreas trabalhadas.</p>
     <div class="feats" style="grid-template-columns:1fr 1fr;">
       <div>CERTIFICADO DE GARANTIA</div><div>RELATÓRIO DE FOTOS ANTES E DEPOIS</div>
       <div>CROQUI DO LOCAL TRABALHADO</div>
@@ -673,11 +684,11 @@ ${sec('5','LOCALIZAÇÃO')}
   <thead>
     <tr>
       <th class="tl" rowspan="2">LOCAL</th>
-      <th rowspan="2">Trincas<br>(m)</th>
-      <th rowspan="2">J.Fria<br>(m)</th>
-      <th rowspan="2">Ralos<br>(unid)</th>
-      <th rowspan="2">J.Dilatação<br>(m)</th>
-      <th rowspan="2">Ferragem<br>(m)</th>
+      <th rowspan="2">Trincas<br>(metros)</th>
+      <th rowspan="2">J.Fria<br>(metros)</th>
+      <th rowspan="2">Ralos<br>(unid.)</th>
+      <th rowspan="2">Juntas de<br>Dilatação<br>(metros)</th>
+      <th rowspan="2">Tratam.<br>Ferragem<br>(metros)</th>
       <th colspan="3">Cortinas (m²)</th>
     </tr>
     <tr><th>L1</th><th>L2</th><th>Total</th></tr>
@@ -715,17 +726,11 @@ ${sec('6','VALORES')}
     </tr>
   </thead>
   <tbody>${valuesRows}</tbody>
-  <tfoot>
-    <tr class="total-row">
-      <td colspan="5" style="text-align:right;">TOTAL</td>
-      <td style="text-align:right;">${fmt(o.totalBruto)}</td>
-    </tr>
-  </tfoot>
 </table>
 
 ${sec('7','CONDIÇÕES DE PAGAMENTO')}
 
-<p style="text-align:center;font-weight:bold;font-size:11px;margin-bottom:4px;">Proposta 1</p>
+<p style="text-align:center;font-weight:bold;font-size:11px;margin-bottom:4px;">Proposta</p>
 <table class="pay">
   <tr>
     <td style="font-style:italic;width:55%"><em>Total Orçamento</em></td>
@@ -737,20 +742,20 @@ ${sec('7','CONDIÇÕES DE PAGAMENTO')}
     <td style="text-align:right;">${fmt(descontoValor)}</td>
   </tr>
   <tr>
-    <td style="font-style:italic;font-weight:bold;"><strong>Total com Desconto</strong></td>
+    <td style="font-style:italic;font-weight:bold;"><strong>Total</strong></td>
     <td style="text-align:right;font-weight:bold;font-size:12px;"><strong>${fmt(totalLiquido)}</strong></td>
   </tr>` : ''}
   <tr><td colspan="2" style="font-style:italic;font-size:10px;">${condicaoPgto1Obs}</td></tr>
 </table>
 
-<p style="text-align:center;font-size:10.5px;margin:8px 0 4px;font-weight:bold;">Proposta 2 &nbsp;<em style="font-weight:normal;">(Pagamento parcelado)</em></p>
+<p style="text-align:center;font-size:10.5px;margin:8px 0 4px;font-weight:bold;">Proposta 2 : &nbsp;<em>(Pagamento parcelado)</em></p>
 <table class="pay">
   <tr>
     <td style="font-style:italic;width:55%"><em>Qtde de parcelas</em></td>
     <td style="text-align:center;font-weight:bold;width:15%">${parcelas}</td>
     <td style="text-align:right;">${fmt(valorParcelaBruto)}</td>
   </tr>
-  <tr class="total-row">
+  <tr>
     <td style="font-style:italic;font-weight:bold;"><strong>Total</strong></td>
     <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;"><strong>${fmt(o.totalBruto)}</strong></td>
   </tr>
@@ -762,29 +767,44 @@ ${sec('7','CONDIÇÕES DE PAGAMENTO')}
 <p style="font-style:italic;font-size:10px;margin:8px 0;">${obsGeral}</p>
 
 ${sec('8','INFORMAÇÕES ADICIONAIS')}
-<p style="font-size:10.5px;margin:8px 0;">
+<p style="font-size:11px;margin:8px 0;">
   &rarr; O prazo de execução desta obra será de:
   <span style="display:inline-block;min-width:36px;border-bottom:1px solid #333;text-align:center;font-weight:bold;margin:0 6px;">${prazoExecucao}</span>
   dia (s) útil(eis).
 </p>
-<p style="margin:10px 0;">A <strong>VEDAFACIL</strong> agradece sua atenção e fica ao seu dispor para maiores esclarecimentos.</p>
-<p style="margin-bottom:12px;">Atenciosamente,</p>
+<p style="margin:12px 0;">A <strong>VEDAFACIL</strong> agradece sua atenção e fica ao seu dispor para maiores esclarecimentos.</p>
+<p style="margin-bottom:14px;">Atenciosamente,</p>
 
 <div class="sigs">
   <div><div class="role">Departamento<br>Comercial:</div><div class="line">${o.departamentoComercial || o.elaboradoPor || 'Daniel Guimarães'}</div></div>
   <div><div class="role">Técnico<br>Responsável:</div><div class="line">${o.avaliadoPor || ''}</div></div>
   <div><div class="role">Vistoria<br>acompanhada por:</div><div class="line">${o.acompanhadoPor || ''}</div></div>
-  <div><div class="role">&nbsp;</div><div class="line">Engº Jociel Moreira da Silva</div><div style="font-size:8px;color:#555;margin-top:2px;">CREA: 201.513.600.3</div></div>
+  <div><div class="role">&nbsp;</div><div class="line">Engº Jociel Moreira da Silva</div><div style="font-size:8.5px;color:#555;">CREA: 201.513.600.3</div></div>
 </div>
 ${FOOTER}
 </div>
 
 ${photoPages}
 
-</body></html>`;
+<script>
+function downloadPDF() {
+  var el = document.querySelector('.download-btn');
+  if (el) el.style.display = 'none';
+  var title = document.title || 'orcamento';
+  var blob = new Blob([document.documentElement.outerHTML], {type: 'text/html'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = title + '.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  if (el) el.style.display = '';
 }
-
-app.get('/api/orcamentos/:id/pdf', async (req, res) => {
+<\/script>
+</body></html>`;
+}app.get('/api/orcamentos/:id/pdf', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1] || req.query.token;
   if (!token) return res.status(401).json({ error: 'Token required' });
   try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); }
