@@ -512,7 +512,7 @@ function buildOrcamentoPdfHtml(o) {
     T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME &nbsp;|&nbsp; CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
   </div>`;
 
-  const sec = (n, t) => `<div style="background:#1a5c9a;color:white;padding:6px 14px;margin:12px 0 8px;font-size:11.5px;font-weight:700;letter-spacing:0.3px;border-radius:2px;">${n}. ${t}</div>`;
+  const sec = (n, t) => `<div style="background:#e87722;color:white;padding:6px 14px;margin:12px 0 8px;font-size:11.5px;font-weight:700;letter-spacing:0.3px;border-radius:2px;">${n}. ${t}</div>`;
 
   const locaisComFotos = (o.locais || []).filter(l => l.fotos && l.fotos.length > 0);
   const photoPages = locaisComFotos.map((l) =>
@@ -541,32 +541,28 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 10.5px; color: #222
 .bt { font-size: 10.5px; line-height: 1.65; text-align: justify; }
 .bt p { margin-bottom: 6px; text-indent: 20px; }
 .feats { display:grid; grid-template-columns:1fr 1fr; gap:3px 16px; margin-top:8px; font-size:9.5px; font-weight:bold; font-style:italic; }
-.feats div::before { content:'✓ '; color:#1a5c9a; }
+.feats div::before { content:'✓ '; color:#e87722; }
 .info-table { width:100%; border-collapse:collapse; margin-bottom:10px; }
 .info-table td { border:1px solid #aaa; padding:5px 8px; font-size:10.5px; vertical-align:top; }
-.info-table .label-cell { background:#f0f4f8; font-weight:600; width:30%; color:#333; font-size:9.5px; }
+.info-table .label-cell { background:#fff3e0; font-weight:600; width:30%; color:#333; font-size:9.5px; }
 .info-table .val-cell { font-size:10.5px; }
 table.loc { width:100%; border-collapse:collapse; font-size:9.5px; margin:6px 0; }
 table.loc th, table.loc td { border:1px solid #888; padding:3px 5px; text-align:center; }
-table.loc th { font-weight:bold; background:#1a5c9a; color:white; }
+table.loc th { font-weight:bold; background:#e87722; color:white; }
 table.loc .tl { text-align:left; }
-table.loc tfoot td { font-weight:bold; background:#d9e6f2; }
+table.loc tfoot td { font-weight:bold; background:#fff3e0; }
 table.val { width:100%; border-collapse:collapse; font-size:10.5px; margin:6px 0; }
 table.val th, table.val td { border:1px solid #888; padding:4px 8px; }
-table.val th { font-weight:bold; text-align:center; background:#1a5c9a; color:white; }
+table.val th { font-weight:bold; text-align:center; background:#e87722; color:white; }
 table.val td { background:white; }
-table.val tr:nth-child(even) td { background:#f7f9fc; }
+table.val tr:nth-child(even) td { background:#fffaf5; }
 table.pay { width:100%; border-collapse:collapse; font-size:10.5px; margin:6px 0 2px; }
 table.pay td { border:1px solid #888; padding:5px 10px; }
-table.pay tr.total-row td { background:#1a5c9a; color:white; font-weight:bold; font-size:12px; }
+table.pay tr.total-row td { background:#e87722; color:white; font-weight:bold; font-size:12px; }
 .obs-box { border:1px solid #888; padding:8px 10px; margin-top:8px; font-size:10px; background:#f9f9f9; }
 .sigs { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:20px; text-align:center; font-size:9px; }
 .sigs .role { color:#444; margin-bottom:30px; font-size:9px; }
 .sigs .line { border-top:1px solid #333; padding-top:4px; font-weight:bold; font-size:9.5px; }
-.types { display:grid; grid-template-columns:repeat(3,1fr); gap:8px 16px; margin:10px 0; }
-.type-it { text-align:center; }
-.type-it .type-label { font-weight:bold; font-size:10px; margin-bottom:4px; color:#1a5c9a; }
-.type-it .type-icon { width:70px; height:70px; border-radius:50%; border:2px solid #1a5c9a; background:linear-gradient(135deg,#e8f1f9,#fff); margin:0 auto; display:flex;align-items:center;justify-content:center; font-size:9px; color:#1a5c9a; font-weight:600; }
 .gtee { display:flex; gap:12px; align-items:flex-start; margin:8px 0; }
 @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } @page { margin:0; size:A4; } }
 </style>
@@ -630,17 +626,7 @@ ${FOOTER}
 <!-- PAGE 2 -->
 <div class="pg pb">
 ${LOGO_HTML}
-${sec('3','TIPOS DE INFILTRAÇÕES')}
-<div class="types">
-  <div class="type-it"><div class="type-label">Trinca</div><div class="type-icon">Linear</div></div>
-  <div class="type-it"><div class="type-label">Junta Fria</div><div class="type-icon">Linear</div></div>
-  <div class="type-it"><div class="type-label">Ralo</div><div class="type-icon">Ponto</div></div>
-  <div class="type-it"><div class="type-label">Junta de Dilatação</div><div class="type-icon">Linear</div></div>
-  <div class="type-it"><div class="type-label">Cortina (m²)</div><div class="type-icon">Área</div></div>
-  <div class="type-it"><div class="type-label">Tratam. Ferragem</div><div class="type-icon">Ponto</div></div>
-</div>
-
-${sec('4','GARANTIA')}
+${sec('3','GARANTIA')}
 <div class="gtee">
   <div style="width:90px;flex-shrink:0;text-align:center;">
     ${seloImg}
@@ -660,7 +646,7 @@ ${FOOTER}
 <!-- PAGE 3 -->
 <div class="pg pb">
 ${LOGO_HTML}
-${sec('5','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
+${sec('4','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
 <div style="font-size:10.5px;line-height:1.65;">
   <p><strong><u>• INÍCIO</u></strong></p>
   <p>Mapeamento dos locais a serem tratados e confecção das imagens (ANTES).</p>
@@ -682,7 +668,7 @@ ${sec('5','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
   <p>✓ Providenciar liberação da área a ser trabalhada, acesso desobstruído e livre de circulação de pessoas.</p>
 </div>
 
-${sec('6','LOCALIZAÇÃO')}
+${sec('5','LOCALIZAÇÃO')}
 <table class="loc">
   <thead>
     <tr>
@@ -699,7 +685,7 @@ ${sec('6','LOCALIZAÇÃO')}
   <tbody>${locaisRows}${emptyRows}</tbody>
   <tfoot>
     <tr>
-      <td class="tl" style="background:#1a5c9a;color:white;">TOTAIS</td>
+      <td class="tl" style="background:#e87722;color:white;">TOTAIS</td>
       <td>${totais.trinca > 0 ? fmtNum(totais.trinca) : ''}</td>
       <td>${totais.juntaFria > 0 ? fmtNum(totais.juntaFria) : ''}</td>
       <td>${totais.ralo > 0 ? totais.ralo : ''}</td>
@@ -716,7 +702,7 @@ ${FOOTER}
 <!-- PAGE 4 -->
 <div class="pg pb">
 ${LOGO_HTML}
-${sec('7','VALORES')}
+${sec('6','VALORES')}
 <table class="val">
   <thead>
     <tr>
@@ -737,7 +723,7 @@ ${sec('7','VALORES')}
   </tfoot>
 </table>
 
-${sec('8','CONDIÇÕES DE PAGAMENTO')}
+${sec('7','CONDIÇÕES DE PAGAMENTO')}
 
 <p style="text-align:center;font-weight:bold;font-size:11px;margin-bottom:4px;">Proposta 1</p>
 <table class="pay">
@@ -775,7 +761,7 @@ ${sec('8','CONDIÇÕES DE PAGAMENTO')}
 
 <p style="font-style:italic;font-size:10px;margin:8px 0;">${obsGeral}</p>
 
-${sec('9','INFORMAÇÕES ADICIONAIS')}
+${sec('8','INFORMAÇÕES ADICIONAIS')}
 <p style="font-size:10.5px;margin:8px 0;">
   &rarr; O prazo de execução desta obra será de:
   <span style="display:inline-block;min-width:36px;border-bottom:1px solid #333;text-align:center;font-weight:bold;margin:0 6px;">${prazoExecucao}</span>
@@ -858,23 +844,23 @@ function buildContratoPdfHtml(c) {
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; font-size: 11px; color: #222; line-height: 1.55; }
     .page { padding: 20mm 18mm; max-width: 210mm; margin: 0 auto; }
-    h1 { color: #1a5c9a; font-size: 18px; }
-    h2 { color: #1a5c9a; font-size: 11px; border-bottom: 2px solid #1a5c9a; padding-bottom: 3px; margin: 14px 0 7px; text-transform: uppercase; letter-spacing: .5px; }
-    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #1a5c9a; padding-bottom: 10px; margin-bottom: 14px; }
-    .doc-num { font-size: 16px; font-weight: bold; color: #1a5c9a; text-align: right; }
+    h1 { color: #e87722; font-size: 18px; }
+    h2 { color: #e87722; font-size: 11px; border-bottom: 2px solid #e87722; padding-bottom: 3px; margin: 14px 0 7px; text-transform: uppercase; letter-spacing: .5px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #e87722; padding-bottom: 10px; margin-bottom: 14px; }
+    .doc-num { font-size: 16px; font-weight: bold; color: #e87722; text-align: right; }
     .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 20px; background: #f5f5f5; padding: 8px 10px; border-radius: 4px; margin: 6px 0 10px; font-size: 10.5px; }
     .info-label { color: #888; font-size: 9px; text-transform: uppercase; }
     table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 10px; }
-    th { background: #1a5c9a; color: white; padding: 5px 6px; text-align: left; }
+    th { background: #e87722; color: white; padding: 5px 6px; text-align: left; }
     td { padding: 4px 6px; border-bottom: 1px solid #eee; }
     tr:nth-child(even) td { background: #f9f9f9; }
     .total-row td { background: #e8f0fb !important; font-weight: bold; }
-    .grand-total td { background: #1a5c9a !important; color: white !important; font-weight: bold; font-size: 12px; }
+    .grand-total td { background: #e87722 !important; color: white !important; font-weight: bold; font-size: 12px; }
     .clause { margin: 6px 0; font-size: 10.5px; }
-    .clause strong { color: #1a5c9a; }
+    .clause strong { color: #e87722; }
     .payment-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; background: #f0f6ff; border-radius: 4px; padding: 10px; margin: 8px 0; text-align: center; }
     .payment-item .label { font-size: 9px; color: #888; }
-    .payment-item .value { font-weight: bold; font-size: 13px; color: #1a5c9a; }
+    .payment-item .value { font-weight: bold; font-size: 13px; color: #e87722; }
     .signature-area { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 35px; }
     .sig-line { border-top: 1px solid #333; padding-top: 5px; text-align: center; font-size: 10px; }
     .footer { margin-top: 16px; border-top: 1px solid #ccc; padding-top: 8px; font-size: 9px; color: #888; text-align: center; }
