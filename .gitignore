@@ -1,5 +1,4 @@
 node_modules/
-dist/
 .env
 .env.*
 data/*.json
@@ -7,3 +6,4 @@ data/*.json
 .vercel
 
 .vercel
+.env*.local
