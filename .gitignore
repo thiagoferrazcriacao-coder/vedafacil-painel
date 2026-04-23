@@ -5,3 +5,5 @@ dist/
 data/*.json
 
 .vercel
+
+.vercel

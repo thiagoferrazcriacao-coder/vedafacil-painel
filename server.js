@@ -534,7 +534,7 @@ export function buildOrcamentoPdfHtml(o) {
     ? `<img src="data:image/png;base64,${GVF_SEAL_LOGO_B64}" style="width:60px;height:auto;display:block;margin:0 auto 8px;" alt="GVF SEAL">`
     : '';
   const gvfGalao = GVF_GALAO_B64
-    ? `<img src="data:image/jpeg;base64,${GVF_GALAO_B64}" style="width:100%;max-width:440px;height:auto;display:block;margin:10px auto;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.1);" alt="GVF SEAL Galão">`
+    ? `<img src="data:image/png;base64,${GVF_GALAO_B64}" style="width:100%;max-width:440px;height:auto;display:block;margin:10px auto;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.1);" alt="GVF SEAL Galão">`
     : '';
 
   const locaisComFotos = (o.locais || []).filter(l => l.fotos && l.fotos.length > 0);
