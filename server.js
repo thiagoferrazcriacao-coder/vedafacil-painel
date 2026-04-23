@@ -531,8 +531,11 @@ export function buildOrcamentoPdfHtml(o) {
 
   const sec = (n, t) => `<div style="background:#e87722;color:white;padding:7px 12px;margin:14px 0 10px;font-size:12px;display:flex;align-items:center;border-radius:2px;">${SIMBOLO}<em><strong>${n}. ${t}</strong></em></div>`;
 
-  const gvfLogo = GVF_SEAL_LOGO_B64
-    ? `<img src="data:image/png;base64,${GVF_SEAL_LOGO_B64}" style="width:120px;height:auto;display:block;margin:0 auto 4px;" alt="GVF SEAL">`
+const gvfLogo = GVF_SEAL_LOGO_B64
+    ? `<img src="data:image/png;base64,${GVF_SEAL_LOGO_B64}" style="width:140px;height:auto;display:block;margin:0 auto;" alt="GVF SEAL">`
+    : '';
+  const gvfGalao = GVF_GALAO_B64
+    ? `<img src="data:image/png;base64,${GVF_GALAO_B64}" style="width:100%;max-width:220px;height:auto;display:block;margin:6px auto 0;border-radius:6px;" alt="GVF SEAL Galão">`
     : '';
   const gvfGalao = GVF_GALAO_B64
     ? `<img src="data:image/png;base64,${GVF_GALAO_B64}" style="width:100%;max-width:320px;height:auto;display:block;margin:0 auto;border-radius:6px;" alt="GVF SEAL Galão">`
@@ -626,9 +629,9 @@ ${sec('2','PROPRIEDADES DO GVF SEAL')}
     <p>O gel formado é inalterável ao ataque de agentes químicos ou biológicos, assim como também aos sais presentes nas estruturas. Além disso, é hidroexpansivo: Em períodos de seca, diminui seu volume, mas sem afetar a membrana impermeável.</p>
     <p>Em contato com água, o produto reabsorve a mesma recuperando seu volume inicial. Este ciclo pode se repetir inúmeras vezes sem afetar as propriedades impermeáveis.</p>
   </div>
-  <div style="flex-shrink:0;width:220px;display:flex;flex-direction:column;align-items:center;gap:6px;">
+  <div style="flex-shrink:0;width:230px;display:flex;flex-direction:column;align-items:center;">
     ${gvfLogo ? `<div>${gvfLogo}</div>` : ''}
-    ${gvfGalao ? `<div>${gvfGalao.replace('max-width:320px','max-width:220px')}</div>` : ''}
+    ${gvfGalao ? `<div>${gvfGalao}</div>` : ''}
   </div>
 </div>
 <div class="feats">
