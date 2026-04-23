@@ -521,7 +521,8 @@ export function buildOrcamentoPdfHtml(o) {
   const LOGO_HTML = `<div style="text-align:center;margin-bottom:8px;">${logoImg}</div>`;
 
   const FOOTER = `<div style="text-align:center;font-size:8.5px;color:#666;margin-top:12px;padding-top:5px;border-top:1px solid #ccc;">
-    T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME &nbsp;|&nbsp; CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
+    <strong style="font-size:9px;color:#e87722;">Eliminamos Infiltrações Sem Quebrar!</strong><br>
+    CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
   </div>`;
 
   const SIMBOLO = SIMBOLO_B64
@@ -531,16 +532,10 @@ export function buildOrcamentoPdfHtml(o) {
   const sec = (n, t) => `<div style="background:#e87722;color:white;padding:7px 12px;margin:14px 0 10px;font-size:12px;display:flex;align-items:center;border-radius:2px;">${SIMBOLO}<em><strong>${n}. ${t}</strong></em></div>`;
 
   const gvfLogo = GVF_SEAL_LOGO_B64
-    ? `<img src="data:image/png;base64,${GVF_SEAL_LOGO_B64}" style="width:100px;height:auto;display:block;" alt="GVF SEAL">`
+    ? `<img src="data:image/png;base64,${GVF_SEAL_LOGO_B64}" style="width:80px;height:auto;display:block;" alt="GVF SEAL">`
     : '';
   const gvfGalao = GVF_GALAO_B64
-    ? `<img src="data:image/png;base64,${GVF_GALAO_B64}" style="width:100%;max-width:360px;height:auto;display:block;border-radius:6px;" alt="GVF SEAL Galão">`
-    : '';
-  const gvfProductSection = (gvfLogo || gvfGalao)
-    ? `<div style="display:flex;align-items:center;gap:18px;margin:10px 0;">
-        ${gvfLogo ? `<div style="flex-shrink:0;text-align:center;">${gvfLogo}</div>` : ''}
-        ${gvfGalao ? `<div style="flex:1;">${gvfGalao}</div>` : ''}
-      </div>`
+    ? `<img src="data:image/png;base64,${GVF_GALAO_B64}" style="width:100%;max-width:440px;height:auto;display:block;margin:0 auto;border-radius:6px;" alt="GVF SEAL Galão">`
     : '';
 
   const locaisComFotos = (o.locais || []).filter(l => l.fotos && l.fotos.length > 0);
@@ -625,11 +620,14 @@ ${sec('1','MÉTODO DE IMPERMEABILIZAÇÃO REPARATIVA')}
 </div>
 
 ${sec('2','PROPRIEDADES DO GVF SEAL')}
-${gvfProductSection}
-<div class="bt">
-  <p>O GVF Seal possui viscosidade ultra baixa que possui altíssima penetração em trincas capilares. Após a cura, o gel forma uma barreira flexível e impermeável que preenche trincas, rachaduras, buracos, nichos de concretagem, fissuras, etc.</p>
-  <p>O gel formado é inalterável ao ataque de agentes químicos ou biológicos, assim como também aos sais presentes nas estruturas. Além disso, é hidroexpansivo: Em períodos de seca, diminui seu volume, mas sem afetar a membrana impermeável.</p>
-  <p>Em contato com água, o produto reabsorve a mesma recuperando seu volume inicial. Este ciclo pode se repetir inúmeras vezes sem afetar as propriedades impermeáveis.</p>
+<div style="display:flex;gap:14px;margin:8px 0;">
+  ${gvfLogo ? `<div style="flex-shrink:0;text-align:center;">${gvfLogo}</div>` : ''}
+  <div class="bt" style="flex:1;">
+    <p>O GVF Seal possui viscosidade ultra baixa que possui altíssima penetração em trincas capilares. Após a cura, o gel forma uma barreira flexível e impermeável que preenche trincas, rachaduras, buracos, nichos de concretagem, fissuras, etc.</p>
+    <p>O gel formado é inalterável ao ataque de agentes químicos ou biológicos, assim como também aos sais presentes nas estruturas. Além disso, é hidroexpansivo: Em períodos de seca, diminui seu volume, mas sem afetar a membrana impermeável.</p>
+    <p>Em contato com água, o produto reabsorve a mesma recuperando seu volume inicial. Este ciclo pode se repetir inúmeras vezes sem afetar as propriedades impermeáveis.</p>
+  </div>
+  ${gvfGalao ? `<div style="flex-shrink:0;width:200px;">${gvfGalao.replace('max-width:360px','max-width:200px')}</div>` : ''}
 </div>
 <div class="feats">
   <div>PRODUTO BICOMPONENTE</div><div>HIDROEXPANSIVO E HIDROABSORVENTE</div>
@@ -643,7 +641,26 @@ ${FOOTER}
 <div class="pg pb">
 ${LOGO_HTML}
 
-${sec('3','GARANTIA')}
+${sec('3','TIPOS DE INFILTRAÇÕES')}
+<div style="text-align:center;margin:10px 0;">
+  ${gvfGalao ? `<div style="margin-bottom:8px;">${gvfGalao.replace('max-width:440px','max-width:380px')}</div>` : ''}
+  <div style="display:flex;justify-content:center;gap:20px;margin:8px 0;">
+    <div style="text-align:center;font-size:10px;font-weight:bold;">Trinca<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(metros)</span></div>
+    <div style="text-align:center;font-size:10px;font-weight:bold;">Junta Fria<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(metros)</span></div>
+    <div style="text-align:center;font-size:10px;font-weight:bold;">Ralo<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(unid.)</span></div>
+    <div style="text-align:center;font-size:10px;font-weight:bold;">Junta de Dilatação<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(metros)</span></div>
+    <div style="text-align:center;font-size:10px;font-weight:bold;">Cortina<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(m²)</span></div>
+    <div style="text-align:center;font-size:10px;font-weight:bold;">Tratam. Ferragem<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(metros)</span></div>
+  </div>
+</div>
+${FOOTER}
+</div>
+
+<!-- PAGE 2b -->
+<div class="pg pb">
+${LOGO_HTML}
+
+${sec('4','GARANTIA')}
 <div class="gtee">
   <div style="width:90px;flex-shrink:0;text-align:center;">
     ${seloImg}
@@ -663,7 +680,7 @@ ${FOOTER}
 <!-- PAGE 3 -->
 <div class="pg pb">
 ${LOGO_HTML}
-${sec('4','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
+${sec('5','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
 <div style="font-size:10.5px;line-height:1.65;">
   <p><strong><u>• INÍCIO</u></strong></p>
   <p>Mapeamento dos locais a serem tratados e confecção das imagens (ANTES).</p>
@@ -685,7 +702,7 @@ ${sec('4','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
   <p>✓ Providenciar liberação da área a ser trabalhada, acesso desobstruído e livre de circulação de pessoas.</p>
 </div>
 
-${sec('5','LOCALIZAÇÃO')}
+${sec('6','LOCALIZAÇÃO')}
 <table class="loc">
   <thead>
     <tr>
@@ -719,7 +736,7 @@ ${FOOTER}
 <!-- PAGE 4 -->
 <div class="pg pb">
 ${LOGO_HTML}
-${sec('6','VALORES')}
+${sec('7','VALORES')}
 <table class="val">
   <thead>
     <tr>
@@ -734,7 +751,7 @@ ${sec('6','VALORES')}
   <tbody>${valuesRows}</tbody>
 </table>
 
-${sec('7','CONDIÇÕES DE PAGAMENTO')}
+${sec('8','CONDIÇÕES DE PAGAMENTO')}
 
 <p style="text-align:center;font-weight:bold;font-size:11px;margin-bottom:4px;">Proposta</p>
 <table class="pay">
@@ -772,7 +789,7 @@ ${sec('7','CONDIÇÕES DE PAGAMENTO')}
 
 <p style="font-style:italic;font-size:10px;margin:8px 0;">${obsGeral}</p>
 
-${sec('8','INFORMAÇÕES ADICIONAIS')}
+${sec('9','INFORMAÇÕES ADICIONAIS')}
 <p style="font-size:11px;margin:8px 0;">
   &rarr; O prazo de execução desta obra será de:
   <span style="display:inline-block;min-width:36px;border-bottom:1px solid #333;text-align:center;font-weight:bold;margin:0 6px;">${prazoExecucao}</span>
