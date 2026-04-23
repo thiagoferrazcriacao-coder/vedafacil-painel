@@ -531,10 +531,16 @@ export function buildOrcamentoPdfHtml(o) {
   const sec = (n, t) => `<div style="background:#e87722;color:white;padding:7px 12px;margin:14px 0 10px;font-size:12px;display:flex;align-items:center;border-radius:2px;">${SIMBOLO}<em><strong>${n}. ${t}</strong></em></div>`;
 
   const gvfLogo = GVF_SEAL_LOGO_B64
-    ? `<img src="data:image/png;base64,${GVF_SEAL_LOGO_B64}" style="width:60px;height:auto;display:block;margin:0 auto 8px;" alt="GVF SEAL">`
+    ? `<img src="data:image/png;base64,${GVF_SEAL_LOGO_B64}" style="width:100px;height:auto;display:block;" alt="GVF SEAL">`
     : '';
   const gvfGalao = GVF_GALAO_B64
-    ? `<img src="data:image/png;base64,${GVF_GALAO_B64}" style="width:100%;max-width:440px;height:auto;display:block;margin:10px auto;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.1);" alt="GVF SEAL Galão">`
+    ? `<img src="data:image/png;base64,${GVF_GALAO_B64}" style="width:100%;max-width:360px;height:auto;display:block;border-radius:6px;" alt="GVF SEAL Galão">`
+    : '';
+  const gvfProductSection = (gvfLogo || gvfGalao)
+    ? `<div style="display:flex;align-items:center;gap:18px;margin:10px 0;">
+        ${gvfLogo ? `<div style="flex-shrink:0;text-align:center;">${gvfLogo}</div>` : ''}
+        ${gvfGalao ? `<div style="flex:1;">${gvfGalao}</div>` : ''}
+      </div>`
     : '';
 
   const locaisComFotos = (o.locais || []).filter(l => l.fotos && l.fotos.length > 0);
@@ -619,7 +625,7 @@ ${sec('1','MÉTODO DE IMPERMEABILIZAÇÃO REPARATIVA')}
 </div>
 
 ${sec('2','PROPRIEDADES DO GVF SEAL')}
-${gvfGalao}
+${gvfProductSection}
 <div class="bt">
   <p>O GVF Seal possui viscosidade ultra baixa que possui altíssima penetração em trincas capilares. Após a cura, o gel forma uma barreira flexível e impermeável que preenche trincas, rachaduras, buracos, nichos de concretagem, fissuras, etc.</p>
   <p>O gel formado é inalterável ao ataque de agentes químicos ou biológicos, assim como também aos sais presentes nas estruturas. Além disso, é hidroexpansivo: Em períodos de seca, diminui seu volume, mas sem afetar a membrana impermeável.</p>
