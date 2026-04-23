@@ -112,20 +112,7 @@ export default function OrcamentoFormPage() {
 
   const handleGeneratePdf = async () => {
     await handleSave()
-    const url = api.getOrcamentoPdfUrl(orc.id)
-    const fileName = `Orcamento_${orc.numero || 1}_${(orc.cliente || 'cliente').replace(/[^a-zA-Z0-9 ]/g,'').replace(/\s+/g,'_')}.html`
-    fetch(url).then(r => r.text()).then(html => {
-      const blob = new Blob([html], { type: 'text/html' })
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = fileName
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(a.href)
-    }).catch(() => {
-      window.open(url, '_blank')
-    })
+    window.open(api.getOrcamentoPdfUrl(orc.id), '_blank')
   }
 
   const handleDownloadExcel = async () => {

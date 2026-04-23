@@ -592,12 +592,12 @@ table.pay td { border:1px solid #aaa; padding:5px 10px; }
 .gtee { display:flex; gap:14px; align-items:flex-start; margin:10px 0; }
 .download-btn { position:fixed; top:12px; right:12px; z-index:9999; background:#e87722; color:white; border:none; padding:10px 20px; font-size:14px; font-weight:700; border-radius:8px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.3); }
 .download-btn:hover { background:#d06a1b; }
-@media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } @page { margin:0; size:A4; } .download-btn { display:none; } }
+@media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } @page { margin:0; size:A4; } .download-btn { display:none !important; } }
 </style>
 </head>
 <body>
 
-<button class="download-btn" onclick="downloadPDF()">⬇ Baixar PDF</button>
+<button class="download-btn" onclick="downloadPDF()">⬇ Salvar como PDF</button>
 
 <!-- PAGE 1 -->
 <div class="pg">
@@ -794,19 +794,7 @@ ${photoPages}
 
 <script>
 function downloadPDF() {
-  var el = document.querySelector('.download-btn');
-  if (el) el.style.display = 'none';
-  var title = document.title || 'orcamento';
-  var blob = new Blob([document.documentElement.outerHTML], {type: 'text/html'});
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url;
-  a.download = title + '.html';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  if (el) el.style.display = '';
+  window.print();
 }
 <\/script>
 </body></html>`;
