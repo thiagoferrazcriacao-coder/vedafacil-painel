@@ -1445,7 +1445,7 @@ app.post('/api/contratos/:id/zapsign', auth, async (req, res) => {
     else c = memStore.contratos.find(x => x._id === req.params.id);
     if (!c) return res.status(404).json({ error: 'Not found' });
 
-    const token = process.env.ZAPSIGN_API_TOKEN;
+    const token = process.env.ZAPSIGN_API_TOKEN || '2822110f-b238-480f-b8b6-f11c8697a2c64bb7c8fd-5888-479d-9d98-a6c3b0034950';
     if (!token) return res.status(400).json({ error: 'ZAPSIGN_API_TOKEN not configured' });
 
     const ZAPSIGN_BASE = 'https://sandbox.api.zapsign.com.br/api/v1';
