@@ -1782,6 +1782,17 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+// ── Debug ─────────────────────────────────────────────────────────────────────
+app.get('/api/debug-zapsign', (req, res) => {
+  const token = process.env.ZAPSIGN_API_TOKEN || '2822110f-b238-480f-b8b6-f11c8697a2c64bb7c8fd-5888-479d-9d98-a6c3b0034950';
+  res.json({
+    build: 'v3-sandbox',
+    zapsign_base: 'https://sandbox.api.zapsign.com.br/api/v1',
+    token_prefix: token.substring(0, 8),
+    token_env: process.env.ZAPSIGN_API_TOKEN ? 'SET' : 'NOT_SET'
+  });
+});
+
 // ── Start server (local dev) ──────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 3001;
