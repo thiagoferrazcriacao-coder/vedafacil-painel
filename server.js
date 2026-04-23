@@ -570,7 +570,6 @@ table.pay tr.total-row td { background:#1a5c9a; color:white; font-weight:bold; f
 .gtee { display:flex; gap:12px; align-items:flex-start; margin:8px 0; }
 @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } @page { margin:0; size:A4; } }
 </style>
-<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),800));<\/script>
 </head>
 <body>
 
@@ -881,7 +880,6 @@ function buildContratoPdfHtml(c) {
     .footer { margin-top: 16px; border-top: 1px solid #ccc; padding-top: 8px; font-size: 9px; color: #888; text-align: center; }
     @media print { @page { margin: 15mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
   </style>
-  <script>window.addEventListener('load', () => setTimeout(() => window.print(), 600));<\/script>
   </head><body><div class="page">
 
   <div class="header">
