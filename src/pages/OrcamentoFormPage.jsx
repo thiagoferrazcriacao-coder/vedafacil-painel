@@ -61,9 +61,17 @@ export default function OrcamentoFormPage() {
           const data = await api.getOrcamento(id)
           setOrc(recalculate(data))
         } else {
+          // Fetch next sequential number before creating
+          let proximoNumero = 1
+          try {
+            const proxResult = await api.getProximoOrcamento()
+            proximoNumero = proxResult.numero || 1
+          } catch (_) { /* silently fall back to 1 */ }
+
           // Create new from measurement
           const data = await api.createOrcamento({ medicaoId: medicaoId || null })
-          setOrc(recalculate(data))
+          // Use the pre-fetched number (server already applied it, but ensure it matches)
+          setOrc(recalculate({ ...data, numero: data.numero || proximoNumero }))
           // Redirect to the edit URL so saves work
           navigate(`/orcamentos/${data.id}`, { replace: true })
         }
@@ -102,10 +110,26 @@ export default function OrcamentoFormPage() {
     }
   }
 
-  const handleGeneratePdf = () => {
-    handleSave().then(() => {
-      window.open(api.getOrcamentoPdfUrl(orc.id), '_blank')
+  const handleGeneratePdf = async () => {
+    await handleSave()
+    window.open(api.getOrcamentoPdfUrl(orc.id), '_blank')
+  }
+
+  const handleDownloadExcel = async () => {
+    await handleSave()
+    const token = localStorage.getItem('veda_token')
+    const res = await fetch(`/api/orcamentos/${orc.id}/excel`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
     })
+    if (!res.ok) { setError('Erro ao gerar Excel'); return }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `Orcamento_${orc.numero || orc.id}_${(orc.cliente || 'cliente').replace(/\s+/g, '_')}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const handleApprove = async () => {
@@ -165,6 +189,9 @@ export default function OrcamentoFormPage() {
           <button onClick={handleGeneratePdf} disabled={saving} className="btn-secondary">
             Gerar PDF
           </button>
+          <button onClick={handleDownloadExcel} disabled={saving} className="btn-secondary">
+            Excel
+          </button>
           {orc.status !== 'aprovado' && (
             <button onClick={handleApprove} disabled={saving} className="btn-success">
               Aprovar → Contrato
@@ -183,7 +210,10 @@ export default function OrcamentoFormPage() {
           <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">1</span>
           Dados do Orçamento
         </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <Field label="Nº do Orçamento">
+            <input className="input" type="number" value={orc.numero || ''} onChange={e => update({ numero: Number(e.target.value) })} />
+          </Field>
           <Field label="Data do Orçamento">
             <input className="input" type="text" value={orc.dataOrcamento || ''} onChange={updateField('dataOrcamento')} placeholder="dd/mm/aaaa" />
           </Field>
@@ -357,24 +387,35 @@ export default function OrcamentoFormPage() {
           </div>
         </div>
 
+        <div className="mb-3">
+          <label className="label">Garantia (aparece no PDF)</label>
+          <div className="flex gap-4 mt-1">
+            {[7, 15].map(anos => (
+              <label key={anos} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="garantia"
+                  value={anos}
+                  checked={Number(orc.garantia || 15) === anos}
+                  onChange={() => update({ garantia: anos })}
+                  className="accent-primary"
+                />
+                <span className="text-sm font-medium">{anos} anos</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Field label="Entrada (%)">
+          <Field label="Prazo de Execução (dias úteis)">
             <input
               className="input"
               type="number"
-              min="0"
-              max="100"
-              step="1"
-              value={orc.entrada || 0}
-              onChange={e => update({ entrada: e.target.value })}
+              min="1"
+              value={orc.prazoExecucao || 3}
+              onChange={e => update({ prazoExecucao: Number(e.target.value) })}
             />
           </Field>
-          <div>
-            <label className="label">Valor da Entrada</label>
-            <div className="input bg-gray-50 text-gray-600">
-              {fmt(orc.totalLiquido * (Number(orc.entrada) || 0) / 100)}
-            </div>
-          </div>
           <Field label="Nº de Parcelas">
             <input
               className="input"
@@ -387,25 +428,34 @@ export default function OrcamentoFormPage() {
             />
           </Field>
           <div>
-            <label className="label">Valor da Parcela</label>
+            <label className="label">Valor da Parcela (sem desc.)</label>
             <div className="input bg-gray-50 text-gray-600 font-medium">
-              {fmt(orc.valorParcela)}
+              {fmt((orc.totalBruto || 0) / Math.max(1, Number(orc.parcelas) || 1))}
+            </div>
+          </div>
+          <div>
+            <label className="label">Total Líquido (à vista)</label>
+            <div className="input bg-gray-50 text-primary font-bold">
+              {fmt(orc.totalLiquido)}
             </div>
           </div>
         </div>
 
-        <div className="mt-3 bg-primary/5 rounded-lg p-3 grid grid-cols-3 gap-3 text-sm text-center">
-          <div>
-            <div className="text-gray-500 text-xs">Total</div>
-            <div className="font-bold text-gray-800">{fmt(orc.totalLiquido)}</div>
-          </div>
-          <div>
-            <div className="text-gray-500 text-xs">Entrada</div>
-            <div className="font-bold text-green-700">{fmt(orc.totalLiquido * (Number(orc.entrada) || 0) / 100)}</div>
-          </div>
-          <div>
-            <div className="text-gray-500 text-xs">Saldo ({orc.parcelas}x)</div>
-            <div className="font-bold text-primary">{fmt(orc.saldo)}</div>
+        <div className="mt-4 space-y-3">
+          <h3 className="text-sm font-semibold text-gray-600">Textos das Condições (aparecem no PDF)</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="Proposta 1 (à vista) — observação">
+              <input className="input" value={orc.condicaoPgto1Obs || ''} onChange={updateField('condicaoPgto1Obs')} placeholder="*Pgto a vista, na assinatura do contrato." />
+            </Field>
+            <Field label="Proposta 2 — obs linha 1">
+              <input className="input" value={orc.condicaoPgto2Obs1 || ''} onChange={updateField('condicaoPgto2Obs1')} placeholder="* 1ª parcela de entrada na assinatura do contrato." />
+            </Field>
+            <Field label="Proposta 2 — obs linha 2">
+              <input className="input" value={orc.condicaoPgto2Obs2 || ''} onChange={updateField('condicaoPgto2Obs2')} placeholder="*2ª parcela p/ 30 dias." />
+            </Field>
+            <Field label="Observação geral (itálico abaixo das propostas)">
+              <input className="input" value={orc.obsGeral || ''} onChange={updateField('obsGeral')} placeholder="Obs: O contrato deve ser assinado até 2 dias após recebimento..." />
+            </Field>
           </div>
         </div>
       </section>
@@ -469,6 +519,9 @@ export default function OrcamentoFormPage() {
         </button>
         <button onClick={handleGeneratePdf} disabled={saving} className="btn-secondary">
           Gerar PDF
+        </button>
+        <button onClick={handleDownloadExcel} disabled={saving} className="btn-secondary">
+          Excel
         </button>
         {orc.status !== 'aprovado' && (
           <button onClick={handleApprove} disabled={saving} className="btn-success">

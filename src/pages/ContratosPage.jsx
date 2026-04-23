@@ -15,6 +15,31 @@ export default function ContratosPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [checked, setChecked] = useState(new Set())
+  const [deleting, setDeleting] = useState(false)
+
+  const toggleCheck = (id, e) => {
+    e.stopPropagation()
+    setChecked(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+  const toggleAll = () => {
+    if (checked.size === filtered.length) setChecked(new Set())
+    else setChecked(new Set(filtered.map(c => c.id)))
+  }
+  const handleDeleteSelected = async () => {
+    if (!confirm(`Excluir ${checked.size} contrato(s)?`)) return
+    setDeleting(true)
+    for (const id of checked) {
+      await api.deleteContrato(id).catch(() => {})
+    }
+    setContratos(prev => prev.filter(c => !checked.has(c.id)))
+    setChecked(new Set())
+    setDeleting(false)
+  }
 
   useEffect(() => {
     api.getContratos()
@@ -38,6 +63,11 @@ export default function ContratosPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Contratos</h1>
           <p className="text-gray-500 text-sm mt-0.5">{filtered.length} registros</p>
+          {checked.size > 0 && (
+            <button onClick={handleDeleteSelected} disabled={deleting} className="btn-danger text-sm ml-4">
+              {deleting ? 'Excluindo...' : `Excluir ${checked.size} selecionado(s)`}
+            </button>
+          )}
         </div>
       </div>
 
@@ -75,6 +105,9 @@ export default function ContratosPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="px-4 py-3 w-10">
+                    <input type="checkbox" checked={checked.size === filtered.length && filtered.length > 0} onChange={toggleAll} className="rounded" />
+                  </th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Nº</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Data</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Cliente</th>
@@ -94,6 +127,9 @@ export default function ContratosPage() {
                       className="hover:bg-gray-50 cursor-pointer transition-colors"
                       onClick={() => navigate(`/contratos/${c.id}`)}
                     >
+                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={checked.has(c.id)} onChange={e => toggleCheck(c.id, e)} className="rounded" />
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs text-gray-500">
                         #{String(c.numero || '').padStart(4, '0')}
                       </td>

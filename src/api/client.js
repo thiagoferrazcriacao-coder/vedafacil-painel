@@ -4,6 +4,12 @@ function getToken() {
   return localStorage.getItem('veda_token')
 }
 
+function normalizeId(data) {
+  if (Array.isArray(data)) return data.map(normalizeId)
+  if (data && typeof data === 'object' && '_id' in data) return { ...data, id: data._id }
+  return data
+}
+
 async function request(method, path, body) {
   const headers = { 'Content-Type': 'application/json' }
   const token = getToken()
@@ -24,7 +30,7 @@ async function request(method, path, body) {
 
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-  return data
+  return normalizeId(data)
 }
 
 export const api = {
@@ -43,18 +49,28 @@ export const api = {
   createOrcamento: (data) => request('POST', '/orcamentos', data),
   updateOrcamento: (id, data) => request('PUT', `/orcamentos/${id}`, data),
   deleteOrcamento: (id) => request('DELETE', `/orcamentos/${id}`),
+  deleteMedicao: (id) => request('DELETE', `/medicoes/${id}`),
+  deleteContrato: (id) => request('DELETE', `/contratos/${id}`),
   approveOrcamento: (id) => request('POST', `/orcamentos/${id}/approve`),
-  getOrcamentoPdfUrl: (id) => `${BASE}/orcamentos/${id}/pdf`,
+  getOrcamentoPdfUrl: (id) => `${BASE}/orcamentos/${id}/pdf?token=${encodeURIComponent(getToken() || '')}`,
 
   // Contratos
   getContratos: () => request('GET', '/contratos'),
   getContrato: (id) => request('GET', `/contratos/${id}`),
   createContrato: (data) => request('POST', '/contratos', data),
   updateContrato: (id, data) => request('PUT', `/contratos/${id}`, data),
-  sendToZapSign: (id) => request('POST', `/contratos/${id}/zapsign`),
-  getContratoPdfUrl: (id) => `${BASE}/contratos/${id}/pdf`,
+  sendToZapSign: (id, email) => request('POST', `/contratos/${id}/zapsign`, { email }),
+  getContratoPdfUrl: (id) => `${BASE}/contratos/${id}/pdf?token=${encodeURIComponent(getToken() || '')}`,
 
   // Config
   getPrecos: () => request('GET', '/config/precos'),
   updatePrecos: (data) => request('PUT', '/config/precos', data),
+  getProximoOrcamento: () => request('GET', '/config/proximo-orcamento'),
+
+  // Usuários
+  getUsuarios: () => request('GET', '/usuarios'),
+  createUsuario: (data) => request('POST', '/usuarios', data),
+  updateUsuario: (email, data) => request('PUT', `/usuarios/${encodeURIComponent(email)}`, data),
+  deleteUsuario: (email) => request('DELETE', `/usuarios/${encodeURIComponent(email)}`),
+  getUsuarioMe: () => request('GET', '/usuarios/me'),
 }

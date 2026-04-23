@@ -10,6 +10,7 @@ import OrcamentoFormPage from './pages/OrcamentoFormPage.jsx'
 import ContratosPage from './pages/ContratosPage.jsx'
 import ContratoFormPage from './pages/ContratoFormPage.jsx'
 import ConfigPage from './pages/ConfigPage.jsx'
+import UsersPage from './pages/UsersPage.jsx'
 
 // ─── Auth Context ─────────────────────────────────────────────────────────────
 export const AuthContext = createContext(null)
@@ -24,6 +25,23 @@ function AuthProvider({ children }) {
     const u = localStorage.getItem('veda_user')
     return u ? JSON.parse(u) : null
   })
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const googleToken = params.get('google_token')
+    if (googleToken) {
+      try {
+        const b64 = googleToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+        const payload = JSON.parse(atob(b64.padEnd(b64.length + (4 - b64.length % 4) % 4, '=')))
+        const newUser = { username: payload.name, email: payload.email, picture: payload.picture, role: payload.role }
+        localStorage.setItem('veda_token', googleToken)
+        localStorage.setItem('veda_user', JSON.stringify(newUser))
+        setToken(googleToken)
+        setUser(newUser)
+        window.history.replaceState({}, '', window.location.pathname)
+      } catch (e) { console.error('Google token parse error', e) }
+    }
+  }, [])
 
   const login = (newToken, newUser) => {
     localStorage.setItem('veda_token', newToken)
@@ -84,6 +102,7 @@ export default function App() {
                   <Route path="/contratos" element={<ContratosPage />} />
                   <Route path="/contratos/:id" element={<ContratoFormPage />} />
                   <Route path="/config" element={<ConfigPage />} />
+                  <Route path="/usuarios" element={<UsersPage />} />
                 </Routes>
               </Layout>
             </ProtectedRoute>

@@ -10,9 +10,23 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import path from 'path';
 import { createRequire } from 'module';
+import { google } from 'googleapis';
+import { readFileSync, existsSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+const LOGO_B64 = existsSync(path.join(__dirname, 'logo_b64.txt'))
+  ? readFileSync(path.join(__dirname, 'logo_b64.txt'), 'utf8').trim()
+  : '';
+
+const SELO7_B64 = existsSync(path.join(__dirname, 'anos7_b64.txt'))
+  ? readFileSync(path.join(__dirname, 'anos7_b64.txt'), 'utf8').trim()
+  : '';
+
+const SELO15_B64 = existsSync(path.join(__dirname, 'anos15_b64.txt'))
+  ? readFileSync(path.join(__dirname, 'anos15_b64.txt'), 'utf8').trim()
+  : '';
 
 const app = express();
 
@@ -68,6 +82,13 @@ const orcamentoSchema = new mongoose.Schema({
   valorParcela: { type: Number, default: 0 },
   obsAdicionais: String,
   locais: [mongoose.Schema.Types.Mixed],
+  prazoExecucao: { type: Number, default: 3 },
+  garantia: { type: Number, default: 15 },
+  condicaoPgto1Obs: { type: String, default: '*Pgto a vista, na assinatura do contrato.' },
+  condicaoPgto2Obs1: { type: String, default: '* 1ª parcela de entrada na assinatura do contrato.' },
+  condicaoPgto2Obs2: { type: String, default: '*2ª parcela p/ 30 dias.' },
+  obsGeral: { type: String, default: 'Obs: O contrato deve ser assinado até 2 dias após recebimento. Após este período não garantimos a data estabelecida préviamente para execução do serviço, podendo ser modificada sem aviso prévio.' },
+  departamentoComercial: { type: String, default: 'Daniel Guimarães' },
 }, { _id: false });
 
 const contratoSchema = new mongoose.Schema({
@@ -89,6 +110,18 @@ const contratoSchema = new mongoose.Schema({
   locais: [mongoose.Schema.Types.Mixed],
 }, { _id: false });
 
+const userSchema = new mongoose.Schema({
+  _id: { type: String }, // email
+  email: String,
+  name: String,
+  picture: String,
+  role: { type: String, default: 'medidor' },
+  googleAccessToken: String,
+  googleRefreshToken: String,
+  googleTokenExpiry: Number,
+}, { _id: false });
+const User = mongoose.model('User', userSchema);
+
 const configSchema = new mongoose.Schema({
   _id: { type: String, default: 'main' },
   precos: {
@@ -100,6 +133,7 @@ const configSchema = new mongoose.Schema({
     cortina: { type: Number, default: 1020 },
     art: { type: Number, default: 300 },
     mobilizacao: { type: Number, default: 300 },
+    numOrcamento: { type: Number, default: 1 },
   }
 }, { _id: false });
 
@@ -109,7 +143,7 @@ const Contrato = mongoose.model('Contrato', contratoSchema);
 const Config = mongoose.model('Config', configSchema);
 
 // In-memory fallback (when no MongoDB)
-const memStore = { medicoes: [], orcamentos: [], contratos: [], config: null };
+const memStore = { medicoes: [], orcamentos: [], contratos: [], config: null, users: [] };
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 
@@ -123,7 +157,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // JWT auth middleware
 function auth(req, res, next) {
-  const token = req.headers.authorization?.split(' ')[1];
+  const token = req.headers.authorization?.split(' ')[1] || req.query.token;
   if (!token) return res.status(401).json({ error: 'Token required' });
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret');
@@ -139,8 +173,8 @@ app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body;
   if (username === (process.env.ADMIN_USER || 'daniel') &&
       password === (process.env.ADMIN_PASSWORD || 'vedafacil2024')) {
-    const token = jwt.sign({ username }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '24h' });
-    return res.json({ token, user: { username } });
+    const token = jwt.sign({ username, role: 'admin' }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '24h' });
+    return res.json({ token, user: { username, role: 'admin' } });
   }
   res.status(401).json({ error: 'Credenciais inválidas' });
 });
@@ -188,6 +222,17 @@ app.post('/api/medicao', async (req, res) => {
   }
 });
 
+// Endpoint público para PWA confirmar que medição foi recebida (sem auth)
+app.get('/api/medicao/:id/ping', async (req, res) => {
+  try {
+    await connectDB();
+    const exists = isConnected
+      ? !!(await Medicao.exists({ _id: req.params.id }))
+      : memStore.medicoes.some(m => m._id === req.params.id);
+    res.json({ found: exists });
+  } catch { res.json({ found: false }); }
+});
+
 app.get('/api/medicoes', auth, async (req, res) => {
   try {
     await connectDB();
@@ -223,6 +268,15 @@ app.patch('/api/medicoes/:id/status', auth, async (req, res) => {
     const m = memStore.medicoes.find(x => x._id === req.params.id);
     if (m) m.status = req.body.status;
     res.json(m);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/medicoes/:id', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) { await Medicao.findByIdAndDelete(req.params.id); }
+    else { memStore.medicoes = memStore.medicoes.filter(x => x._id !== req.params.id); }
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -275,9 +329,11 @@ app.post('/api/orcamentos', auth, async (req, res) => {
 
     const totalBruto = itens.reduce((s, i) => s + i.subtotal, 0);
 
+    const numeroAtual = (cfg.precos || cfg).numOrcamento || 1;
+
     const novoOrcamento = {
       _id: uuidv4(),
-      numero: (isConnected ? await Orcamento.countDocuments() : memStore.orcamentos.length) + 1,
+      numero: numeroAtual,
       medicaoId: req.body.medicaoId || null,
       status: 'rascunho',
       createdAt: Date.now(),
@@ -290,7 +346,7 @@ app.post('/api/orcamentos', auth, async (req, res) => {
       celular: medicao?.celular || '',
       dataOrcamento: new Date().toISOString().split('T')[0],
       validade: '',
-      avaliadoPor: '', acompanhadoPor: '', tecnicoResponsavel: 'Thiago Ramos Ferraz', elaboradoPor: '',
+      avaliadoPor: medicao?.user || '', acompanhadoPor: '', tecnicoResponsavel: 'Thiago Ramos Ferraz', elaboradoPor: '',
       origem: '', sigla: '',
       itens,
       totalBruto,
@@ -303,9 +359,14 @@ app.post('/api/orcamentos', auth, async (req, res) => {
 
     if (isConnected) {
       const saved = await Orcamento.create(novoOrcamento);
+      // Increment numOrcamento asynchronously (does not block response)
+      Config.findByIdAndUpdate('main', { $inc: { 'precos.numOrcamento': 1 } }, { upsert: true }).catch(console.error);
       return res.json(saved);
     }
     memStore.orcamentos.push(novoOrcamento);
+    // Increment numOrcamento in memStore
+    if (!memStore.config) memStore.config = { precos: {} };
+    memStore.config.precos.numOrcamento = (memStore.config.precos.numOrcamento || 1) + 1;
     res.json(novoOrcamento);
   } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
@@ -368,110 +429,382 @@ app.post('/api/orcamentos/:id/approve', auth, async (req, res) => {
 
 function buildOrcamentoPdfHtml(o) {
   const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-  const rows = (o.itens || []).map((item, i) => `
+  const fmtDate = (d) => {
+    if (!d) return '';
+    const date = new Date(d.includes && d.includes('-') && d.length === 10 ? d + 'T12:00:00' : d);
+    if (isNaN(date.getTime())) return d;
+    return date.toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'2-digit' }).replace('.','');
+  };
+  const fmtNum = (n) => (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+
+  const descontoValor = o.descontoTipo === 'percent'
+    ? (o.totalBruto * (o.desconto || 0) / 100)
+    : (o.desconto || 0);
+  const totalLiquido = o.totalLiquido || (o.totalBruto - descontoValor);
+  const parcelas = o.parcelas || 1;
+  const valorParcelaBruto = parcelas > 1 ? (o.totalBruto / parcelas) : o.totalBruto;
+
+  const locais = o.locais || [];
+  const locaisRows = locais.map(l => `
     <tr>
-      <td>${i + 1}</td>
-      <td>${item.descricao}</td>
-      <td>${item.quantidade} ${item.unidade}</td>
-      <td>${fmt(item.valorUnit)}</td>
-      <td>${fmt(item.subtotal)}</td>
+      <td class="td-local">${l.nome || ''}</td>
+      <td>${l.trinca > 0 ? fmtNum(l.trinca) : ''}</td>
+      <td>${l.juntaFria > 0 ? fmtNum(l.juntaFria) : ''}</td>
+      <td>${l.ralo > 0 ? l.ralo : ''}</td>
+      <td>${l.juntaDilat > 0 ? fmtNum(l.juntaDilat) : ''}</td>
+      <td>${l.ferragem > 0 ? fmtNum(l.ferragem) : ''}</td>
+      <td></td><td></td>
+      <td>${l.cortina > 0 ? fmtNum(l.cortina) : ''}</td>
     </tr>`).join('');
 
-  const locaisRows = (o.locais || []).map(l => `
+  const emptyRows = Array(Math.max(0, 5 - locais.length)).fill('<tr style="height:18px;"><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
+
+  const totais = {
+    trinca: locais.reduce((s, l) => s + (l.trinca || 0), 0),
+    juntaFria: locais.reduce((s, l) => s + (l.juntaFria || 0), 0),
+    ralo: locais.reduce((s, l) => s + (l.ralo || 0), 0),
+    juntaDilat: locais.reduce((s, l) => s + (l.juntaDilat || 0), 0),
+    ferragem: locais.reduce((s, l) => s + (l.ferragem || 0), 0),
+    cortina: locais.reduce((s, l) => s + (l.cortina || 0), 0),
+  };
+
+  const itensAtivos = (o.itens || []).filter(i => i.quantidade > 0);
+  const valuesRows = itensAtivos.map((item, i) => `
     <tr>
-      <td>${l.nome || ''}</td>
-      <td>${l.trinca || 0}m</td>
-      <td>${l.juntaFria || 0}m</td>
-      <td>${l.ralo || 0}</td>
-      <td>${l.juntaDilat || 0}m</td>
-      <td>${l.ferragem || 0}m</td>
-      <td>${l.cortina || 0}m²</td>
+      <td style="text-align:center">${i + 1}</td>
+      <td style="text-align:left">${item.descricao}</td>
+      <td style="text-align:center">${item.unidade || '-'}</td>
+      <td style="text-align:center">${fmtNum(item.quantidade)}</td>
+      <td style="text-align:right">${fmtNum(item.valorUnit)}</td>
+      <td style="text-align:right">${fmtNum(item.subtotal)}</td>
     </tr>`).join('');
 
-  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-  <style>
-    body { font-family: Arial, sans-serif; font-size: 11px; color: #222; margin: 20px; }
-    h1 { color: #1a5c9a; font-size: 18px; margin: 0; }
-    h2 { color: #1a5c9a; font-size: 13px; border-bottom: 2px solid #1a5c9a; padding-bottom: 4px; }
-    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
-    .company { font-size: 10px; color: #666; }
-    table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-    th { background: #1a5c9a; color: white; padding: 6px 8px; text-align: left; font-size: 10px; }
-    td { padding: 5px 8px; border-bottom: 1px solid #eee; }
-    tr:nth-child(even) td { background: #f9f9f9; }
-    .total-row td { font-weight: bold; background: #e8f0fb; }
-    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
-    .info-item { background: #f5f5f5; padding: 6px 10px; border-radius: 4px; }
-    .info-label { font-size: 9px; color: #888; }
-    .info-value { font-weight: bold; }
-    .technical { background: #f0f6ff; border-left: 3px solid #1a5c9a; padding: 10px; margin: 10px 0; font-size: 10px; }
-    .footer { margin-top: 30px; border-top: 1px solid #ccc; padding-top: 10px; font-size: 9px; color: #888; text-align: center; }
-  </style></head><body>
-  <div class="header">
-    <div>
-      <h1>Vedafácil</h1>
-      <div class="company">T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME<br>
-      CNPJ: 23.606.470/0001-07<br>
-      Rua Professora Margarida Fialho Thompson Leite, 670 — Barra Mansa/RJ</div>
+  const prazoExecucao = o.prazoExecucao || 3;
+  const condicaoPgto1Obs = o.condicaoPgto1Obs || '*Pgto a vista, na assinatura do contrato.';
+  const condicaoPgto2Obs1 = o.condicaoPgto2Obs1 || '* 1ª parcela de entrada na assinatura do contrato.';
+  const condicaoPgto2Obs2 = o.condicaoPgto2Obs2 || '*2ª parcela p/ 30 dias.';
+  const obsGeral = o.obsGeral || 'Obs: O contrato deve ser assinado até 2 dias após recebimento. Após este período não garantimos a data estabelecida préviamente para execução do serviço, podendo ser modificada sem aviso prévio.';
+
+  const garantia = o.garantia || 15;
+  const seloSrc = garantia <= 7 ? SELO7_B64 : SELO15_B64;
+  const seloImg = seloSrc
+    ? `<img src="data:image/png;base64,${seloSrc}" style="width:82px;height:auto;display:block;" alt="${garantia} anos">`
+    : `<div style="width:76px;height:76px;border-radius:50%;border:3px solid #c8942a;background:linear-gradient(135deg,#f5d060,#c8942a);display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font-weight:bold;margin:0 auto;">
+        <div style="font-size:8px;text-align:center;">★ SUA OBRA TEM ★</div>
+        <div style="font-size:20px;font-weight:900;line-height:1;">${garantia}</div>
+        <div style="font-size:8px;letter-spacing:1px;">ANOS DE</div>
+        <div style="font-size:7px;font-style:italic;">Garantia</div>
+        <div style="font-size:7px;">★★★</div>
+      </div>`;
+
+  const logoImg = LOGO_B64
+    ? `<img src="data:image/png;base64,${LOGO_B64}" style="max-width:280px;height:auto;display:block;margin:0 auto;" alt="Vedafácil">`
+    : `<div style="text-align:center;margin-bottom:10px;padding-bottom:8px;">
+        <div style="font-size:34px;font-weight:900;color:#2a2a2a;letter-spacing:-1px;font-family:'Arial Black',Arial,sans-serif;line-height:1;">
+          <span style="color:#e87722;">&#92;</span>VEDAF<span style="color:#e87722;">Á</span>CIL
+        </div>
+        <div style="font-size:9px;letter-spacing:3.5px;color:#444;margin-top:1px;font-weight:600;">TECNOLOGIA EM IMPERMEABILIZAÇÃO</div>
+      </div>`;
+
+  const LOGO_HTML = `<div style="text-align:center;margin-bottom:8px;">${logoImg}</div>`;
+
+  const FOOTER = `<div style="text-align:center;font-size:8.5px;color:#666;margin-top:12px;padding-top:5px;border-top:1px solid #ccc;">
+    T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME &nbsp;|&nbsp; CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
+  </div>`;
+
+  const sec = (n, t) => `<div style="background:#1a5c9a;color:white;padding:6px 14px;margin:12px 0 8px;font-size:11.5px;font-weight:700;letter-spacing:0.3px;border-radius:2px;">${n}. ${t}</div>`;
+
+  const locaisComFotos = (o.locais || []).filter(l => l.fotos && l.fotos.length > 0);
+  const photoPages = locaisComFotos.map((l) =>
+    (l.fotos || []).map(f => `
+    <div style="page-break-before:always;padding:10mm 14mm 14mm;max-width:210mm;margin:0 auto;">
+      ${LOGO_HTML}
+      <div style="font-size:11px;margin-bottom:10px;font-weight:bold;">${l.nome || ''}</div>
+      <div style="border:1px solid #ccc;padding:8px;">
+        <img src="${f.data || f}" style="width:100%;max-height:200mm;object-fit:contain;" alt="">
+        <div style="text-align:center;font-size:9px;color:#555;margin-top:4px;">${l.nome || ''}</div>
+      </div>
+      ${FOOTER}
+    </div>`).join('')
+  ).join('');
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Orçamento Vedafácil #${o.numero || 1}</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, Helvetica, sans-serif; font-size: 10.5px; color: #222; }
+.pg { padding: 8mm 12mm 10mm; max-width: 210mm; margin: 0 auto; }
+.pb { page-break-before: always; }
+.bt { font-size: 10.5px; line-height: 1.65; text-align: justify; }
+.bt p { margin-bottom: 6px; text-indent: 20px; }
+.feats { display:grid; grid-template-columns:1fr 1fr; gap:3px 16px; margin-top:8px; font-size:9.5px; font-weight:bold; font-style:italic; }
+.feats div::before { content:'✓ '; color:#1a5c9a; }
+.info-table { width:100%; border-collapse:collapse; margin-bottom:10px; }
+.info-table td { border:1px solid #aaa; padding:5px 8px; font-size:10.5px; vertical-align:top; }
+.info-table .label-cell { background:#f0f4f8; font-weight:600; width:30%; color:#333; font-size:9.5px; }
+.info-table .val-cell { font-size:10.5px; }
+table.loc { width:100%; border-collapse:collapse; font-size:9.5px; margin:6px 0; }
+table.loc th, table.loc td { border:1px solid #888; padding:3px 5px; text-align:center; }
+table.loc th { font-weight:bold; background:#1a5c9a; color:white; }
+table.loc .tl { text-align:left; }
+table.loc tfoot td { font-weight:bold; background:#d9e6f2; }
+table.val { width:100%; border-collapse:collapse; font-size:10.5px; margin:6px 0; }
+table.val th, table.val td { border:1px solid #888; padding:4px 8px; }
+table.val th { font-weight:bold; text-align:center; background:#1a5c9a; color:white; }
+table.val td { background:white; }
+table.val tr:nth-child(even) td { background:#f7f9fc; }
+table.pay { width:100%; border-collapse:collapse; font-size:10.5px; margin:6px 0 2px; }
+table.pay td { border:1px solid #888; padding:5px 10px; }
+table.pay tr.total-row td { background:#1a5c9a; color:white; font-weight:bold; font-size:12px; }
+.obs-box { border:1px solid #888; padding:8px 10px; margin-top:8px; font-size:10px; background:#f9f9f9; }
+.sigs { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:20px; text-align:center; font-size:9px; }
+.sigs .role { color:#444; margin-bottom:30px; font-size:9px; }
+.sigs .line { border-top:1px solid #333; padding-top:4px; font-weight:bold; font-size:9.5px; }
+.types { display:grid; grid-template-columns:repeat(3,1fr); gap:8px 16px; margin:10px 0; }
+.type-it { text-align:center; }
+.type-it .type-label { font-weight:bold; font-size:10px; margin-bottom:4px; color:#1a5c9a; }
+.type-it .type-icon { width:70px; height:70px; border-radius:50%; border:2px solid #1a5c9a; background:linear-gradient(135deg,#e8f1f9,#fff); margin:0 auto; display:flex;align-items:center;justify-content:center; font-size:9px; color:#1a5c9a; font-weight:600; }
+.gtee { display:flex; gap:12px; align-items:flex-start; margin:8px 0; }
+@media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } @page { margin:0; size:A4; } }
+</style>
+<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),800));<\/script>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="pg">
+${LOGO_HTML}
+
+<table class="info-table">
+  <tr>
+    <td class="label-cell">CLIENTE / CONDOMÍNIO</td>
+    <td class="val-cell"><strong>${o.cliente || ''}</strong></td>
+    <td class="label-cell">ORÇAMENTO Nº</td>
+    <td class="val-cell" style="text-align:right;"><strong style="font-size:13px;">${o.numero || 1}</strong></td>
+  </tr>
+  <tr>
+    <td class="label-cell">ENDEREÇO</td>
+    <td class="val-cell">${o.endereco || ''}${o.cidade ? ' — ' + o.cidade : ''}</td>
+    <td class="label-cell">DATA</td>
+    <td class="val-cell" style="text-align:right;">${fmtDate(o.dataOrcamento)}</td>
+  </tr>
+  <tr>
+    <td class="label-cell">A/C</td>
+    <td class="val-cell">${o.ac || ''}</td>
+    <td class="label-cell">VALIDADE</td>
+    <td class="val-cell" style="text-align:right;">${fmtDate(o.validade) || '30 dias'}</td>
+  </tr>
+  <tr>
+    <td class="label-cell">CONTATO</td>
+    <td class="val-cell">${o.celular || ''}</td>
+    <td class="label-cell">CEP</td>
+    <td class="val-cell" style="text-align:right;">${o.cep || ''}</td>
+  </tr>
+</table>
+
+<p style="margin-bottom:4px;font-size:10.5px;">Prezado (a),&nbsp;&nbsp;&nbsp;<strong>${o.ac || o.cliente || ''}</strong></p>
+<p style="margin-bottom:10px;font-size:10.5px;">Temos o prazer de submeter a vossa consideração, nosso orçamento para a eliminação de infiltrações:</p>
+
+${sec('1','MÉTODO DE IMPERMEABILIZAÇÃO REPARATIVA')}
+<div class="bt">
+  <p>O método de injeção é a tecnologia mais moderna e avançada para eliminar qualquer tipo de infiltração em trincas e rachaduras em qualquer superfície de concreto maciço. O produto é injetado no concreto, nos pontos de infiltração, com equipamentos exclusivos, que o forçam a penetrar na estrutura vedando trincas e microfissuras até atingir a origem do vazamento.</p>
+  <p>O gel hidroabsorvente <em>GVF SEAL</em> possui a consistência da água quando injetado, por isso percola exatamente o mesmo caminho da infiltração, mas em sentido contrário. Enquanto se injeta, permanece em estado líquido e quando a injeção se interrompe, em um minuto e meio, se transforma num gel flexível que produzirá a vedação do ponto tratado.</p>
+</div>
+
+${sec('2','PROPRIEDADES DO GVF SEAL')}
+<div class="bt">
+  <p>O GVF Seal possui viscosidade ultra baixa que possui altíssima penetração em trincas capilares. Após a cura, o gel forma uma barreira flexível e impermeável que preenche trincas, rachaduras, buracos, nichos de concretagem, fissuras, etc.</p>
+  <p>O gel formado é inalterável ao ataque de agentes químicos ou biológicos, assim como também aos sais presentes nas estruturas. Além disso, é hidroexpansivo: Em períodos de seca, diminui seu volume, mas sem afetar a membrana impermeável.</p>
+  <p>Em contato com água, o produto reabsorve a mesma recuperando seu volume inicial. Este ciclo pode se repetir inúmeras vezes sem afetar as propriedades impermeáveis.</p>
+</div>
+<div class="feats">
+  <div>PRODUTO BICOMPONENTE</div><div>HIDROEXPANSIVO E HIDROABSORVENTE</div>
+  <div>POSSUI ATÉ 300% DE ELONGAÇÃO</div><div>PODE SER APLICADO COM FLUXO DE ÁGUA</div>
+  <div>TEMPO DE REAÇÃO 1,05-1,55min</div><div>PENETRA EM FISSURAS DE ATÉ 0,05mm</div>
+</div>
+${FOOTER}
+</div>
+
+<!-- PAGE 2 -->
+<div class="pg pb">
+${LOGO_HTML}
+${sec('3','TIPOS DE INFILTRAÇÕES')}
+<div class="types">
+  <div class="type-it"><div class="type-label">Trinca</div><div class="type-icon">Linear</div></div>
+  <div class="type-it"><div class="type-label">Junta Fria</div><div class="type-icon">Linear</div></div>
+  <div class="type-it"><div class="type-label">Ralo</div><div class="type-icon">Ponto</div></div>
+  <div class="type-it"><div class="type-label">Junta de Dilatação</div><div class="type-icon">Linear</div></div>
+  <div class="type-it"><div class="type-label">Cortina (m²)</div><div class="type-icon">Área</div></div>
+  <div class="type-it"><div class="type-label">Tratam. Ferragem</div><div class="type-icon">Ponto</div></div>
+</div>
+
+${sec('4','GARANTIA')}
+<div class="gtee">
+  <div style="width:90px;flex-shrink:0;text-align:center;">
+    ${seloImg}
+  </div>
+  <div>
+    <p class="bt" style="margin-bottom:8px;">A Vedafacil - Tecnologia em Impermeabilização oferece garantia de <strong>${garantia} anos</strong> nos pontos tratados e especificados no ítem LOCALIZAÇÃO deste orçamento. Após o término da obra os pontos tratados serão descritos em croqui e relatório PDF com imagens do antes e depois das áreas trabalhadas.</p>
+    <div class="feats" style="grid-template-columns:1fr 1fr;">
+      <div>CERTIFICADO DE GARANTIA</div><div>RELATÓRIO DE FOTOS ANTES E DEPOIS</div>
+      <div>CROQUI DO LOCAL TRABALHADO</div>
     </div>
-    <div style="text-align:right">
-      <div style="font-size:16px;font-weight:bold;color:#1a5c9a">ORÇAMENTO Nº ${o.numero || 1}</div>
-      <div>Data: ${o.dataOrcamento || new Date().toLocaleDateString('pt-BR')}</div>
-      <div>Validade: ${o.validade || '30 dias'}</div>
-    </div>
   </div>
+</div>
+<div class="obs-box"><strong>Observação:</strong> Esta proposta contempla garantia Pontual, somente nos locais orçados e tratados.</div>
+${FOOTER}
+</div>
 
-  <h2>Dados do Cliente</h2>
-  <div class="info-grid">
-    <div class="info-item"><div class="info-label">CLIENTE / CONDOMÍNIO</div><div class="info-value">${o.cliente || ''}</div></div>
-    <div class="info-item"><div class="info-label">A/C</div><div class="info-value">${o.ac || ''}</div></div>
-    <div class="info-item"><div class="info-label">ENDEREÇO</div><div class="info-value">${o.endereco || ''}</div></div>
-    <div class="info-item"><div class="info-label">CIDADE</div><div class="info-value">${o.cidade || ''}</div></div>
-    <div class="info-item"><div class="info-label">CELULAR</div><div class="info-value">${o.celular || ''}</div></div>
-    <div class="info-item"><div class="info-label">TÉCNICO RESPONSÁVEL</div><div class="info-value">${o.tecnicoResponsavel || ''}</div></div>
-  </div>
+<!-- PAGE 3 -->
+<div class="pg pb">
+${LOGO_HTML}
+${sec('5','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
+<div style="font-size:10.5px;line-height:1.65;">
+  <p><strong><u>• INÍCIO</u></strong></p>
+  <p>Mapeamento dos locais a serem tratados e confecção das imagens (ANTES).</p>
+  <p>Isolamento da região a tratar utilizando faixa zebrada para área de recuo.</p>
+  <p><strong><u>• PERFURAÇÃO</u></strong></p>
+  <p>• Perfuração utilizando furadeira de impacto com broca no diâmetro de ½ polegada.</p>
+  <p>• Colocação de bicos injetores na estrutura.</p>
+  <p><strong><u>• APLICAÇÃO</u></strong></p>
+  <p>• Início do processo de injeção com bomba injetora elétrica de alta pressão.</p>
+  <p><strong><u>• ACABAMENTO</u></strong></p>
+  <p>• Acabamento dos locais tratados, utilizando argamassa cimentícia.</p>
+  <p><strong><u>• CONCLUSÃO</u></strong></p>
+  <p>• Limpeza do local trabalhado e remoção de detritos gerados no decorrer do serviço.</p>
+  <p>• Confecção do croqui e fotos da área trabalhada.</p>
+  <p>• Conferência do serviço realizado junto à contrantante, assinatura do termo de entrega de obra.</p>
+  <p style="margin-top:8px;"><u>O cliente deverá:</u></p>
+  <p>✓ Disponibilizar vaga para veículo da VEDAFACIL.</p>
+  <p>✓ Fornecer ponto de energia elétrica;</p>
+  <p>✓ Providenciar liberação da área a ser trabalhada, acesso desobstruído e livre de circulação de pessoas.</p>
+</div>
 
-  <h2>Método de Impermeabilização</h2>
-  <div class="technical">
-    <p>O método de injeção é a tecnologia mais moderna e avançada para eliminar qualquer tipo de infiltração em trincas e rachaduras em qualquer superfície de concreto maciço. O produto é injetado no concreto, nos pontos de infiltração, com equipamentos exclusivos, que o forçam a penetrar na estrutura vedando trincas e microfissuras até atingir a origem do vazamento. O gel hidroabsorvente GVF SEAL possui a consistência da água quando injetado, por isso percola exatamente o mesmo caminho da infiltração, mas em sentido contrário.</p>
-    <p>O GVF Seal possui viscosidade ultra baixa que possui altíssima penetração em trincas capilares. Após a cura, o gel forma uma barreira flexível e impermeável que preenche trincas, rachaduras, buracos, nichos de concretagem, fissuras, etc.</p>
-  </div>
+${sec('6','LOCALIZAÇÃO')}
+<table class="loc">
+  <thead>
+    <tr>
+      <th class="tl" rowspan="2">LOCAL</th>
+      <th rowspan="2">Trincas<br>(m)</th>
+      <th rowspan="2">J.Fria<br>(m)</th>
+      <th rowspan="2">Ralos<br>(unid)</th>
+      <th rowspan="2">J.Dilatação<br>(m)</th>
+      <th rowspan="2">Ferragem<br>(m)</th>
+      <th colspan="3">Cortinas (m²)</th>
+    </tr>
+    <tr><th>L1</th><th>L2</th><th>Total</th></tr>
+  </thead>
+  <tbody>${locaisRows}${emptyRows}</tbody>
+  <tfoot>
+    <tr>
+      <td class="tl" style="background:#1a5c9a;color:white;">TOTAIS</td>
+      <td>${totais.trinca > 0 ? fmtNum(totais.trinca) : ''}</td>
+      <td>${totais.juntaFria > 0 ? fmtNum(totais.juntaFria) : ''}</td>
+      <td>${totais.ralo > 0 ? totais.ralo : ''}</td>
+      <td>${totais.juntaDilat > 0 ? fmtNum(totais.juntaDilat) : ''}</td>
+      <td>${totais.ferragem > 0 ? fmtNum(totais.ferragem) : ''}</td>
+      <td></td><td></td>
+      <td>${totais.cortina > 0 ? fmtNum(totais.cortina) : ''}</td>
+    </tr>
+  </tfoot>
+</table>
+${FOOTER}
+</div>
 
-  <h2>Itens e Valores</h2>
-  <table>
-    <thead><tr><th>#</th><th>Descrição</th><th>Quantidade</th><th>Valor Unit.</th><th>Subtotal</th></tr></thead>
-    <tbody>${rows}</tbody>
-    <tfoot>
-      <tr class="total-row"><td colspan="4">TOTAL BRUTO</td><td>${fmt(o.totalBruto)}</td></tr>
-      ${o.desconto ? `<tr><td colspan="4">Desconto (${o.descontoTipo === 'percent' ? o.desconto + '%' : fmt(o.desconto)})</td><td>- ${fmt(o.descontoTipo === 'percent' ? (o.totalBruto * o.desconto / 100) : o.desconto)}</td></tr>` : ''}
-      <tr class="total-row"><td colspan="4">TOTAL LÍQUIDO</td><td>${fmt(o.totalLiquido)}</td></tr>
-    </tfoot>
-  </table>
+<!-- PAGE 4 -->
+<div class="pg pb">
+${LOGO_HTML}
+${sec('7','VALORES')}
+<table class="val">
+  <thead>
+    <tr>
+      <th style="width:6%">Item</th>
+      <th style="text-align:left">Descrição</th>
+      <th>Unid.</th>
+      <th>Qtde.</th>
+      <th style="text-align:right">Valor Unit.</th>
+      <th style="text-align:right">Valor por Item</th>
+    </tr>
+  </thead>
+  <tbody>${valuesRows}</tbody>
+  <tfoot>
+    <tr class="total-row">
+      <td colspan="5" style="text-align:right;">TOTAL</td>
+      <td style="text-align:right;">${fmt(o.totalBruto)}</td>
+    </tr>
+  </tfoot>
+</table>
 
-  ${o.parcelas > 1 ? `
-  <h2>Condições de Pagamento</h2>
-  <table>
-    <tr><td>Entrada (${o.entrada}%)</td><td>${fmt(o.totalLiquido * o.entrada / 100)}</td></tr>
-    <tr><td>Saldo em ${o.parcelas}x</td><td>${fmt(o.valorParcela)} / parcela</td></tr>
-  </table>` : ''}
+${sec('8','CONDIÇÕES DE PAGAMENTO')}
 
-  ${locaisRows ? `
-  <h2>Levantamento por Local</h2>
-  <table>
-    <thead><tr><th>Local</th><th>Trincas</th><th>Juntas Frias</th><th>Ralos</th><th>Jta. Dilat.</th><th>Ferragens</th><th>Cortinas</th></tr></thead>
-    <tbody>${locaisRows}</tbody>
-  </table>` : ''}
+<p style="text-align:center;font-weight:bold;font-size:11px;margin-bottom:4px;">Proposta 1</p>
+<table class="pay">
+  <tr>
+    <td style="font-style:italic;width:55%"><em>Total Orçamento</em></td>
+    <td style="text-align:right;font-weight:bold;font-size:12px;">${fmt(o.totalBruto)}</td>
+  </tr>
+  ${(o.desconto && Number(o.desconto) > 0) ? `
+  <tr>
+    <td style="font-style:italic;"><em>Desconto</em> &nbsp;&nbsp; ${o.desconto}%</td>
+    <td style="text-align:right;">${fmt(descontoValor)}</td>
+  </tr>
+  <tr>
+    <td style="font-style:italic;font-weight:bold;"><strong>Total com Desconto</strong></td>
+    <td style="text-align:right;font-weight:bold;font-size:12px;"><strong>${fmt(totalLiquido)}</strong></td>
+  </tr>` : ''}
+  <tr><td colspan="2" style="font-style:italic;font-size:10px;">${condicaoPgto1Obs}</td></tr>
+</table>
 
-  ${o.obsAdicionais ? `<h2>Observações</h2><p>${o.obsAdicionais}</p>` : ''}
+<p style="text-align:center;font-size:10.5px;margin:8px 0 4px;font-weight:bold;">Proposta 2 &nbsp;<em style="font-weight:normal;">(Pagamento parcelado)</em></p>
+<table class="pay">
+  <tr>
+    <td style="font-style:italic;width:55%"><em>Qtde de parcelas</em></td>
+    <td style="text-align:center;font-weight:bold;width:15%">${parcelas}</td>
+    <td style="text-align:right;">${fmt(valorParcelaBruto)}</td>
+  </tr>
+  <tr class="total-row">
+    <td style="font-style:italic;font-weight:bold;"><strong>Total</strong></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;"><strong>${fmt(o.totalBruto)}</strong></td>
+  </tr>
+  <tr><td colspan="3" style="font-style:italic;font-size:10px;font-weight:bold;">Observações:</td></tr>
+  <tr><td colspan="3" style="font-style:italic;font-size:10px;">${condicaoPgto2Obs1}</td></tr>
+  <tr><td colspan="3" style="font-style:italic;font-size:10px;">${condicaoPgto2Obs2}</td></tr>
+</table>
 
-  <div class="footer">
-    Vedafácil — T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME — CNPJ: 23.606.470/0001-07<br>
-    Thiago Ramos Ferraz — CPF: 104.589.167-30
-  </div>
-  </body></html>`;
+<p style="font-style:italic;font-size:10px;margin:8px 0;">${obsGeral}</p>
+
+${sec('9','INFORMAÇÕES ADICIONAIS')}
+<p style="font-size:10.5px;margin:8px 0;">
+  &rarr; O prazo de execução desta obra será de:
+  <span style="display:inline-block;min-width:36px;border-bottom:1px solid #333;text-align:center;font-weight:bold;margin:0 6px;">${prazoExecucao}</span>
+  dia (s) útil(eis).
+</p>
+<p style="margin:10px 0;">A <strong>VEDAFACIL</strong> agradece sua atenção e fica ao seu dispor para maiores esclarecimentos.</p>
+<p style="margin-bottom:12px;">Atenciosamente,</p>
+
+<div class="sigs">
+  <div><div class="role">Departamento<br>Comercial:</div><div class="line">${o.departamentoComercial || o.elaboradoPor || 'Daniel Guimarães'}</div></div>
+  <div><div class="role">Técnico<br>Responsável:</div><div class="line">${o.avaliadoPor || ''}</div></div>
+  <div><div class="role">Vistoria<br>acompanhada por:</div><div class="line">${o.acompanhadoPor || ''}</div></div>
+  <div><div class="role">&nbsp;</div><div class="line">Engº Jociel Moreira da Silva</div><div style="font-size:8px;color:#555;margin-top:2px;">CREA: 201.513.600.3</div></div>
+</div>
+${FOOTER}
+</div>
+
+${photoPages}
+
+</body></html>`;
 }
 
-app.post('/api/orcamentos/:id/pdf', auth, async (req, res) => {
+app.get('/api/orcamentos/:id/pdf', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1] || req.query.token;
+  if (!token) return res.status(401).json({ error: 'Token required' });
+  try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); }
+  catch { return res.status(401).json({ error: 'Invalid token' }); }
+
   try {
     await connectDB();
     let o;
@@ -479,10 +812,361 @@ app.post('/api/orcamentos/:id/pdf', auth, async (req, res) => {
     else o = memStore.orcamentos.find(x => x._id === req.params.id);
     if (!o) return res.status(404).json({ error: 'Not found' });
 
-    // Return printable HTML — browser's Ctrl+P saves as PDF
+    // Fetch fotos from medicao if not in orcamento
+    if (o.medicaoId && (!o.locais || o.locais.every(l => !l.fotos || l.fotos.length === 0))) {
+      let med;
+      if (isConnected) med = await Medicao.findById(o.medicaoId);
+      else med = memStore.medicoes.find(x => x._id === o.medicaoId);
+      if (med && med.locais) {
+        const locaisComFotos = o.locais.map((l, i) => ({
+          ...l,
+          fotos: (med.locais[i] && med.locais[i].fotos) ? med.locais[i].fotos : []
+        }));
+        o = { ...o.toObject ? o.toObject() : o, locais: locaisComFotos };
+      }
+    }
+
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.send(buildOrcamentoPdfHtml(o));
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Contrato PDF ─────────────────────────────────────────────────────────────
+
+function buildContratoPdfHtml(c) {
+  const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+  const today = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+  const dataAssinatura = c.dataAssinatura ? new Date(c.dataAssinatura + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : today;
+  const itensFiltrados = (c.itens || []).filter(i => i.quantidade > 0);
+
+  const itemRows = itensFiltrados.map((i, n) => `
+    <tr>
+      <td>${n+1}</td>
+      <td>${i.descricao}</td>
+      <td style="text-align:center">${i.quantidade} ${i.unidade}</td>
+      <td style="text-align:right">${fmt(i.valorUnit)}</td>
+      <td style="text-align:right"><strong>${fmt(i.subtotal)}</strong></td>
+    </tr>`).join('');
+
+  const entradaValor = c.totalLiquido * (Number(c.entrada) || 0) / 100;
+  const saldo = c.saldo || c.totalLiquido;
+  const parcelas = c.parcelas || 1;
+  const valorParcela = c.valorParcela || saldo;
+
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+  <title>Contrato Vedafácil #${c.numero || 1}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 11px; color: #222; line-height: 1.55; }
+    .page { padding: 20mm 18mm; max-width: 210mm; margin: 0 auto; }
+    h1 { color: #1a5c9a; font-size: 18px; }
+    h2 { color: #1a5c9a; font-size: 11px; border-bottom: 2px solid #1a5c9a; padding-bottom: 3px; margin: 14px 0 7px; text-transform: uppercase; letter-spacing: .5px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #1a5c9a; padding-bottom: 10px; margin-bottom: 14px; }
+    .doc-num { font-size: 16px; font-weight: bold; color: #1a5c9a; text-align: right; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 20px; background: #f5f5f5; padding: 8px 10px; border-radius: 4px; margin: 6px 0 10px; font-size: 10.5px; }
+    .info-label { color: #888; font-size: 9px; text-transform: uppercase; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 10px; }
+    th { background: #1a5c9a; color: white; padding: 5px 6px; text-align: left; }
+    td { padding: 4px 6px; border-bottom: 1px solid #eee; }
+    tr:nth-child(even) td { background: #f9f9f9; }
+    .total-row td { background: #e8f0fb !important; font-weight: bold; }
+    .grand-total td { background: #1a5c9a !important; color: white !important; font-weight: bold; font-size: 12px; }
+    .clause { margin: 6px 0; font-size: 10.5px; }
+    .clause strong { color: #1a5c9a; }
+    .payment-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; background: #f0f6ff; border-radius: 4px; padding: 10px; margin: 8px 0; text-align: center; }
+    .payment-item .label { font-size: 9px; color: #888; }
+    .payment-item .value { font-weight: bold; font-size: 13px; color: #1a5c9a; }
+    .signature-area { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 35px; }
+    .sig-line { border-top: 1px solid #333; padding-top: 5px; text-align: center; font-size: 10px; }
+    .footer { margin-top: 16px; border-top: 1px solid #ccc; padding-top: 8px; font-size: 9px; color: #888; text-align: center; }
+    @media print { @page { margin: 15mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  </style>
+  <script>window.addEventListener('load', () => setTimeout(() => window.print(), 600));<\/script>
+  </head><body><div class="page">
+
+  <div class="header">
+    <div>
+      <h1>Vedafácil</h1>
+      <div style="font-size:9.5px;color:#555;margin-top:3px">T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME<br>
+      CNPJ: 23.606.470/0001-07 · Rua Profª Margarida F. T. Leite, 670 · Barra Mansa/RJ</div>
+    </div>
+    <div class="doc-num">
+      CONTRATO DE PRESTAÇÃO DE SERVIÇOS<br>
+      Nº ${String(c.numero || 1).padStart(4,'0')}
+    </div>
+  </div>
+
+  <h2>Das Partes</h2>
+  <div class="clause">
+    <strong>CONTRATADA:</strong> T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME, inscrita no CNPJ sob nº 23.606.470/0001-07, com sede na Rua Professora Margarida Fialho Thompson Leite, 670, Barra Mansa/RJ, doravante denominada simplesmente <strong>VEDAFÁCIL</strong>.
+  </div>
+  <div class="clause" style="margin-top:6px">
+    <strong>CONTRATANTE:</strong> ${c.cliente || ''}${c.cnpjCliente ? ', inscrito no CNPJ sob nº ' + c.cnpjCliente : ''}${c.cpfResponsavel ? ', A/C ' + (c.ac || c.cliente) + ', portador do CPF nº ' + c.cpfResponsavel + (c.rgResponsavel ? ' e RG nº ' + c.rgResponsavel : '') : ''}, com endereço em ${c.endereco || ''}${c.cidade ? ', ' + c.cidade : ''}, doravante denominado simplesmente <strong>CONTRATANTE</strong>.
+  </div>
+
+  <h2>Do Objeto</h2>
+  <div class="clause">
+    O presente contrato tem como objeto a prestação de serviços especializados de impermeabilização e tratamento de infiltrações, mediante a aplicação de tecnologia de injeção de gel hidroabsorvente <strong>GVF SEAL</strong>, nas áreas especificadas abaixo.
+  </div>
+
+  ${itensFiltrados.length > 0 ? `
+  <table>
+    <thead><tr><th>#</th><th>Descrição do Serviço</th><th style="text-align:center">Quantidade</th><th style="text-align:right">Valor Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
+    <tbody>${itemRows}</tbody>
+    <tfoot>
+      <tr class="grand-total"><td colspan="4">VALOR TOTAL DO CONTRATO</td><td style="text-align:right">${fmt(c.totalLiquido)}</td></tr>
+    </tfoot>
+  </table>` : ''}
+
+  <h2>Do Valor e Condições de Pagamento</h2>
+  <div class="payment-grid">
+    <div class="payment-item"><div class="label">Valor Total</div><div class="value">${fmt(c.totalLiquido)}</div></div>
+    <div class="payment-item"><div class="label">Entrada${entradaValor > 0 ? ' (' + (c.entrada || 0) + '%)' : ''}</div><div class="value">${fmt(entradaValor)}</div></div>
+    <div class="payment-item"><div class="label">Saldo${parcelas > 1 ? ' (' + parcelas + 'x)' : ''}</div><div class="value">${fmt(valorParcela)}</div></div>
+  </div>
+  <div class="clause">A entrada deverá ser paga na assinatura do contrato. ${parcelas > 1 ? `O saldo remanescente de ${fmt(saldo)} será dividido em ${parcelas} parcelas de ${fmt(valorParcela)}.` : `O saldo de ${fmt(saldo)} deverá ser pago na conclusão dos serviços.`}</div>
+
+  ${c.dataInicio || c.dataTermino ? `
+  <h2>Do Prazo</h2>
+  <div class="clause">
+    ${c.dataInicio ? `Início previsto: <strong>${new Date(c.dataInicio + 'T12:00:00').toLocaleDateString('pt-BR')}</strong>.` : ''}
+    ${c.dataTermino ? ` Término previsto: <strong>${new Date(c.dataTermino + 'T12:00:00').toLocaleDateString('pt-BR')}</strong>.` : ''}
+    O prazo poderá ser alterado em caso de condições climáticas adversas, força maior ou alteração do escopo contratado.
+  </div>` : ''}
+
+  <h2>Das Obrigações da Contratada</h2>
+  <div class="clause">A VEDAFÁCIL compromete-se a: (a) executar os serviços com mão de obra qualificada e materiais de primeira linha; (b) zelar pela segurança dos profissionais e do local de trabalho; (c) fornecer ART de engenharia quando aplicável; (d) garantir os serviços executados pelo prazo estipulado na cláusula de garantia.</div>
+
+  <h2>Das Obrigações do Contratante</h2>
+  <div class="clause">O CONTRATANTE compromete-se a: (a) proporcionar acesso livre ao local de execução dos serviços; (b) efetuar os pagamentos nas datas acordadas; (c) informar previamente sobre eventuais restrições de horário ou acesso; (d) manter o local vistoriado devidamente desocupado durante a execução.</div>
+
+  <h2>Da Garantia</h2>
+  <div class="clause">Os serviços de impermeabilização por injeção executados pela VEDAFÁCIL têm <strong>garantia de 5 (cinco) anos</strong>, a contar da data de conclusão dos serviços, contra infiltrações nas regiões tratadas, desde que observadas as condições normais de uso e ausência de danos estruturais supervenientes não relacionados ao escopo contratado.</div>
+
+  <h2>Do Foro</h2>
+  <div class="clause">As partes elegem o Foro da Comarca de <strong>${c.foro || 'Barra Mansa'}/RJ</strong> para dirimir quaisquer dúvidas ou litígios decorrentes deste contrato, com expressa renúncia de qualquer outro, por mais privilegiado que seja.</div>
+
+  <div class="clause" style="margin-top:14px;text-align:center">
+    Por estarem assim justas e contratadas, as partes assinam o presente instrumento em 2 (duas) vias de igual teor e forma.<br>
+    <strong>${c.cidade || 'Barra Mansa'}, ${dataAssinatura}.</strong>
+  </div>
+
+  <div class="signature-area">
+    <div class="sig-line">
+      Vedafácil — Thiago Ramos Ferraz<br>CPF: 104.589.167-30<br>CONTRATADA
+    </div>
+    <div class="sig-line">
+      ${c.cliente || ''}<br>${c.ac ? 'A/C: ' + c.ac + (c.cpfResponsavel ? ' · CPF: ' + c.cpfResponsavel : '') : (c.cpfResponsavel ? 'CPF: ' + c.cpfResponsavel : '')}<br>CONTRATANTE
+    </div>
+  </div>
+
+  <div class="footer">Vedafácil · T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME · CNPJ: 23.606.470/0001-07 · Barra Mansa/RJ</div>
+  </div></body></html>`;
+}
+
+app.get('/api/contratos/:id/pdf', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1] || req.query.token;
+  if (token) {
+    try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); }
+    catch { return res.status(401).json({ error: 'Invalid token' }); }
+  }
+
+  try {
+    await connectDB();
+    let c;
+    if (isConnected) c = await Contrato.findById(req.params.id);
+    else c = memStore.contratos.find(x => x._id === req.params.id);
+    if (!c) return res.status(404).json({ error: 'Not found' });
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(buildContratoPdfHtml(c));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Excel Generation ──────────────────────────────────────────────────────────
+
+async function buildOrcamentoExcel(o) {
+  const { default: ExcelJS } = await import('exceljs');
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Vedafácil';
+  wb.created = new Date();
+
+  const AZUL = '1a5c9a';
+  const AZUL_CLARO = 'e8f0fb';
+  const CINZA = 'f5f5f5';
+
+  const fmt = (n) => Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // ── Aba 1: Informações ─────────────────────────────────────────────────────
+  const wsInfo = wb.addWorksheet('Informações');
+  wsInfo.columns = [
+    { width: 28 }, { width: 40 }, { width: 28 }, { width: 30 },
+  ];
+
+  // Cabeçalho empresa
+  const titleRow = wsInfo.addRow(['Vedafácil', '', '', `ORÇAMENTO Nº ${o.numero || 1}`]);
+  titleRow.font = { bold: true, size: 16, color: { argb: 'FF' + AZUL } };
+  titleRow.getCell(4).alignment = { horizontal: 'right' };
+  titleRow.getCell(4).font = { bold: true, size: 14, color: { argb: 'FF' + AZUL } };
+  wsInfo.mergeCells('A1:C1');
+
+  wsInfo.addRow(['T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME', '', '', `Data: ${o.dataOrcamento || new Date().toLocaleDateString('pt-BR')}`])
+    .getCell(4).alignment = { horizontal: 'right' };
+  wsInfo.addRow(['CNPJ: 23.606.470/0001-07', '', '', `Validade: ${o.validade || '30 dias'}`])
+    .getCell(4).alignment = { horizontal: 'right' };
+  wsInfo.addRow(['Rua Profª Margarida F. T. Leite, 670 — Barra Mansa/RJ']);
+  wsInfo.addRow([]);
+
+  // Seção Dados do Cliente
+  const headerCliente = wsInfo.addRow(['DADOS DO CLIENTE']);
+  headerCliente.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + AZUL } };
+  headerCliente.getCell(1).font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+  wsInfo.mergeCells(`A${headerCliente.number}:D${headerCliente.number}`);
+
+  const addInfoRow = (label1, val1, label2, val2) => {
+    const r = wsInfo.addRow([label1, val1, label2 || '', val2 || '']);
+    r.getCell(1).font = { bold: true, size: 10, color: { argb: 'FF555555' } };
+    r.getCell(3).font = { bold: true, size: 10, color: { argb: 'FF555555' } };
+    [1, 2, 3, 4].forEach(c => {
+      r.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + CINZA } };
+      r.getCell(c).border = { bottom: { style: 'thin', color: { argb: 'FFDDDDDD' } } };
+    });
+    return r;
+  };
+
+  addInfoRow('CLIENTE / CONDOMÍNIO', o.cliente || '', 'A/C', o.ac || '');
+  addInfoRow('ENDEREÇO', o.endereco || '', 'CEP', o.cep || '');
+  addInfoRow('CIDADE', o.cidade || '', 'CELULAR', o.celular || '');
+  addInfoRow('TÉCNICO RESPONSÁVEL', o.tecnicoResponsavel || '', 'ELABORADO POR', o.elaboradoPor || '');
+  addInfoRow('AVALIADO POR', o.avaliadoPor || '', 'ACOMPANHADO POR', o.acompanhadoPor || '');
+  addInfoRow('ORIGEM', o.origem || '', 'SIGLA', o.sigla || '');
+  wsInfo.addRow([]);
+
+  // Seção Locais
+  if (o.locais && o.locais.length > 0) {
+    const headerLocais = wsInfo.addRow(['LEVANTAMENTO POR LOCAL']);
+    headerLocais.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + AZUL } };
+    headerLocais.getCell(1).font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+    wsInfo.mergeCells(`A${headerLocais.number}:D${headerLocais.number}`);
+
+    const colsLocais = wsInfo.addRow(['Local', 'Trincas (m)', 'Juntas Frias (m)', 'Ralos (un)', 'Jta. Dilat. (m)', 'Ferragens (m)', 'Cortinas (m²)']);
+    colsLocais.eachCell(cell => {
+      cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3a7cbf' } };
+    });
+    wsInfo.getColumn(5).width = 20;
+    wsInfo.getColumn(6).width = 18;
+    wsInfo.getColumn(7).width = 18;
+
+    o.locais.forEach((l, i) => {
+      const r = wsInfo.addRow([l.nome || `Local ${i + 1}`, l.trinca || 0, l.juntaFria || 0, l.ralo || 0, l.juntaDilat || 0, l.ferragem || 0, l.cortina || 0]);
+      if (i % 2 === 0) r.eachCell(cell => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + CINZA } };
+      });
+    });
+    wsInfo.addRow([]);
+  }
+
+  // Observações
+  if (o.obsAdicionais) {
+    wsInfo.addRow(['OBSERVAÇÕES']).getCell(1).font = { bold: true };
+    wsInfo.addRow([o.obsAdicionais]);
+  }
+
+  // ── Aba 2: Orçamento ────────────────────────────────────────────────────────
+  const wsOrc = wb.addWorksheet('Orçamento');
+  wsOrc.columns = [
+    { width: 6 }, { width: 35 }, { width: 18 }, { width: 20 }, { width: 20 },
+  ];
+
+  // Cabeçalho
+  const titleOrc = wsOrc.addRow(['Vedafácil — ORÇAMENTO', '', '', '', `Nº ${o.numero || 1}`]);
+  titleOrc.font = { bold: true, size: 14, color: { argb: 'FF' + AZUL } };
+  titleOrc.getCell(5).alignment = { horizontal: 'right' };
+  wsOrc.mergeCells('A1:D1');
+
+  wsOrc.addRow([`Data: ${o.dataOrcamento || ''}`, '', '', '', `Validade: ${o.validade || '30 dias'}`])
+    .getCell(5).alignment = { horizontal: 'right' };
+  wsOrc.addRow([`Cliente: ${o.cliente || ''}`, '', '', '', `A/C: ${o.ac || ''}`])
+    .getCell(5).alignment = { horizontal: 'right' };
+  wsOrc.addRow([]);
+
+  // Header tabela
+  const tHead = wsOrc.addRow(['#', 'Descrição', 'Qtd / Unidade', 'Valor Unitário', 'Subtotal']);
+  tHead.eachCell(cell => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + AZUL } };
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+    cell.alignment = { horizontal: 'center' };
+    cell.border = { bottom: { style: 'medium' } };
+  });
+
+  (o.itens || []).forEach((item, i) => {
+    const r = wsOrc.addRow([
+      i + 1,
+      item.descricao,
+      `${item.quantidade} ${item.unidade}`,
+      `R$ ${fmt(item.valorUnit)}`,
+      `R$ ${fmt(item.subtotal)}`,
+    ]);
+    if (i % 2 === 0) r.eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + AZUL_CLARO } };
+    });
+    r.getCell(4).alignment = { horizontal: 'right' };
+    r.getCell(5).alignment = { horizontal: 'right' };
+  });
+
+  // Totais
+  wsOrc.addRow([]);
+  const addTotalRow = (label, value, bold = false) => {
+    const r = wsOrc.addRow(['', '', '', label, `R$ ${fmt(value)}`]);
+    r.getCell(4).alignment = { horizontal: 'right' };
+    r.getCell(5).alignment = { horizontal: 'right' };
+    if (bold) {
+      r.getCell(4).font = { bold: true, size: 12 };
+      r.getCell(5).font = { bold: true, size: 12 };
+      r.eachCell(cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + AZUL_CLARO } }; });
+    }
+    return r;
+  };
+
+  addTotalRow('TOTAL BRUTO', o.totalBruto, true);
+  if (o.desconto) {
+    const descValor = o.descontoTipo === 'percent' ? (o.totalBruto * o.desconto / 100) : o.desconto;
+    addTotalRow(`Desconto (${o.descontoTipo === 'percent' ? o.desconto + '%' : 'R$ ' + fmt(o.desconto)})`, descValor);
+  }
+  addTotalRow('TOTAL LÍQUIDO', o.totalLiquido, true);
+
+  if (o.parcelas > 1 || o.entrada) {
+    wsOrc.addRow([]);
+    wsOrc.addRow(['', '', '', 'CONDIÇÕES DE PAGAMENTO', '']).getCell(4).font = { bold: true };
+    if (o.entrada) addTotalRow(`Entrada (${o.entrada}%)`, o.totalLiquido * o.entrada / 100);
+    if (o.parcelas > 1) addTotalRow(`Saldo em ${o.parcelas}x`, o.valorParcela);
+  }
+
+  // Rodapé
+  wsOrc.addRow([]);
+  const footer = wsOrc.addRow(['Vedafácil — T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME — CNPJ: 23.606.470/0001-07']);
+  footer.getCell(1).font = { size: 9, color: { argb: 'FF888888' } };
+  wsOrc.mergeCells(`A${footer.number}:E${footer.number}`);
+
+  return wb;
+}
+
+app.post('/api/orcamentos/:id/excel', auth, async (req, res) => {
+  try {
+    await connectDB();
+    let o;
+    if (isConnected) o = await Orcamento.findById(req.params.id);
+    else o = memStore.orcamentos.find(x => x._id === req.params.id);
+    if (!o) return res.status(404).json({ error: 'Not found' });
+
+    const wb = await buildOrcamentoExcel(o);
+    const filename = `Orcamento_${o.numero || o._id}_${(o.cliente || 'cliente').replace(/\s+/g, '_')}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
 
 // ── Contratos Routes ──────────────────────────────────────────────────────────
@@ -556,6 +1240,15 @@ app.put('/api/contratos/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.delete('/api/contratos/:id', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) { await Contrato.findByIdAndDelete(req.params.id); }
+    else { memStore.contratos = memStore.contratos.filter(x => x._id !== req.params.id); }
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/contratos/:id/zapsign', auth, async (req, res) => {
   try {
     await connectDB();
@@ -606,6 +1299,142 @@ app.post('/api/contratos/webhook/zapsign', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Google OAuth ──────────────────────────────────────────────────────────────
+
+function getOAuthClient() {
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI || 'https://vedafacil-painel.vercel.app/api/auth/google/callback'
+  );
+}
+
+app.get('/api/auth/google', (req, res) => {
+  if (!process.env.GOOGLE_CLIENT_ID) return res.status(400).json({ error: 'Google OAuth not configured' });
+  const source = req.query.source || 'panel';
+  const debug = req.query.debug === '1';
+  const oauth2Client = getOAuthClient();
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: [
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/calendar.readonly',
+    ],
+    prompt: 'consent',
+    state: source,
+  });
+  if (debug) return res.json({ url, client_id: process.env.GOOGLE_CLIENT_ID, redirect_uri: process.env.GOOGLE_REDIRECT_URI });
+  res.redirect(url);
+});
+
+app.get('/api/auth/google/callback', async (req, res) => {
+  const { code, state, error: oauthError } = req.query;
+  if (oauthError) return res.redirect('/login?error=oauth_denied');
+  const source = state || 'panel';
+  try {
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://vedafacil-painel.vercel.app/api/auth/google/callback';
+
+    // Exchange code for tokens via fetch (avoids googleapis cold-start overhead)
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }).toString(),
+    });
+    const tokens = await tokenRes.json();
+    if (!tokens.access_token) throw new Error('No access_token: ' + JSON.stringify(tokens));
+
+    // Get user info
+    const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const userInfo = await userinfoRes.json();
+    if (!userInfo.email) throw new Error('No email in userinfo');
+
+    const ADMIN_EMAIL = 'thiagoferrazcriacao@gmail.com';
+    const role = userInfo.email === ADMIN_EMAIL ? 'admin' : 'medidor';
+
+    // Include access_token in JWT so calendar works immediately (no DB lookup needed)
+    const token = jwt.sign(
+      { email: userInfo.email, name: userInfo.name, picture: userInfo.picture || '', role, googleAccessToken: tokens.access_token },
+      process.env.JWT_SECRET || 'dev-secret',
+      { expiresIn: '7d' }
+    );
+
+    // Save to DB in background — use $setOnInsert for name to preserve admin-registered name
+    connectDB().then(() => {
+      const tokenFields = { googleAccessToken: tokens.access_token, googleRefreshToken: tokens.refresh_token || undefined, googleTokenExpiry: tokens.expiry_date, picture: userInfo.picture || '' };
+      if (isConnected) {
+        User.findOneAndUpdate(
+          { _id: userInfo.email },
+          { $setOnInsert: { name: userInfo.name, role, email: userInfo.email }, $set: tokenFields },
+          { upsert: true }
+        ).catch(() => {});
+      } else {
+        const idx = memStore.users.findIndex(u => u._id === userInfo.email);
+        if (idx >= 0) Object.assign(memStore.users[idx], tokenFields);
+        else memStore.users.push({ _id: userInfo.email, email: userInfo.email, name: userInfo.name, role, ...tokenFields });
+      }
+    }).catch(() => {});
+
+    if (source === 'medidor') {
+      const medidorUrl = process.env.MEDIDOR_URL || 'https://vedafacil-medidor.vercel.app';
+      const dest = `${medidorUrl}/#google_token=${encodeURIComponent(token)}&google_name=${encodeURIComponent(userInfo.name)}&google_email=${encodeURIComponent(userInfo.email)}`;
+      return res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><script>window.location.replace(${JSON.stringify(dest)})</script></body></html>`);
+    }
+
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><script>window.location.replace(${JSON.stringify(`/?google_token=${token}`)})</script></body></html>`);
+  } catch (err) {
+    console.error('Google OAuth error:', err.message);
+    res.redirect('/login?error=' + encodeURIComponent(err.message.slice(0, 80)));
+  }
+});
+
+app.get('/api/calendar/events', auth, async (req, res) => {
+  try {
+    // Use access token from JWT directly — no DB lookup needed
+    const accessToken = req.user.googleAccessToken;
+    if (!accessToken) return res.json([]);
+
+    const now = new Date();
+    const maxTime = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const params = new URLSearchParams({
+      timeMin: now.toISOString(),
+      timeMax: maxTime.toISOString(),
+      maxResults: '30',
+      singleEvents: 'true',
+      orderBy: 'startTime',
+    });
+
+    const r = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!r.ok) return res.json([]);
+    const data = await r.json();
+
+    const events = (data.items || []).map(e => ({
+      id: e.id,
+      title: e.summary || '',
+      start: e.start?.dateTime || e.start?.date || '',
+      end: e.end?.dateTime || e.end?.date || '',
+      location: e.location || '',
+      description: e.description || '',
+      htmlLink: e.htmlLink || '',
+    }));
+
+    res.json(events);
+  } catch (err) {
+    console.error('Calendar error:', err);
+    res.json([]);
+  }
+});
+
 // ── Config Routes ─────────────────────────────────────────────────────────────
 
 app.get('/api/config/precos', auth, async (req, res) => {
@@ -625,6 +1454,98 @@ app.put('/api/config/precos', auth, async (req, res) => {
     if (!memStore.config) memStore.config = { precos: {} };
     memStore.config.precos = req.body;
     res.json(req.body);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/config/proximo-orcamento', auth, async (req, res) => {
+  try {
+    const cfg = await getConfig();
+    const precos = cfg.precos || cfg;
+    res.json({ numero: precos.numOrcamento || 1 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Usuários Routes ───────────────────────────────────────────────────────────
+
+function adminOnly(req, res, next) {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Acesso negado — somente admin' });
+  next();
+}
+
+app.get('/api/usuarios/me', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const email = req.user.email;
+    if (!email) return res.json(req.user);
+    let user;
+    if (isConnected) user = await User.findById(email);
+    else user = memStore.users.find(u => u._id === email || u.email === email);
+    if (!user) return res.json(req.user);
+    res.json({ id: user._id || user.email, email: user.email, name: user.name, role: user.role, picture: user.picture });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/usuarios', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) {
+      const users = await User.find().select('-googleAccessToken -googleRefreshToken -googleTokenExpiry');
+      return res.json(users.map(u => ({ id: u._id, email: u.email, name: u.name, role: u.role, picture: u.picture })));
+    }
+    res.json(memStore.users.map(u => ({ id: u._id || u.email, email: u.email, name: u.name, role: u.role, picture: u.picture })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/usuarios', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const { email, name, role } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email obrigatório' });
+    const userData = { _id: email, email, name: name || '', role: role || 'medidor' };
+    if (isConnected) {
+      const existing = await User.findById(email);
+      if (existing) return res.status(409).json({ error: 'Usuário já existe' });
+      const created = await User.create(userData);
+      return res.json({ id: created._id, email: created.email, name: created.name, role: created.role });
+    }
+    if (memStore.users.find(u => u._id === email || u.email === email)) {
+      return res.status(409).json({ error: 'Usuário já existe' });
+    }
+    memStore.users.push(userData);
+    res.json({ id: email, email, name: userData.name, role: userData.role });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const { email } = req.params;
+    const { name, role } = req.body;
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (role !== undefined) updates.role = role;
+    if (isConnected) {
+      const updated = await User.findByIdAndUpdate(email, updates, { new: true });
+      if (!updated) return res.status(404).json({ error: 'Usuário não encontrado' });
+      return res.json({ id: updated._id, email: updated.email, name: updated.name, role: updated.role });
+    }
+    const u = memStore.users.find(x => x._id === email || x.email === email);
+    if (!u) return res.status(404).json({ error: 'Usuário não encontrado' });
+    Object.assign(u, updates);
+    res.json({ id: u._id || u.email, email: u.email, name: u.name, role: u.role });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const { email } = req.params;
+    if (isConnected) {
+      await User.findByIdAndDelete(email);
+    } else {
+      memStore.users = memStore.users.filter(u => u._id !== email && u.email !== email);
+    }
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

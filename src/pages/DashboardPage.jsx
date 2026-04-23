@@ -2,9 +2,12 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
 
-function MetricCard({ label, value, sub, color, icon }) {
+function MetricCard({ label, value, sub, color, icon, onClick }) {
   return (
-    <div className="card flex items-start gap-4">
+    <div
+      className={`card flex items-start gap-4 ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}
+      onClick={onClick}
+    >
       <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${color}`}>
         {icon}
       </div>
@@ -107,6 +110,7 @@ export default function DashboardPage() {
           value={medicoesHoje}
           sub={`${data.medicoes.length} total`}
           color="bg-purple-100"
+          onClick={() => navigate('/medicoes')}
           icon={
             <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -119,6 +123,7 @@ export default function DashboardPage() {
           value={orcPendentes}
           sub={`${data.orcamentos.length} total`}
           color="bg-blue-100"
+          onClick={() => navigate('/orcamentos')}
           icon={
             <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -131,6 +136,7 @@ export default function DashboardPage() {
           value={contPendentes}
           sub={`${data.contratos.length} contratos`}
           color="bg-orange-100"
+          onClick={() => navigate('/contratos')}
           icon={
             <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -143,6 +149,7 @@ export default function DashboardPage() {
           value={contAssinados}
           sub="contratos assinados"
           color="bg-green-100"
+          onClick={() => navigate('/contratos')}
           icon={
             <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

@@ -44,6 +44,11 @@ export default function ConfigPage() {
     setSaved(false)
   }
 
+  const handleNumOrcamentoChange = (value) => {
+    setPrecos(prev => ({ ...prev, numOrcamento: Number(value) }))
+    setSaved(false)
+  }
+
   const handleSave = async () => {
     setSaving(true)
     setError('')
@@ -141,6 +146,27 @@ export default function ConfigPage() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Numero do Orcamento */}
+      <div className="card mt-4">
+        <h2 className="font-semibold text-gray-700 mb-4 text-sm uppercase tracking-wide">Numeração de Orçamentos</h2>
+        <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+          <div>
+            <label className="label">Número atual do orçamento</label>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              className="input w-36"
+              value={precos?.numOrcamento ?? 1}
+              onChange={e => handleNumOrcamentoChange(e.target.value)}
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Próximo orçamento será gerado com este número. Altere apenas se necessário.
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Company Info */}

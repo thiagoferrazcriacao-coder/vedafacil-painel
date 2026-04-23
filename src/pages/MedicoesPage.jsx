@@ -21,6 +21,8 @@ export default function MedicoesPage() {
   const [medicoes, setMedicoes] = useState([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
+  const [checked, setChecked] = useState(new Set())
+  const [deleting, setDeleting] = useState(false)
   const [filters, setFilters] = useState({ medidor: '', status: '', dateFrom: '', dateTo: '', search: '' })
 
   useEffect(() => {
@@ -31,24 +33,48 @@ export default function MedicoesPage() {
   }, [])
 
   const filtered = medicoes.filter(m => {
-    if (filters.medidor && m.medidor !== filters.medidor) return false
+    if (filters.medidor && (m.user || m.medidor) !== filters.medidor) return false
     if (filters.status && m.status !== filters.status) return false
     if (filters.search) {
       const q = filters.search.toLowerCase()
-      const match = [m.cliente, m.nomeCliente, m.cidade, m.medidor]
+      const match = [m.cliente, m.nomeCliente, m.cidade, m.user, m.medidor]
         .filter(Boolean).some(v => v.toLowerCase().includes(q))
       if (!match) return false
     }
-    if (filters.dateFrom) {
-      if (new Date(m.receivedAt) < new Date(filters.dateFrom)) return false
+    const ts = m.createdAt || m.receivedAt
+    if (filters.dateFrom && ts) {
+      if (new Date(ts) < new Date(filters.dateFrom)) return false
     }
-    if (filters.dateTo) {
-      if (new Date(m.receivedAt) > new Date(filters.dateTo + 'T23:59:59')) return false
+    if (filters.dateTo && ts) {
+      if (new Date(ts) > new Date(filters.dateTo + 'T23:59:59')) return false
     }
     return true
   })
 
-  const medidores = [...new Set(medicoes.map(m => m.medidor).filter(Boolean))]
+  const medidores = [...new Set(medicoes.map(m => m.user || m.medidor).filter(Boolean))]
+
+  const toggleCheck = (id, e) => {
+    e.stopPropagation()
+    setChecked(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+  const toggleAll = () => {
+    if (checked.size === filtered.length) setChecked(new Set())
+    else setChecked(new Set(filtered.map(m => m.id)))
+  }
+  const handleDeleteSelected = async () => {
+    if (!confirm(`Excluir ${checked.size} medição(ões)?`)) return
+    setDeleting(true)
+    for (const id of checked) {
+      await api.deleteMedicao(id).catch(() => {})
+    }
+    setMedicoes(prev => prev.filter(m => !checked.has(m.id)))
+    setChecked(new Set())
+    setDeleting(false)
+  }
 
   return (
     <div className="flex h-full">
@@ -59,6 +85,15 @@ export default function MedicoesPage() {
             <h1 className="text-2xl font-bold text-gray-800">Medições</h1>
             <p className="text-gray-500 text-sm mt-0.5">{filtered.length} registros</p>
           </div>
+          {checked.size > 0 && (
+            <button
+              onClick={handleDeleteSelected}
+              disabled={deleting}
+              className="btn-danger text-sm ml-4"
+            >
+              {deleting ? 'Excluindo...' : `Excluir ${checked.size} selecionado(s)`}
+            </button>
+          )}
         </div>
 
         {/* Filters */}
@@ -126,6 +161,9 @@ export default function MedicoesPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="px-4 py-3 w-10">
+                      <input type="checkbox" checked={checked.size === filtered.length && filtered.length > 0} onChange={toggleAll} className="rounded" />
+                    </th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Nº</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Data/Hora</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Cliente</th>
@@ -143,17 +181,20 @@ export default function MedicoesPage() {
                       className={`hover:bg-gray-50 cursor-pointer transition-colors ${selected?.id === m.id ? 'bg-blue-50' : ''}`}
                       onClick={() => setSelected(selected?.id === m.id ? null : m)}
                     >
+                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={checked.has(m.id)} onChange={e => toggleCheck(m.id, e)} className="rounded" />
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs text-gray-500">
                         #{String(m.numeroMedicao || '').padStart(3, '0')}
                       </td>
                       <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                        {new Date(m.receivedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        {new Date(m.createdAt || m.receivedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
                       </td>
                       <td className="px-4 py-3 font-medium text-gray-800">
                         {m.cliente || m.nomeCliente || '—'}
                       </td>
                       <td className="px-4 py-3 text-gray-600">{m.cidade || '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{m.medidor || '—'}</td>
+                      <td className="px-4 py-3 text-gray-600">{m.user || m.medidor || '—'}</td>
                       <td className="px-4 py-3 text-gray-600">
                         {Array.isArray(m.locais) ? m.locais.length : '—'}
                       </td>
@@ -186,6 +227,7 @@ export default function MedicoesPage() {
             medicao={selected}
             onClose={() => setSelected(null)}
             onGenerateOrcamento={() => navigate(`/orcamentos/novo/${selected.id}`)}
+            onViewDetail={() => navigate(`/medicoes/${selected.id}`)}
           />
         </div>
       )}
@@ -193,7 +235,7 @@ export default function MedicoesPage() {
   )
 }
 
-function MedicaoPanel({ medicao: m, onClose, onGenerateOrcamento }) {
+function MedicaoPanel({ medicao: m, onClose, onGenerateOrcamento, onViewDetail }) {
   return (
     <div className="p-4">
       <div className="flex items-center justify-between mb-4">
@@ -222,8 +264,8 @@ function MedicaoPanel({ medicao: m, onClose, onGenerateOrcamento }) {
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Informações</h3>
           <div className="space-y-1 text-sm">
-            <div><span className="text-gray-500">Medidor:</span> {m.medidor || '—'}</div>
-            <div><span className="text-gray-500">Data:</span> {new Date(m.receivedAt).toLocaleString('pt-BR')}</div>
+            <div><span className="text-gray-500">Medidor:</span> {m.user || m.medidor || '—'}</div>
+            <div><span className="text-gray-500">Data:</span> {new Date(m.createdAt || m.receivedAt).toLocaleString('pt-BR')}</div>
             <div><span className="text-gray-500">Nº Medição:</span> #{String(m.numeroMedicao || '').padStart(3, '0')}</div>
           </div>
         </div>
@@ -240,7 +282,11 @@ function MedicaoPanel({ medicao: m, onClose, onGenerateOrcamento }) {
                   <div className="font-medium text-gray-700">{local.nome || local.local || `Local ${i + 1}`}</div>
                   {local.descricao && <div className="text-gray-500 text-xs mt-0.5">{local.descricao}</div>}
                   {local.trinca > 0 && <div className="text-xs text-gray-500">Trincas: {local.trinca}m</div>}
+                  {local.juntaFria > 0 && <div className="text-xs text-gray-500">Juntas Frias: {local.juntaFria}m</div>}
                   {local.ralo > 0 && <div className="text-xs text-gray-500">Ralos: {local.ralo}</div>}
+                  {local.juntaDilat > 0 && <div className="text-xs text-gray-500">Jta. Dilat: {local.juntaDilat}m</div>}
+                  {local.ferragem > 0 && <div className="text-xs text-gray-500">Ferragens: {local.ferragem}m</div>}
+                  {local.cortina > 0 && <div className="text-xs text-gray-500">Cortinas: {local.cortina}m²</div>}
                 </div>
               ))}
             </div>
@@ -248,29 +294,31 @@ function MedicaoPanel({ medicao: m, onClose, onGenerateOrcamento }) {
         )}
 
         {/* Photos */}
-        {Array.isArray(m.fotos) && m.fotos.length > 0 && (
-          <div>
-            <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
-              Fotos ({m.fotos.length})
-            </h3>
-            <div className="grid grid-cols-3 gap-1">
-              {m.fotos.slice(0, 6).map((foto, i) => (
-                <img
-                  key={i}
-                  src={foto.url || foto}
-                  alt={`Foto ${i + 1}`}
-                  className="w-full aspect-square object-cover rounded"
-                />
-              ))}
+        {(() => {
+          const todasFotos = (m.locais || []).flatMap(l => (l.fotos || []).map(f => ({ ...f, local: l.nome })))
+          if (todasFotos.length === 0) return null
+          return (
+            <div>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                Fotos ({todasFotos.length})
+              </h3>
+              <div className="grid grid-cols-3 gap-1">
+                {todasFotos.slice(0, 9).map((foto, i) => (
+                  <div key={i} className="relative">
+                    <img src={foto.data || foto.url || foto} alt={`Foto ${i+1}`} className="w-full aspect-square object-cover rounded" />
+                    {foto.local && <div className="text-xs text-gray-400 text-center truncate">{foto.local}</div>}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Observacoes */}
-        {m.observacoes && (
+        {(m.obs || m.observacoes) && (
           <div>
             <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Observações</h3>
-            <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{m.observacoes}</p>
+            <p className="text-sm text-gray-600 bg-gray-50 rounded-lg p-2">{m.obs || m.observacoes}</p>
           </div>
         )}
       </div>
@@ -278,6 +326,9 @@ function MedicaoPanel({ medicao: m, onClose, onGenerateOrcamento }) {
       <div className="mt-6 space-y-2">
         <button className="btn-primary w-full" onClick={onGenerateOrcamento}>
           Gerar Orçamento
+        </button>
+        <button className="btn-secondary w-full text-sm" onClick={() => onViewDetail && onViewDetail()}>
+          Ver detalhes completos
         </button>
       </div>
     </div>

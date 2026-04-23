@@ -67,11 +67,11 @@ export default function MedicaoDetailPage() {
           <h2 className="font-semibold mb-3 text-primary">Informações</h2>
           <dl className="space-y-2 text-sm">
             {[
-              ['Medidor', m.medidor],
-              ['Data', m.receivedAt ? new Date(m.receivedAt).toLocaleString('pt-BR') : null],
+              ['Medidor', m.user || m.medidor],
+              ['Data', (m.createdAt || m.receivedAt) ? new Date(m.createdAt || m.receivedAt).toLocaleString('pt-BR') : null],
               ['Status', m.status],
               ['Locais', Array.isArray(m.locais) ? `${m.locais.length} locais` : null],
-              ['Fotos', Array.isArray(m.fotos) ? `${m.fotos.length} fotos` : null]
+              ['Fotos', (() => { const n = (m.locais||[]).reduce((a,l) => a + (l.fotos||[]).length, 0); return n > 0 ? `${n} fotos` : null })()]
             ].map(([k, v]) => v ? (
               <div key={k} className="flex gap-2">
                 <dt className="font-medium text-gray-500 w-24 flex-shrink-0">{k}:</dt>
@@ -97,19 +97,19 @@ export default function MedicaoDetailPage() {
           </div>
         )}
 
-        {Array.isArray(m.fotos) && m.fotos.length > 0 && (
+        {(m.locais || []).some(l => l.fotos && l.fotos.length > 0) && (
           <div className="card md:col-span-2">
-            <h2 className="font-semibold mb-3 text-primary">Fotos ({m.fotos.length})</h2>
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-              {m.fotos.map((foto, i) => (
-                <img
-                  key={i}
-                  src={foto.url || foto}
-                  alt={`Foto ${i + 1}`}
-                  className="w-full aspect-square object-cover rounded-lg"
-                />
-              ))}
-            </div>
+            <h2 className="font-semibold mb-3 text-primary">Fotos por Local</h2>
+            {(m.locais || []).filter(l => l.fotos && l.fotos.length > 0).map((local, li) => (
+              <div key={li} className="mb-4">
+                <h3 className="text-sm font-medium text-gray-600 mb-2">{local.nome || `Local ${li+1}`} ({local.fotos.length} fotos)</h3>
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                  {local.fotos.map((foto, i) => (
+                    <img key={i} src={foto.data || foto.url || foto} alt={`Foto ${i+1}`} className="w-full aspect-square object-cover rounded-lg cursor-pointer" onClick={() => window.open(foto.data || foto.url || foto, '_blank')} />
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
