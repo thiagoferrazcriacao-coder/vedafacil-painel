@@ -1,3 +1,3 @@
-// Vedafácil API — Vercel Serverless entry point — build: 2
+// Vedafacil API - Vercel Serverless
 import app from '../server.js';
 export default app;
