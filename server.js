@@ -537,9 +537,6 @@ const gvfLogo = GVF_SEAL_LOGO_B64
   const gvfGalao = GVF_GALAO_B64
     ? `<img src="data:image/png;base64,${GVF_GALAO_B64}" style="width:100%;max-width:220px;height:auto;display:block;margin:6px auto 0;border-radius:6px;" alt="GVF SEAL Galão">`
     : '';
-  const gvfGalao = GVF_GALAO_B64
-    ? `<img src="data:image/png;base64,${GVF_GALAO_B64}" style="width:100%;max-width:320px;height:auto;display:block;margin:0 auto;border-radius:6px;" alt="GVF SEAL Galão">`
-    : '';
 
   const locaisComFotos = (o.locais || []).filter(l => l.fotos && l.fotos.length > 0);
   const photoPages = locaisComFotos.map((l) =>
