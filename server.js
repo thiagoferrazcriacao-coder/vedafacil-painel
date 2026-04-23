@@ -1448,9 +1448,9 @@ app.post('/api/contratos/:id/zapsign', auth, async (req, res) => {
     const token = process.env.ZAPSIGN_API_TOKEN;
     if (!token) return res.status(400).json({ error: 'ZAPSIGN_API_TOKEN not configured' });
 
-    const ZAPSIGN_BASE = 'https://sandbox.api.zapsign.com.br/api/v1';
+    const ZAPSIGN_BASE = 'https://api.zapsign.com.br/api/v1';
 
-    console.log('[ZapSign] Sending contrato', req.params.id, '- base URL:', ZAPSIGN_BASE);
+    console.log('[ZapSign] Sending contrato', req.params.id, '(sandbox mode)');
 
     let sendMethod = 'base64';
     let base64Pdf = '';
@@ -1469,6 +1469,7 @@ app.post('/api/contratos/:id/zapsign', auth, async (req, res) => {
     const baseUrl = `${protocol}://${host}`;
 
     const docPayload = {
+      sandbox: true,
       name: `Contrato Vedafácil - ${c.cliente}`,
       signers: [{ name: c.sindico || c.ac || c.cliente, email: req.body.email || c.emailCliente || '' }]
     };
