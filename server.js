@@ -621,13 +621,15 @@ ${sec('1','MÉTODO DE IMPERMEABILIZAÇÃO REPARATIVA')}
 
 ${sec('2','PROPRIEDADES DO GVF SEAL')}
 <div style="display:flex;gap:14px;margin:8px 0;">
-  ${gvfLogo ? `<div style="flex-shrink:0;text-align:center;">${gvfLogo}</div>` : ''}
   <div class="bt" style="flex:1;">
     <p>O GVF Seal possui viscosidade ultra baixa que possui altíssima penetração em trincas capilares. Após a cura, o gel forma uma barreira flexível e impermeável que preenche trincas, rachaduras, buracos, nichos de concretagem, fissuras, etc.</p>
     <p>O gel formado é inalterável ao ataque de agentes químicos ou biológicos, assim como também aos sais presentes nas estruturas. Além disso, é hidroexpansivo: Em períodos de seca, diminui seu volume, mas sem afetar a membrana impermeável.</p>
     <p>Em contato com água, o produto reabsorve a mesma recuperando seu volume inicial. Este ciclo pode se repetir inúmeras vezes sem afetar as propriedades impermeáveis.</p>
   </div>
-  ${gvfGalao ? `<div style="flex-shrink:0;width:200px;">${gvfGalao.replace('max-width:360px','max-width:200px')}</div>` : ''}
+  <div style="flex-shrink:0;width:200px;display:flex;flex-direction:column;align-items:center;gap:8px;">
+    ${gvfLogo ? `<div style="text-align:center;">${gvfLogo}</div>` : ''}
+    ${gvfGalao ? `<div>${gvfGalao.replace('max-width:440px','max-width:200px')}</div>` : ''}
+  </div>
 </div>
 <div class="feats">
   <div>PRODUTO BICOMPONENTE</div><div>HIDROEXPANSIVO E HIDROABSORVENTE</div>
@@ -637,30 +639,11 @@ ${sec('2','PROPRIEDADES DO GVF SEAL')}
 ${FOOTER}
 </div>
 
-<!-- PAGE 2 -->
-<div class="pg pb">
-${LOGO_HTML}
-
-${sec('3','TIPOS DE INFILTRAÇÕES')}
-<div style="text-align:center;margin:10px 0;">
-  ${gvfGalao ? `<div style="margin-bottom:8px;">${gvfGalao.replace('max-width:440px','max-width:380px')}</div>` : ''}
-  <div style="display:flex;justify-content:center;gap:20px;margin:8px 0;">
-    <div style="text-align:center;font-size:10px;font-weight:bold;">Trinca<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(metros)</span></div>
-    <div style="text-align:center;font-size:10px;font-weight:bold;">Junta Fria<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(metros)</span></div>
-    <div style="text-align:center;font-size:10px;font-weight:bold;">Ralo<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(unid.)</span></div>
-    <div style="text-align:center;font-size:10px;font-weight:bold;">Junta de Dilatação<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(metros)</span></div>
-    <div style="text-align:center;font-size:10px;font-weight:bold;">Cortina<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(m²)</span></div>
-    <div style="text-align:center;font-size:10px;font-weight:bold;">Tratam. Ferragem<br><span style="font-size:9px;font-weight:normal;font-style:italic;">(metros)</span></div>
-  </div>
-</div>
-${FOOTER}
-</div>
-
 <!-- PAGE 2b -->
 <div class="pg pb">
 ${LOGO_HTML}
 
-${sec('4','GARANTIA')}
+${sec('3','GARANTIA')}
 <div class="gtee">
   <div style="width:90px;flex-shrink:0;text-align:center;">
     ${seloImg}
@@ -680,7 +663,7 @@ ${FOOTER}
 <!-- PAGE 3 -->
 <div class="pg pb">
 ${LOGO_HTML}
-${sec('5','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
+${sec('4','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
 <div style="font-size:10.5px;line-height:1.65;">
   <p><strong><u>• INÍCIO</u></strong></p>
   <p>Mapeamento dos locais a serem tratados e confecção das imagens (ANTES).</p>
@@ -702,7 +685,7 @@ ${sec('5','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
   <p>✓ Providenciar liberação da área a ser trabalhada, acesso desobstruído e livre de circulação de pessoas.</p>
 </div>
 
-${sec('6','LOCALIZAÇÃO')}
+${sec('5','LOCALIZAÇÃO')}
 <table class="loc">
   <thead>
     <tr>
@@ -736,7 +719,7 @@ ${FOOTER}
 <!-- PAGE 4 -->
 <div class="pg pb">
 ${LOGO_HTML}
-${sec('7','VALORES')}
+${sec('6','VALORES')}
 <table class="val">
   <thead>
     <tr>
@@ -751,7 +734,7 @@ ${sec('7','VALORES')}
   <tbody>${valuesRows}</tbody>
 </table>
 
-${sec('8','CONDIÇÕES DE PAGAMENTO')}
+${sec('7','CONDIÇÕES DE PAGAMENTO')}
 
 <p style="text-align:center;font-weight:bold;font-size:11px;margin-bottom:4px;">Proposta</p>
 <table class="pay">
@@ -789,7 +772,7 @@ ${sec('8','CONDIÇÕES DE PAGAMENTO')}
 
 <p style="font-style:italic;font-size:10px;margin:8px 0;">${obsGeral}</p>
 
-${sec('9','INFORMAÇÕES ADICIONAIS')}
+${sec('8','INFORMAÇÕES ADICIONAIS')}
 <p style="font-size:11px;margin:8px 0;">
   &rarr; O prazo de execução desta obra será de:
   <span style="display:inline-block;min-width:36px;border-bottom:1px solid #333;text-align:center;font-weight:bold;margin:0 6px;">${prazoExecucao}</span>
