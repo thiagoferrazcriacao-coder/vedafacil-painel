@@ -1448,9 +1448,7 @@ app.post('/api/contratos/:id/zapsign', auth, async (req, res) => {
     const token = process.env.ZAPSIGN_API_TOKEN;
     if (!token) return res.status(400).json({ error: 'ZAPSIGN_API_TOKEN not configured' });
 
-    const ZAPSIGN_BASE = process.env.ZAPSIGN_SANDBOX === 'true'
-      ? 'https://sandbox.api.zapsign.com.br/api/v1'
-      : 'https://api.zapsign.com.br/api/v1';
+    const ZAPSIGN_BASE = 'https://sandbox.api.zapsign.com.br/api/v1';
 
     console.log('[ZapSign] Sending contrato', req.params.id, '- base URL:', ZAPSIGN_BASE);
 
