@@ -60,7 +60,9 @@ export default function ContratoFormPage() {
     setError('')
     try {
       await handleSave()
-      const res = await api.sendToZapSign(id, c.emailCliente || '')
+      const email = (c.emailCliente || '').trim()
+      if (!email) { alert('Preencha o E-mail do Signatario em Dados do Cliente'); setZapsignLoading(false); return }
+      const res = await api.sendToZapSign(id, email, c.sindico || c.ac || c.cliente)
       setC(prev => ({ ...prev, zapsignDocId: res.docToken, zapsignSignUrl: res.signUrl }))
       if (res.signUrl) {
         alert(`Contrato enviado! Link de assinatura:\n${res.signUrl}`)

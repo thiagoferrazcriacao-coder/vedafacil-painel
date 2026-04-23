@@ -59,7 +59,7 @@ export const api = {
   getContrato: (id) => request('GET', `/contratos/${id}`),
   createContrato: (data) => request('POST', '/contratos', data),
   updateContrato: (id, data) => request('PUT', `/contratos/${id}`, data),
-  sendToZapSign: (id, email) => request('POST', `/contratos/${id}/zapsign`, { email }),
+  sendToZapSign: (id, email, nomeSigner) => request('POST', `/zapsign-send`, { contratoId: id, email, nomeSigner }),
   getContratoPdfUrl: (id) => `${BASE}/contratos/${id}/pdf?token=${encodeURIComponent(getToken() || '')}`,
 
   // Config
