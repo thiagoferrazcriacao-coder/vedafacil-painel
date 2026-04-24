@@ -42,6 +42,7 @@ export const api = {
   getMedicoes: () => request('GET', '/medicoes'),
   getMedicao: (id) => request('GET', `/medicoes/${id}`),
   updateMedicaoStatus: (id, status) => request('PATCH', `/medicoes/${id}/status`, { status }),
+  updateMedicao: (id, data) => request('PUT', `/medicoes/${id}`, data),
 
   // Orcamentos
   getOrcamentos: () => request('GET', '/orcamentos'),

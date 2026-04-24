@@ -294,6 +294,22 @@ app.get('/api/medicoes/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.put('/api/medicoes/:id', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const allowed = ['cliente','nomeCliente','ac','endereco','cidade','cep','celular','telefone','locais','obs'];
+    const update = {};
+    allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
+    if (isConnected) {
+      const m = await Medicao.findByIdAndUpdate(req.params.id, update, { new: true });
+      return res.json(m);
+    }
+    const idx = memStore.medicoes.findIndex(x => x._id === req.params.id);
+    if (idx !== -1) Object.assign(memStore.medicoes[idx], update);
+    res.json(memStore.medicoes[idx]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.patch('/api/medicoes/:id/status', auth, async (req, res) => {
   try {
     await connectDB();
