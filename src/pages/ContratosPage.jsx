@@ -5,6 +5,7 @@ import { api } from '../api/client.js'
 const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
 
 const STATUS = {
+  rascunho: { label: 'Rascunho', color: 'bg-gray-100 text-gray-700' },
   aguardando_assinatura: { label: 'Aguardando Assinatura', color: 'bg-orange-100 text-orange-800' },
   assinado: { label: 'Assinado', color: 'bg-green-100 text-green-800' }
 }
@@ -81,6 +82,7 @@ export default function ContratosPage() {
         />
         <select className="input w-52" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="">Todos status</option>
+          <option value="rascunho">Rascunho</option>
           <option value="aguardando_assinatura">Aguardando Assinatura</option>
           <option value="assinado">Assinado</option>
         </select>
@@ -120,7 +122,7 @@ export default function ContratosPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map(c => {
-                  const st = STATUS[c.status] || STATUS.aguardando_assinatura
+                  const st = STATUS[c.status] || STATUS.rascunho
                   return (
                     <tr
                       key={c.id}
