@@ -9,6 +9,7 @@ import OrcamentosPage from './pages/OrcamentosPage.jsx'
 import OrcamentoFormPage from './pages/OrcamentoFormPage.jsx'
 import ContratosPage from './pages/ContratosPage.jsx'
 import ContratoFormPage from './pages/ContratoFormPage.jsx'
+import GarantiasPage from './pages/GarantiasPage.jsx'
 import ConfigPage from './pages/ConfigPage.jsx'
 import UsersPage from './pages/UsersPage.jsx'
 
@@ -101,6 +102,7 @@ export default function App() {
                   <Route path="/orcamentos/:id" element={<OrcamentoFormPage />} />
                   <Route path="/contratos" element={<ContratosPage />} />
                   <Route path="/contratos/:id" element={<ContratoFormPage />} />
+                  <Route path="/garantias" element={<GarantiasPage />} />
                   <Route path="/config" element={<ConfigPage />} />
                   <Route path="/usuarios" element={<UsersPage />} />
                 </Routes>

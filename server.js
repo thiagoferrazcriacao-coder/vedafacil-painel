@@ -151,6 +151,7 @@ const contratoSchema = new mongoose.Schema({
   itens: [mongoose.Schema.Types.Mixed],
   cronograma: [{ local: String, dataInicio: String, dataFim: String }],
   zapsignDocId: String, zapsignSignUrl: String, assinadoEm: Number,
+  garantiaEnviadaEm: Number,
 }, { _id: false });
 
 const userSchema = new mongoose.Schema({
@@ -1308,6 +1309,22 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#222;line-heigh
 </body>
 </html>`;
 }
+
+app.post('/api/contratos/:id/garantia/marcar-enviada', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const ts = Date.now();
+    if (isConnected) {
+      const c = await Contrato.findByIdAndUpdate(req.params.id, { garantiaEnviadaEm: ts }, { new: true });
+      if (!c) return res.status(404).json({ error: 'Not found' });
+      return res.json(c);
+    }
+    const c = memStore.contratos.find(x => x._id === req.params.id);
+    if (!c) return res.status(404).json({ error: 'Not found' });
+    c.garantiaEnviadaEm = ts;
+    res.json(c);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 app.get('/api/contratos/:id/garantia', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1] || req.query.token;

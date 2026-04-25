@@ -64,6 +64,7 @@ export const api = {
   getContratoPdfUrl: (id) => `${BASE}/contratos/${id}/pdf?token=${encodeURIComponent(getToken() || '')}`,
   getGarantiaPdfUrl: (id) => `${BASE}/contratos/${id}/garantia?token=${encodeURIComponent(getToken() || '')}`,
   getArtPdfUrl: (id) => `${BASE}/contratos/${id}/art?token=${encodeURIComponent(getToken() || '')}`,
+  marcarGarantiaEnviada: (id) => request('POST', `/contratos/${id}/garantia/marcar-enviada`),
 
   // Config
   getPrecos: () => request('GET', '/config/precos'),
