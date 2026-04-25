@@ -156,6 +156,18 @@ export default function ContratoFormPage() {
           >
             Gerar PDF
           </button>
+          <button
+            onClick={() => window.open(api.getGarantiaPdfUrl(id), '_blank')}
+            className="btn-secondary"
+          >
+            Cert. Garantia
+          </button>
+          <button
+            onClick={() => window.open(api.getArtPdfUrl(id), '_blank')}
+            className="btn-secondary"
+          >
+            ART
+          </button>
           {c.status !== 'assinado' && (
             <button
               onClick={handleZapSign}
@@ -518,6 +530,12 @@ export default function ContratoFormPage() {
         </button>
         <button onClick={() => window.open(api.getContratoPdfUrl(id), '_blank')} className="btn-secondary">
           Gerar PDF
+        </button>
+        <button onClick={() => window.open(api.getGarantiaPdfUrl(id), '_blank')} className="btn-secondary">
+          Cert. Garantia
+        </button>
+        <button onClick={() => window.open(api.getArtPdfUrl(id), '_blank')} className="btn-secondary">
+          ART
         </button>
         {c.status !== 'assinado' && (
           <button onClick={handleZapSign} disabled={zapsignLoading} className="btn-primary">

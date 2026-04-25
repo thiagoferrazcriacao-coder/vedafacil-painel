@@ -15,6 +15,19 @@ const DEFAULT_ITENS = [
   { tipo: 'mobilizacao', descricao: 'Mobilização', quantidade: 1, unidade: 'unid', valorUnit: 300, subtotal: 300 }
 ]
 
+function calcObra(itens) {
+  const get = (tipo) => Number((itens || []).find(i => i.tipo === tipo)?.quantidade) || 0
+  const trinca = get('trinca')
+  const juntaFria = get('juntaFria')
+  const juntaDilat = get('juntaDilat')
+  const linear = trinca + juntaFria + juntaDilat
+  return {
+    diasTrabalho: parseFloat((linear / 9).toFixed(2)),
+    consumoProduto: parseFloat((trinca * 1.5 + (juntaFria + juntaDilat) * 1.0).toFixed(1)),
+    qtdInjetores: Math.ceil(linear * 4),
+  }
+}
+
 function recalculate(orc) {
   const itens = (orc.itens || []).map(item => ({
     ...item,
@@ -29,8 +42,9 @@ function recalculate(orc) {
   const saldo = Math.max(0, totalLiquido - entradaValor)
   const parcelas = Math.max(1, Number(orc.parcelas) || 1)
   const valorParcela = saldo / parcelas
+  const obra = calcObra(itens)
 
-  return { ...orc, itens, totalBruto, totalLiquido, saldo, valorParcela }
+  return { ...orc, itens, totalBruto, totalLiquido, saldo, valorParcela, ...obra }
 }
 
 function Field({ label, children }) {
@@ -349,6 +363,31 @@ export default function OrcamentoFormPage() {
           </div>
         </div>
       </section>
+
+      {/* ─── Cálculo de Obra ─── */}
+      {(orc.diasTrabalho > 0 || orc.consumoProduto > 0 || orc.qtdInjetores > 0) && (
+        <section className="card mb-4 bg-amber-50 border border-amber-200">
+          <h2 className="font-semibold text-amber-800 mb-3 flex items-center gap-2">
+            <span className="w-6 h-6 rounded-full bg-amber-600 text-white text-xs flex items-center justify-center">⚙</span>
+            Cálculo de Obra
+          </h2>
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div className="bg-white rounded-lg p-3 border border-amber-200">
+              <div className="text-2xl font-bold text-amber-700">{orc.diasTrabalho?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+              <div className="text-xs text-gray-500 mt-1">Dias de Trabalho</div>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-amber-200">
+              <div className="text-2xl font-bold text-amber-700">{orc.consumoProduto?.toLocaleString('pt-BR', { minimumFractionDigits: 1 })} L</div>
+              <div className="text-xs text-gray-500 mt-1">Consumo GVF Seal</div>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-amber-200">
+              <div className="text-2xl font-bold text-amber-700">{orc.qtdInjetores}</div>
+              <div className="text-xs text-gray-500 mt-1">Injetores</div>
+            </div>
+          </div>
+          <p className="text-xs text-amber-700 mt-2">Calculado automaticamente a partir das quantidades acima.</p>
+        </section>
+      )}
 
       {/* ─── Section 4: Discount & Payment ─── */}
       <section className="card mb-4">

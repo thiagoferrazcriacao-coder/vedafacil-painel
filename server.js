@@ -51,6 +51,10 @@ const SIMBOLO_B64 = existsSync(path.join(__dirname, 'simbolo_b64.txt'))
   ? readFileSync(path.join(__dirname, 'simbolo_b64.txt'), 'utf8').trim()
   : '';
 
+const ASSINATURA_B64 = existsSync(path.join(__dirname, 'assinatura_b64.txt'))
+  ? readFileSync(path.join(__dirname, 'assinatura_b64.txt'), 'utf8').trim()
+  : '';
+
 const app = express();
 
 // MongoDB connection
@@ -105,6 +109,9 @@ const orcamentoSchema = new mongoose.Schema({
   valorParcela: { type: Number, default: 0 },
   obsAdicionais: String,
   locais: [mongoose.Schema.Types.Mixed],
+  diasTrabalho: { type: Number, default: 0 },
+  consumoProduto: { type: Number, default: 0 },
+  qtdInjetores: { type: Number, default: 0 },
   prazoExecucao: { type: Number, default: 3 },
   garantia: { type: Number, default: 15 },
   condicaoPgto1Obs: { type: String, default: '*Pgto a vista, na assinatura do contrato.' },
@@ -342,6 +349,17 @@ app.get('/api/orcamentos', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Fórmulas extraídas da planilha "3071 - Condomínio Seleto.xls", Aba 1 (Informações)
+// 9m de injeção linear por dia | GVF Seal: 1.5L/m trinca, 1.0L/m junta | 4 injetores/m (1 a cada 25cm)
+function calcObra(totals) {
+  const linear = (totals.trinca || 0) + (totals.juntaFria || 0) + (totals.juntaDilat || 0);
+  return {
+    diasTrabalho: parseFloat((linear / 9).toFixed(2)),
+    consumoProduto: parseFloat(((totals.trinca || 0) * 1.5 + ((totals.juntaFria || 0) + (totals.juntaDilat || 0)) * 1.0).toFixed(1)),
+    qtdInjetores: Math.ceil(linear * 4),
+  };
+}
+
 app.post('/api/orcamentos', auth, async (req, res) => {
   try {
     await connectDB();
@@ -367,6 +385,8 @@ app.post('/api/orcamentos', auth, async (req, res) => {
         totals.cortina += l.cortina || 0;
       });
     }
+
+    const obra = calcObra(totals);
 
     const itens = [
       { tipo: 'trinca', descricao: 'Trincas', quantidade: totals.trinca, unidade: 'm', valorUnit: precos.trinca, subtotal: totals.trinca * precos.trinca },
@@ -407,6 +427,9 @@ app.post('/api/orcamentos', auth, async (req, res) => {
       entrada: 0, saldo: totalBruto, parcelas: 1, valorParcela: totalBruto,
       obsAdicionais: '',
       locais: medicao?.locais || [],
+      diasTrabalho: obra.diasTrabalho,
+      consumoProduto: obra.consumoProduto,
+      qtdInjetores: obra.qtdInjetores,
     };
 
     if (isConnected) {
@@ -818,6 +841,19 @@ ${sec('8','INFORMAÇÕES ADICIONAIS')}
   <span style="display:inline-block;min-width:36px;border-bottom:1px solid #333;text-align:center;font-weight:bold;margin:0 6px;">${prazoExecucao}</span>
   dia (s) útil(eis).
 </p>
+${(o.diasTrabalho || o.consumoProduto || o.qtdInjetores) ? `
+<table style="border-collapse:collapse;font-size:10.5px;margin:10px 0;">
+  <thead><tr style="background:#e87722;color:white;">
+    <th style="padding:5px 14px;text-align:left;">Cálculo de Obra</th>
+    <th style="padding:5px 18px;text-align:center;">Qtd.</th>
+    <th style="padding:5px 12px;text-align:left;">Unidade</th>
+  </tr></thead>
+  <tbody>
+    <tr><td style="padding:4px 14px;border:1px solid #ddd;">Dias de Trabalho</td><td style="padding:4px 18px;border:1px solid #ddd;text-align:center;">${(o.diasTrabalho||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td><td style="padding:4px 12px;border:1px solid #ddd;">dias</td></tr>
+    <tr><td style="padding:4px 14px;border:1px solid #ddd;">Consumo GVF Seal</td><td style="padding:4px 18px;border:1px solid #ddd;text-align:center;">${(o.consumoProduto||0).toLocaleString('pt-BR',{minimumFractionDigits:1})}</td><td style="padding:4px 12px;border:1px solid #ddd;">litros</td></tr>
+    <tr><td style="padding:4px 14px;border:1px solid #ddd;">Qtd. de Injetores</td><td style="padding:4px 18px;border:1px solid #ddd;text-align:center;">${o.qtdInjetores||0}</td><td style="padding:4px 12px;border:1px solid #ddd;">unid</td></tr>
+  </tbody>
+</table>` : ''}
 <p style="margin:12px 0;">A <strong>VEDAFACIL</strong> agradece sua atenção e fica ao seu dispor para maiores esclarecimentos.</p>
 <p style="margin-bottom:14px;">Atenciosamente,</p>
 
@@ -1139,6 +1175,307 @@ app.get('/api/contratos/:id/pdf', async (req, res) => {
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.send(buildContratoPdfHtml(c));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Certificado de Garantia PDF ───────────────────────────────────────────────
+
+function buildGarantiaPdfHtml(c) {
+  const fmtDate = (d) => {
+    if (!d) return new Date().toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' });
+    const dt = new Date(d.includes('-') && d.length === 10 ? d + 'T12:00:00' : d);
+    return isNaN(dt.getTime()) ? d : dt.toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' });
+  };
+
+  const anos = c.garantia || 15;
+  const anosExt = extenso(anos);
+  const nContrato = c.numero ? String(c.numero).padStart(4, '0') : '___';
+  const cliente = c.razaoSocial || c.cliente || '___';
+  const endereco = c.endereco || '';
+  const cidade = c.cidade || '';
+  const cnpj = c.cnpjCliente || '';
+  const dataEmissao = fmtDate(c.dataTermino || c.dataAssinatura || '');
+  const foro = c.foro || 'Rio de Janeiro';
+
+  // Build trabalho description from locais
+  const locais = c.locais || [];
+  const descLocais = locais.map(l => {
+    const partes = [];
+    if (l.trinca > 0) partes.push(`${l.trinca}m de trinca`);
+    if (l.juntaFria > 0) partes.push(`${l.juntaFria}m de junta fria`);
+    if (l.ralo > 0) partes.push(`${l.ralo} ralo(s)`);
+    if (l.juntaDilat > 0) partes.push(`${l.juntaDilat}m de junta de dilatação`);
+    if (l.ferragem > 0) partes.push(`${l.ferragem}m de tratamento de ferragem`);
+    if (l.cortina > 0) partes.push(`${l.cortina}m² de cortina`);
+    return partes.length ? `${l.nome || 'Local'}: ${partes.join(', ')}` : null;
+  }).filter(Boolean).join('; ');
+
+  const logoImg = LOGO_B64
+    ? `<img src="data:image/png;base64,${LOGO_B64}" style="max-width:240px;height:auto;display:block;margin:0 auto;" alt="Vedafácil">`
+    : `<div style="font-size:28px;font-weight:900;color:#e87722;text-align:center;">VEDAFÁCIL</div>`;
+
+  const assinaturaImg = ASSINATURA_B64
+    ? `<img src="data:image/png;base64,${ASSINATURA_B64}" style="max-width:200px;height:60px;object-fit:contain;display:block;margin:0 auto;" alt="Assinatura">`
+    : `<div style="height:60px;"></div>`;
+
+  const seloSrc = anos <= 7 ? SELO7_B64 : SELO15_B64;
+  const seloImg = seloSrc
+    ? `<img src="data:image/png;base64,${seloSrc}" style="width:90px;height:auto;" alt="${anos} anos">`
+    : `<div style="width:80px;height:80px;border-radius:50%;border:3px solid #c8942a;background:linear-gradient(135deg,#f5d060,#c8942a);display:flex;align-items:center;justify-content:center;color:white;font-weight:900;font-size:24px;">${anos}</div>`;
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8">
+<title>Certificado_Garantia_${nContrato}_${cliente.replace(/[^a-zA-Z0-9]/g,'_')}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#222;line-height:1.7}
+.pg{padding:14mm 18mm;max-width:210mm;margin:0 auto}
+.title{text-align:center;font-size:20px;font-weight:900;color:#e87722;letter-spacing:2px;margin:18px 0 6px;text-transform:uppercase}
+.subtitle{text-align:center;font-size:11px;color:#555;margin-bottom:18px;letter-spacing:1px}
+.client-box{border:1.5px solid #e87722;border-radius:4px;padding:10px 14px;margin:14px 0;font-size:11px}
+.client-box strong{color:#e87722;font-size:10px;text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:4px}
+.clause{margin:10px 0;font-size:11px;text-align:justify}
+.clause-num{font-weight:bold;color:#e87722}
+.divider{border:none;border-top:1px solid #ddd;margin:16px 0}
+.sig-block{text-align:center;margin-top:30px}
+.sig-line{border-top:1px solid #333;width:280px;margin:8px auto 4px;padding-top:5px;font-size:10px;font-weight:bold}
+.footer{text-align:center;font-size:8.5px;color:#666;margin-top:16px;padding-top:8px;border-top:1px solid #ccc}
+.download-btn{position:fixed;top:12px;right:12px;z-index:9999;background:#e87722;color:white;border:none;padding:10px 20px;font-size:14px;font-weight:700;border-radius:8px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
+@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:0;size:A4}.download-btn{display:none!important}}
+</style>
+</head>
+<body>
+<button class="download-btn" onclick="window.print()">⬇ Salvar como PDF</button>
+<div class="pg">
+  ${logoImg}
+  <div class="title">Certificado de Garantia</div>
+  <div class="subtitle">Nº ${nContrato}</div>
+  <hr class="divider">
+
+  <div class="client-box">
+    <strong>Contratante</strong>
+    <div><b>${cliente}</b>${cnpj ? ` &nbsp;|&nbsp; CNPJ: ${cnpj}` : ''}</div>
+    ${endereco ? `<div>${endereco}${cidade ? ', ' + cidade : ''}</div>` : ''}
+  </div>
+
+  <div class="clause">
+    <span class="clause-num">1.</span> A empresa <strong>T. R. FERRAZ (VEDAFACIL)</strong> oferece garantia limitada por um período de
+    <strong>${anos} (${anosExt}) anos</strong>, nas áreas tratadas e especificadas no Contrato de Prestação de
+    Serviço nº <strong>${nContrato}</strong>, contada a partir da data de emissão desse certificado.
+  </div>
+
+  <div class="clause">
+    <span class="clause-num">2.</span> <b>Trabalho realizado:</b> Serviço de hidrojateamento para selamento de trincas com problemas de
+    infiltração, por meio de pressão negativa com gel calafetador de alta flexibilidade (GVF SEAL).
+    ${descLocais ? `<br><span style="color:#555;font-size:10.5px;">Locais tratados: ${descLocais}.</span>` : ''}
+  </div>
+
+  <div class="clause">
+    <span class="clause-num">3.</span> Cessa a garantia caso sejam realizadas obras posteriores ao tratamento e estas obras
+    afetem as condições da estrutura nas regiões especificadas neste certificado.
+  </div>
+
+  <div class="clause">
+    <span class="clause-num">4.</span> A garantia não cobre infiltrações em áreas não tratadas, danos causados por terceiros,
+    alterações estruturais ou eventos de força maior.
+  </div>
+
+  <hr class="divider">
+
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:20px;">
+    <div>
+      <p style="font-size:10.5px;">${foro}, ${dataEmissao}</p>
+    </div>
+    <div style="text-align:center;">
+      ${seloImg}
+    </div>
+  </div>
+
+  <div class="sig-block" style="margin-top:24px;">
+    ${assinaturaImg}
+    <div class="sig-line">Thiago Ramos Ferraz</div>
+    <div style="font-size:9.5px;color:#555;">T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZAÇÃO LTDA ME</div>
+    <div style="font-size:9.5px;color:#555;">CNPJ: 23.606.470/0001-07</div>
+  </div>
+
+  <div class="footer">
+    <strong style="color:#e87722;">Eliminamos Infiltrações Sem Quebrar!</strong><br>
+    CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
+  </div>
+</div>
+<script>function downloadPDF(){window.print()}</script>
+</body>
+</html>`;
+}
+
+app.get('/api/contratos/:id/garantia', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1] || req.query.token;
+  if (!token) return res.status(401).json({ error: 'Token required' });
+  try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); }
+  catch { return res.status(401).json({ error: 'Invalid token' }); }
+  try {
+    await connectDB();
+    let c;
+    if (isConnected) c = await Contrato.findById(req.params.id);
+    else c = memStore.contratos.find(x => x._id === req.params.id);
+    if (!c) return res.status(404).json({ error: 'Not found' });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(buildGarantiaPdfHtml(c));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── ART PDF ───────────────────────────────────────────────────────────────────
+
+function buildArtPdfHtml(c) {
+  const fmtDate = (d) => {
+    if (!d) return '___';
+    const dt = new Date(d.includes('-') && d.length === 10 ? d + 'T12:00:00' : d);
+    return isNaN(dt.getTime()) ? d : dt.toLocaleDateString('pt-BR');
+  };
+  const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+
+  const nContrato = c.numero ? String(c.numero).padStart(4, '0') : '___';
+  const cliente = c.razaoSocial || c.cliente || '___';
+  const cnpj = c.cnpjCliente || '___';
+  const endereco = c.endereco || '___';
+  const cidade = c.cidade || '___';
+  const cep = c.cep || '___';
+  const dataInicio = fmtDate(c.dataInicio);
+  const dataTermino = fmtDate(c.dataTermino);
+
+  const totals = { trinca:0, juntaFria:0, ralo:0, juntaDilat:0, cortina:0 };
+  (c.locais || []).forEach(l => {
+    totals.trinca += l.trinca || 0;
+    totals.juntaFria += l.juntaFria || 0;
+    totals.ralo += l.ralo || 0;
+    totals.juntaDilat += l.juntaDilat || 0;
+    totals.cortina += l.cortina || 0;
+  });
+
+  const descLocais = (c.locais || []).map(l => {
+    const partes = [];
+    if (l.trinca > 0) partes.push(`${l.trinca} metro(s) de trinca`);
+    if (l.juntaFria > 0) partes.push(`${l.juntaFria} metro(s) de junta fria`);
+    if (l.ralo > 0) partes.push(`${l.ralo} ralo(s)`);
+    if (l.juntaDilat > 0) partes.push(`${l.juntaDilat} metro(s) de junta de dilatação`);
+    if (l.cortina > 0) partes.push(`${l.cortina}m² de cortina`);
+    return partes.length ? `${l.nome || 'Local'}: ${partes.join(' - ')}` : null;
+  }).filter(Boolean).join('; ');
+
+  const descServico = `EXECUÇÃO DE SERVIÇO DE HIDROJATEAMENTO, CALAFETAÇÃO E SELADOR DE INFILTRAÇÕES UTILIZANDO O MÉTODO DE INJEÇÃO CAPILAR QUÍMICA FORÇADA EM ESTRUTURA DE CONCRETO MACIÇO.${descLocais ? ' LOCAL: ' + descLocais + '.' : ''}`;
+
+  const logoImg = LOGO_B64
+    ? `<img src="data:image/png;base64,${LOGO_B64}" style="max-width:200px;height:auto;display:block;" alt="Vedafácil">`
+    : `<div style="font-size:22px;font-weight:900;color:#e87722;">VEDAFÁCIL</div>`;
+
+  const row = (label, value) => `<tr><td class="lbl">${label}</td><td class="val">${value}</td></tr>`;
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8">
+<title>ART_${nContrato}_${cliente.replace(/[^a-zA-Z0-9]/g,'_')}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#222;line-height:1.6}
+.pg{padding:12mm 16mm;max-width:210mm;margin:0 auto}
+h1{font-size:14px;font-weight:900;color:#e87722;text-transform:uppercase;letter-spacing:1px;margin:14px 0 10px;border-bottom:2px solid #e87722;padding-bottom:4px}
+h2{font-size:11px;font-weight:bold;background:#e87722;color:white;padding:5px 10px;margin:12px 0 6px;border-radius:2px}
+table.info{width:100%;border-collapse:collapse;font-size:10.5px;margin:4px 0}
+table.info td{padding:4px 6px;border:1px solid #ccc}
+table.info .lbl{background:#f5f5f5;font-weight:bold;width:38%;color:#444}
+table.info .val{width:62%}
+table.qty{width:100%;border-collapse:collapse;font-size:10.5px;margin:6px 0}
+table.qty th{background:#e87722;color:white;padding:5px 8px;text-align:center;font-weight:bold}
+table.qty td{border:1px solid #ccc;padding:5px 8px;text-align:center}
+.desc{border:1px solid #ccc;padding:8px 10px;font-size:10.5px;margin:6px 0;line-height:1.7}
+.download-btn{position:fixed;top:12px;right:12px;z-index:9999;background:#e87722;color:white;border:none;padding:10px 20px;font-size:14px;font-weight:700;border-radius:8px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
+.footer{text-align:center;font-size:8.5px;color:#666;margin-top:16px;padding-top:8px;border-top:1px solid #ccc}
+@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:0;size:A4}.download-btn{display:none!important}}
+</style>
+</head>
+<body>
+<button class="download-btn" onclick="window.print()">⬇ Salvar como PDF</button>
+<div class="pg">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    ${logoImg}
+    <div style="text-align:right;font-size:10px;color:#555;">
+      <div><b>Contrato nº ${nContrato}</b></div>
+      <div>${new Date().toLocaleDateString('pt-BR')}</div>
+    </div>
+  </div>
+
+  <h1>Informações para Emissão de ART</h1>
+
+  <h2>Dados da Empresa Responsável (Contratada)</h2>
+  <table class="info">
+    ${row('Razão Social', 'T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZAÇÃO LTDA ME')}
+    ${row('Nome Fantasia', 'VEDAFACIL')}
+    ${row('CNPJ', '23.606.470/0001-07')}
+    ${row('Endereço', 'Rua Professora Margarida Fialho Thompson Leite, 670')}
+    ${row('Bairro', 'Residencial Cristo Redentor')}
+    ${row('Cidade / UF', 'Barra Mansa / RJ')}
+    ${row('CEP', '27.323-755')}
+  </table>
+
+  <h2>Dados do Contrato / Obra</h2>
+  <table class="info">
+    ${row('Contratante / Condomínio', cliente)}
+    ${row('CNPJ do Contratante', cnpj)}
+    ${row('Endereço da Obra', endereco)}
+    ${row('Cidade / UF', cidade + ' / RJ')}
+    ${row('CEP', cep)}
+    ${row('Local do Serviço', cliente)}
+    ${row('Nº do Contrato', nContrato)}
+    ${row('Valor do Contrato', fmt(c.totalLiquido || c.totalBruto))}
+    ${row('Data de Início', dataInicio)}
+    ${row('Previsão de Término', dataTermino)}
+    ${row('Categoria', 'Residencial')}
+  </table>
+
+  <h2>Quantidade dos Serviços</h2>
+  <table class="qty">
+    <tr>
+      <th>Trincas (m)</th>
+      <th>Junta Fria (m)</th>
+      <th>Ralos (unid)</th>
+      <th>Junta Dilatação (m)</th>
+      <th>Cortina (m²)</th>
+    </tr>
+    <tr>
+      <td>${totals.trinca || '—'}</td>
+      <td>${totals.juntaFria || '—'}</td>
+      <td>${totals.ralo || '—'}</td>
+      <td>${totals.juntaDilat || '—'}</td>
+      <td>${totals.cortina || '—'}</td>
+    </tr>
+  </table>
+
+  <h2>Descrição do Serviço</h2>
+  <div class="desc">${descServico}</div>
+
+  <div class="footer">
+    <strong style="color:#e87722;">Eliminamos Infiltrações Sem Quebrar!</strong><br>
+    CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
+  </div>
+</div>
+</body>
+</html>`;
+}
+
+app.get('/api/contratos/:id/art', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1] || req.query.token;
+  if (!token) return res.status(401).json({ error: 'Token required' });
+  try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); }
+  catch { return res.status(401).json({ error: 'Invalid token' }); }
+  try {
+    await connectDB();
+    let c;
+    if (isConnected) c = await Contrato.findById(req.params.id);
+    else c = memStore.contratos.find(x => x._id === req.params.id);
+    if (!c) return res.status(404).json({ error: 'Not found' });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(buildArtPdfHtml(c));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
