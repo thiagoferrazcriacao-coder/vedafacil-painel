@@ -66,6 +66,20 @@ export const api = {
   getArtPdfUrl: (id) => `${BASE}/contratos/${id}/art?token=${encodeURIComponent(getToken() || '')}`,
   marcarGarantiaEnviada: (id) => request('POST', `/contratos/${id}/garantia/marcar-enviada`),
 
+  // Equipes
+  getEquipes: () => request('GET', '/equipes'),
+  createEquipe: (data) => request('POST', '/equipes', data),
+  updateEquipe: (id, data) => request('PUT', `/equipes/${id}`, data),
+  deleteEquipe: (id) => request('DELETE', `/equipes/${id}`),
+
+  // Ordens de Serviço
+  getOrdensServico: () => request('GET', '/ordens-servico'),
+  getOrdemServico: (id) => request('GET', `/ordens-servico/${id}`),
+  createOrdemServico: (data) => request('POST', '/ordens-servico', data),
+  updateOrdemServico: (id, data) => request('PUT', `/ordens-servico/${id}`, data),
+  updateOSStatus: (id, status, progresso) => request('PATCH', `/ordens-servico/${id}/status`, { status, progresso }),
+  deleteOrdemServico: (id) => request('DELETE', `/ordens-servico/${id}`),
+
   // Config
   getPrecos: () => request('GET', '/config/precos'),
   updatePrecos: (data) => request('PUT', '/config/precos', data),

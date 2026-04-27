@@ -151,12 +151,19 @@ export default function ContratosPage() {
                       <td className="px-4 py-3 text-center">
                         <span className={`badge ${st.color}`}>{st.label}</span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 flex gap-2 items-center">
                         <button
                           className="text-xs text-primary hover:underline"
                           onClick={e => { e.stopPropagation(); window.open(api.getContratoPdfUrl(c.id), '_blank') }}
                         >
                           PDF
+                        </button>
+                        <button
+                          className="text-xs text-green-600 hover:underline font-medium"
+                          onClick={e => { e.stopPropagation(); navigate(`/ordens-servico?contratoId=${c.id}`) }}
+                          title="Criar Ordem de Serviço"
+                        >
+                          OS
                         </button>
                       </td>
                     </tr>

@@ -181,13 +181,51 @@ const configSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
+const equipeSchema = new mongoose.Schema({
+  _id: { type: String, default: uuidv4 },
+  nome: { type: String, required: true },
+  emailGmail: String,
+  membros: [String],
+  cor: { type: String, default: '#1a5c9a' },
+  ativa: { type: Boolean, default: true },
+  createdAt: { type: Number, default: Date.now },
+}, { _id: false });
+
+const osSchema = new mongoose.Schema({
+  _id: { type: String, default: uuidv4 },
+  numero: Number,
+  contratoId: String,
+  orcamentoId: String,
+  status: { type: String, default: 'agendada' }, // agendada | em_andamento | concluida | cancelada
+  cliente: String,
+  endereco: String,
+  cidade: String,
+  celular: String,
+  equipeId: String,
+  equipeNome: String,
+  dataInicio: String,
+  dataTermino: String,
+  calendarEventId: String,
+  diasTrabalho: Number,
+  consumoProduto: Number,
+  qtdInjetores: Number,
+  pontos: [mongoose.Schema.Types.Mixed], // locais da medicao
+  itens: [mongoose.Schema.Types.Mixed],
+  obs: String,
+  progresso: { type: Number, default: 0 }, // 0-100
+  createdAt: { type: Number, default: Date.now },
+  updatedAt: { type: Number, default: Date.now },
+}, { _id: false });
+
 const Medicao = mongoose.model('Medicao', medicaoSchema);
 const Orcamento = mongoose.model('Orcamento', orcamentoSchema);
 const Contrato = mongoose.model('Contrato', contratoSchema);
 const Config = mongoose.model('Config', configSchema);
+const Equipe = mongoose.model('Equipe', equipeSchema);
+const OS = mongoose.model('OS', osSchema);
 
 // In-memory fallback (when no MongoDB)
-const memStore = { medicoes: [], orcamentos: [], contratos: [], config: null, users: [] };
+const memStore = { medicoes: [], orcamentos: [], contratos: [], config: null, users: [], equipes: [], ordens: [] };
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 
@@ -2142,6 +2180,139 @@ app.delete('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
     } else {
       memStore.users = memStore.users.filter(u => u._id !== email && u.email !== email);
     }
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Equipes Routes ────────────────────────────────────────────────────────────
+
+app.get('/api/equipes', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) return res.json(await Equipe.find().sort({ createdAt: -1 }));
+    res.json(memStore.equipes);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/equipes', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const data = { ...req.body, _id: uuidv4(), createdAt: Date.now() };
+    if (isConnected) { const e = await Equipe.create(data); return res.json(e); }
+    memStore.equipes.push(data);
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/equipes/:id', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) {
+      const e = await Equipe.findByIdAndUpdate(req.params.id, req.body, { new: true });
+      if (!e) return res.status(404).json({ error: 'Not found' });
+      return res.json(e);
+    }
+    const e = memStore.equipes.find(x => x._id === req.params.id);
+    if (!e) return res.status(404).json({ error: 'Not found' });
+    Object.assign(e, req.body);
+    res.json(e);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/equipes/:id', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) { await Equipe.findByIdAndDelete(req.params.id); return res.json({ success: true }); }
+    memStore.equipes = memStore.equipes.filter(x => x._id !== req.params.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Ordens de Serviço Routes ──────────────────────────────────────────────────
+
+app.get('/api/ordens-servico', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) return res.json(await OS.find().sort({ createdAt: -1 }));
+    res.json(memStore.ordens);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/ordens-servico', auth, async (req, res) => {
+  try {
+    await connectDB();
+    let numero = 1;
+    if (isConnected) { numero = (await OS.countDocuments()) + 1; }
+    else { numero = memStore.ordens.length + 1; }
+    const data = { ...req.body, _id: uuidv4(), numero, createdAt: Date.now(), updatedAt: Date.now() };
+
+    // Try to create Google Calendar event
+    if (data.dataInicio && data.equipeId) {
+      try {
+        const equipe = isConnected
+          ? await Equipe.findById(data.equipeId)
+          : memStore.equipes.find(e => e._id === data.equipeId);
+        if (equipe) data.equipeNome = equipe.nome;
+      } catch {}
+    }
+
+    if (isConnected) { const os = await OS.create(data); return res.json(os); }
+    memStore.ordens.push(data);
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/ordens-servico/:id', auth, async (req, res) => {
+  try {
+    await connectDB();
+    let os;
+    if (isConnected) os = await OS.findById(req.params.id);
+    else os = memStore.ordens.find(x => x._id === req.params.id);
+    if (!os) return res.status(404).json({ error: 'Not found' });
+    res.json(os);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/ordens-servico/:id', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const updates = { ...req.body, updatedAt: Date.now() };
+    if (isConnected) {
+      const os = await OS.findByIdAndUpdate(req.params.id, updates, { new: true });
+      if (!os) return res.status(404).json({ error: 'Not found' });
+      return res.json(os);
+    }
+    const os = memStore.ordens.find(x => x._id === req.params.id);
+    if (!os) return res.status(404).json({ error: 'Not found' });
+    Object.assign(os, updates);
+    res.json(os);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/ordens-servico/:id/status', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const { status, progresso } = req.body;
+    const updates = { updatedAt: Date.now() };
+    if (status) updates.status = status;
+    if (progresso !== undefined) updates.progresso = progresso;
+    if (isConnected) {
+      const os = await OS.findByIdAndUpdate(req.params.id, updates, { new: true });
+      if (!os) return res.status(404).json({ error: 'Not found' });
+      return res.json(os);
+    }
+    const os = memStore.ordens.find(x => x._id === req.params.id);
+    if (!os) return res.status(404).json({ error: 'Not found' });
+    Object.assign(os, updates);
+    res.json(os);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/ordens-servico/:id', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) { await OS.findByIdAndDelete(req.params.id); return res.json({ success: true }); }
+    memStore.ordens = memStore.ordens.filter(x => x._id !== req.params.id);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

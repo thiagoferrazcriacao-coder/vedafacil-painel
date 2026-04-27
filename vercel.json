@@ -19,6 +19,10 @@
     { "source": "/api/medicao", "destination": "/api/index.js" },
     { "source": "/api/calendar/:path*", "destination": "/api/index.js" },
     { "source": "/api/garantias/:path*", "destination": "/api/index.js" },
+    { "source": "/api/equipes/:path*", "destination": "/api/index.js" },
+    { "source": "/api/equipes", "destination": "/api/index.js" },
+    { "source": "/api/ordens-servico/:path*", "destination": "/api/index.js" },
+    { "source": "/api/ordens-servico", "destination": "/api/index.js" },
     { "source": "/api/debug-zapsign", "destination": "/api/index.js" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
