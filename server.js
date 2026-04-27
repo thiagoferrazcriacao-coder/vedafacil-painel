@@ -215,8 +215,8 @@ function auth(req, res, next) {
 
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body;
-  if (username === (process.env.ADMIN_USER || 'daniel') &&
-      password === (process.env.ADMIN_PASSWORD || 'vedafacil2024')) {
+  if (username === (process.env.ADMIN_USER || 'admin') &&
+      password === (process.env.ADMIN_PASSWORD || 'vedafacil2025')) {
     const token = jwt.sign({ username, role: 'admin' }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '24h' });
     return res.json({ token, user: { username, role: 'admin' } });
   }
