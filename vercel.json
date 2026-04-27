@@ -15,7 +15,10 @@
     { "source": "/api/config/:path*", "destination": "/api/index.js" },
     { "source": "/api/auth/:path*", "destination": "/api/index.js" },
     { "source": "/api/usuarios/:path*", "destination": "/api/index.js" },
+    { "source": "/api/medicao/:path*", "destination": "/api/index.js" },
     { "source": "/api/medicao", "destination": "/api/index.js" },
+    { "source": "/api/calendar/:path*", "destination": "/api/index.js" },
+    { "source": "/api/garantias/:path*", "destination": "/api/index.js" },
     { "source": "/api/debug-zapsign", "destination": "/api/index.js" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
