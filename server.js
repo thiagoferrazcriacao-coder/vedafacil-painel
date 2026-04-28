@@ -1211,7 +1211,7 @@ app.get('/api/contratos/:id/pdf', async (req, res) => {
   try {
     await connectDB();
     let c;
-    if (isConnected) c = await Contrato.findById(req.params.id);
+    if (isConnected) c = await Contrato.findOne({ _id: req.params.id });
     else c = memStore.contratos.find(x => x._id === req.params.id);
     if (!c) return res.status(404).json({ error: 'Not found' });
 
@@ -1356,7 +1356,7 @@ app.post('/api/contratos/:id/garantia/marcar-enviada', auth, async (req, res) =>
     await connectDB();
     const ts = Date.now();
     if (isConnected) {
-      const c = await Contrato.findByIdAndUpdate(req.params.id, { garantiaEnviadaEm: ts }, { new: true });
+      const c = await Contrato.findOneAndUpdate({ _id: req.params.id }, { garantiaEnviadaEm: ts }, { new: true });
       if (!c) return res.status(404).json({ error: 'Not found' });
       return res.json(c);
     }
@@ -1375,7 +1375,7 @@ app.get('/api/contratos/:id/garantia', async (req, res) => {
   try {
     await connectDB();
     let c;
-    if (isConnected) c = await Contrato.findById(req.params.id);
+    if (isConnected) c = await Contrato.findOne({ _id: req.params.id });
     else c = memStore.contratos.find(x => x._id === req.params.id);
     if (!c) return res.status(404).json({ error: 'Not found' });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1529,7 +1529,7 @@ app.get('/api/contratos/:id/art', async (req, res) => {
   try {
     await connectDB();
     let c;
-    if (isConnected) c = await Contrato.findById(req.params.id);
+    if (isConnected) c = await Contrato.findOne({ _id: req.params.id });
     else c = memStore.contratos.find(x => x._id === req.params.id);
     if (!c) return res.status(404).json({ error: 'Not found' });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1785,7 +1785,7 @@ app.get('/api/contratos/:id', auth, async (req, res) => {
   try {
     await connectDB();
     if (isConnected) {
-      const c = await Contrato.findById(req.params.id);
+      const c = await Contrato.findOne({ _id: req.params.id });
       if (!c) return res.status(404).json({ error: 'Not found' });
       return res.json(c);
     }
@@ -1800,7 +1800,7 @@ app.put('/api/contratos/:id', auth, async (req, res) => {
     await connectDB();
     const updates = { ...req.body, updatedAt: Date.now() };
     if (isConnected) {
-      const c = await Contrato.findByIdAndUpdate(req.params.id, updates, { new: true });
+      const c = await Contrato.findOneAndUpdate({ _id: req.params.id }, updates, { new: true });
       return res.json(c);
     }
     const idx = memStore.contratos.findIndex(x => x._id === req.params.id);
@@ -1852,7 +1852,7 @@ app.post('/api/contratos/:id/zapsign', auth, async (req, res) => {
   try {
     await connectDB();
     let c;
-    if (isConnected) c = await Contrato.findById(req.params.id);
+    if (isConnected) c = await Contrato.findOne({ _id: req.params.id });
     else c = memStore.contratos.find(x => x._id === req.params.id);
     if (!c) return res.status(404).json({ error: 'Not found' });
 
@@ -1905,7 +1905,7 @@ app.post('/api/contratos/:id/zapsign', auth, async (req, res) => {
     console.log('[ZapSign] Document created:', docToken, 'signUrl:', signUrl);
 
     if (isConnected) {
-      c = await Contrato.findByIdAndUpdate(req.params.id, { zapsignDocId: docToken, zapsignSignUrl: signUrl }, { new: true });
+      c = await Contrato.findOneAndUpdate({ _id: req.params.id }, { zapsignDocId: docToken, zapsignSignUrl: signUrl }, { new: true });
     } else {
       const idx = memStore.contratos.findIndex(x => x._id === req.params.id);
       memStore.contratos[idx].zapsignDocId = docToken;
