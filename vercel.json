@@ -23,6 +23,7 @@
     { "source": "/api/equipes", "destination": "/api/index.js" },
     { "source": "/api/ordens-servico/:path*", "destination": "/api/index.js" },
     { "source": "/api/ordens-servico", "destination": "/api/index.js" },
+    { "source": "/api/aplicador/:path*", "destination": "/api/index.js" },
     { "source": "/api/debug-zapsign", "destination": "/api/index.js" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]

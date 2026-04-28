@@ -1856,11 +1856,10 @@ app.post('/api/contratos/:id/zapsign', auth, async (req, res) => {
     else c = memStore.contratos.find(x => x._id === req.params.id);
     if (!c) return res.status(404).json({ error: 'Not found' });
 
-    // SANDBOX - token fixo ate contratar plano API producao
-    const token = '2822110f-b238-480f-b8b6-f11c8697a2c64bb7c8fd-5888-479d-9d98-a6c3b0034950';
-    const ZAPSIGN_BASE = 'https://sandbox.api.zapsign.com.br/api/v1';
+    const token = process.env.ZAPSIGN_API_TOKEN || 'b9e08716-cee2-43fc-81f0-18a974ed335cffcaa050-1373-4782-936c-0e6b366b8e20';
+    const ZAPSIGN_BASE = 'https://api.zapsign.com.br/api/v1';
 
-    console.log('[ZapSign] Sending contrato', req.params.id, '(SANDBOX)');
+    console.log('[ZapSign] Sending contrato', req.params.id, '(PRODUCAO)');
 
     let sendMethod = 'base64';
     let base64Pdf = '';
@@ -2233,8 +2232,12 @@ app.delete('/api/equipes/:id', auth, adminOnly, async (req, res) => {
 app.get('/api/ordens-servico', auth, async (req, res) => {
   try {
     await connectDB();
-    if (isConnected) return res.json(await OS.find().sort({ createdAt: -1 }));
-    res.json(memStore.ordens);
+    const { equipeId } = req.query;
+    const filter = equipeId ? { equipeId } : {};
+    if (isConnected) return res.json(await OS.find(filter).sort({ createdAt: -1 }));
+    let list = memStore.ordens;
+    if (equipeId) list = list.filter(o => o.equipeId === equipeId);
+    res.json(list);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2308,6 +2311,114 @@ app.patch('/api/ordens-servico/:id/status', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Atualiza um ponto especifico da OS (status + fotos antes/depois)
+app.patch('/api/ordens-servico/:id/pontos/:idx', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const { idx } = req.params;
+    const { status, fotoAntes, fotoDepois, membro } = req.body;
+    if (isConnected) {
+      const os = await OS.findById(req.params.id);
+      if (!os) return res.status(404).json({ error: 'Not found' });
+      const pontos = os.pontos || [];
+      if (!pontos[idx]) return res.status(404).json({ error: 'Ponto nao encontrado' });
+      if (status !== undefined) pontos[idx].status = status;
+      if (fotoAntes !== undefined) pontos[idx].fotoAntes = fotoAntes;
+      if (fotoDepois !== undefined) pontos[idx].fotoDepois = fotoDepois;
+      if (membro !== undefined) pontos[idx].membro = membro;
+      pontos[idx].updatedAt = Date.now();
+      // recalcula progresso
+      const concluidos = pontos.filter(p => p.status === 'concluido').length;
+      const progresso = pontos.length > 0 ? Math.round((concluidos / pontos.length) * 100) : 0;
+      const novoStatus = progresso === 100 ? 'concluida' : progresso > 0 ? 'em_andamento' : os.status;
+      const updated = await OS.findByIdAndUpdate(req.params.id, { pontos, progresso, status: novoStatus, updatedAt: Date.now() }, { new: true });
+      return res.json(updated);
+    }
+    const os = memStore.ordens.find(x => x._id === req.params.id);
+    if (!os) return res.status(404).json({ error: 'Not found' });
+    if (!os.pontos?.[idx]) return res.status(404).json({ error: 'Ponto nao encontrado' });
+    if (status !== undefined) os.pontos[idx].status = status;
+    if (fotoAntes !== undefined) os.pontos[idx].fotoAntes = fotoAntes;
+    if (fotoDepois !== undefined) os.pontos[idx].fotoDepois = fotoDepois;
+    if (membro !== undefined) os.pontos[idx].membro = membro;
+    os.pontos[idx].updatedAt = Date.now();
+    const concluidos = os.pontos.filter(p => p.status === 'concluido').length;
+    os.progresso = os.pontos.length > 0 ? Math.round((concluidos / os.pontos.length) * 100) : 0;
+    if (os.progresso === 100) os.status = 'concluida';
+    else if (os.progresso > 0) os.status = 'em_andamento';
+    os.updatedAt = Date.now();
+    res.json(os);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// API publica para o aplicador (sem auth JWT — usa equipeId + membro como identificacao)
+app.get('/api/aplicador/equipes', async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) return res.json(await Equipe.find({ ativa: true }).select('_id nome membros emailGmail cor'));
+    res.json(memStore.equipes.filter(e => e.ativa !== false));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/aplicador/os', async (req, res) => {
+  try {
+    await connectDB();
+    const { equipeId } = req.query;
+    if (!equipeId) return res.status(400).json({ error: 'equipeId required' });
+    const filter = { equipeId, status: { $in: ['agendada', 'em_andamento'] } };
+    if (isConnected) return res.json(await OS.find(filter).sort({ dataInicio: 1 }));
+    res.json(memStore.ordens.filter(o => o.equipeId === equipeId && ['agendada','em_andamento'].includes(o.status)));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/aplicador/os/:id', async (req, res) => {
+  try {
+    await connectDB();
+    let os;
+    if (isConnected) os = await OS.findById(req.params.id);
+    else os = memStore.ordens.find(x => x._id === req.params.id);
+    if (!os) return res.status(404).json({ error: 'Not found' });
+    res.json(os);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/aplicador/os/:id/pontos/:idx', async (req, res) => {
+  try {
+    await connectDB();
+    const { idx } = req.params;
+    const { status, fotoAntes, fotoDepois, membro } = req.body;
+    if (isConnected) {
+      const os = await OS.findById(req.params.id);
+      if (!os) return res.status(404).json({ error: 'Not found' });
+      const pontos = os.pontos || [];
+      if (!pontos[idx]) return res.status(404).json({ error: 'Ponto nao encontrado' });
+      if (status !== undefined) pontos[idx].status = status;
+      if (fotoAntes !== undefined) pontos[idx].fotoAntes = fotoAntes;
+      if (fotoDepois !== undefined) pontos[idx].fotoDepois = fotoDepois;
+      if (membro !== undefined) pontos[idx].membro = membro;
+      pontos[idx].updatedAt = Date.now();
+      const concluidos = pontos.filter(p => p.status === 'concluido').length;
+      const progresso = pontos.length > 0 ? Math.round((concluidos / pontos.length) * 100) : 0;
+      const novoStatus = progresso === 100 ? 'concluida' : progresso > 0 ? 'em_andamento' : os.status;
+      const updated = await OS.findByIdAndUpdate(req.params.id, { pontos, progresso, status: novoStatus, updatedAt: Date.now() }, { new: true });
+      return res.json({ success: true, progresso: updated.progresso, status: updated.status });
+    }
+    const os = memStore.ordens.find(x => x._id === req.params.id);
+    if (!os) return res.status(404).json({ error: 'Not found' });
+    if (!os.pontos?.[idx]) return res.status(404).json({ error: 'Ponto nao encontrado' });
+    if (status !== undefined) os.pontos[idx].status = status;
+    if (fotoAntes !== undefined) os.pontos[idx].fotoAntes = fotoAntes;
+    if (fotoDepois !== undefined) os.pontos[idx].fotoDepois = fotoDepois;
+    if (membro !== undefined) os.pontos[idx].membro = membro;
+    const concluidos = os.pontos.filter(p => p.status === 'concluido').length;
+    os.progresso = os.pontos.length > 0 ? Math.round((concluidos / os.pontos.length) * 100) : 0;
+    if (os.progresso === 100) os.status = 'concluida';
+    else if (os.progresso > 0) os.status = 'em_andamento';
+    os.updatedAt = Date.now();
+    res.json({ success: true, progresso: os.progresso, status: os.status });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.delete('/api/ordens-servico/:id', auth, adminOnly, async (req, res) => {
   try {
     await connectDB();
@@ -2329,8 +2440,8 @@ if (process.env.NODE_ENV === 'production') {
 app.get('/api/debug-zapsign', (req, res) => {
   const token = process.env.ZAPSIGN_API_TOKEN || '2822110f-b238-480f-b8b6-f11c8697a2c64bb7c8fd-5888-479d-9d98-a6c3b0034950';
   res.json({
-    build: 'v3-sandbox',
-    zapsign_base: 'https://sandbox.api.zapsign.com.br/api/v1',
+    build: 'v4-producao',
+    zapsign_base: 'https://api.zapsign.com.br/api/v1',
     token_prefix: token.substring(0, 8),
     token_env: process.env.ZAPSIGN_API_TOKEN ? 'SET' : 'NOT_SET'
   });
