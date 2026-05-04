@@ -1,0 +1,28 @@
+#!/bin/bash
+# Hook pre-push — bloqueia force push em main/master
+# Instalar: cp scripts/git-hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+PROTECTED="main master"
+
+for PROTECTED_BRANCH in $PROTECTED; do
+  if [ "$BRANCH" = "$PROTECTED_BRANCH" ]; then
+    # Detecta force push checando flags passadas ao hook
+    while read local_ref local_sha remote_ref remote_sha; do
+      if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+        echo "❌ BLOQUEADO: Não é permitido deletar a branch '$PROTECTED_BRANCH' remotamente."
+        exit 1
+      fi
+      # Verifica se é force push (commits locais não alcançam o remoto)
+      if [ "$remote_sha" != "0000000000000000000000000000000000000000" ]; then
+        if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+          echo "❌ BLOQUEADO: Force push em '$PROTECTED_BRANCH' não é permitido."
+          echo "   Use 'git pull --rebase' para sincronizar antes de fazer push."
+          exit 1
+        fi
+      fi
+    done
+  fi
+done
+
+exit 0

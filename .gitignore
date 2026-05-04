@@ -1,0 +1,47 @@
+# Dependências
+node_modules/
+painel/node_modules/
+medidor-app/node_modules/
+aplicador-app/node_modules/
+
+# Build outputs
+dist/
+painel/dist/
+.vercel/
+
+# Variáveis de ambiente — NUNCA commitar
+.env
+.env.local
+.env.production
+.env.development
+
+# Imagens base64 embarcadas (podem conter logos/assinaturas da empresa)
+*_b64.txt
+painel/*_b64.txt
+
+# Arquivos de configuração local (senhas, tokens pessoais)
+*.local
+.claude/settings.local.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# PDFs e documentos locais de teste
+*.pdf
+*.xls
+*.xlsx
+!MODELO*
+!EXEMPLO*
+
+# Cache
+.cache/
+.parcel-cache/
+
+# Sub-repositórios git — cada um é independente
+# medidor-app/ → próprio repo git
+# painel/      → próprio repo git

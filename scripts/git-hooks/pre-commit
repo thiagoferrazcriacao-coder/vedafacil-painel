@@ -1,0 +1,51 @@
+#!/bin/bash
+# Hook pre-commit — bloqueia commit de arquivos sensíveis
+# Instalar: cp scripts/git-hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+echo "🔍 Verificando arquivos sensíveis antes do commit..."
+
+# Padrões proibidos em staged files
+FORBIDDEN_PATTERNS=(
+  ".env"
+  ".env.local"
+  ".env.production"
+  "_b64.txt"
+  "settings.local.json"
+)
+
+STAGED=$(git diff --cached --name-only)
+BLOCKED=0
+
+for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+  MATCHES=$(echo "$STAGED" | grep -i "$pattern")
+  if [ -n "$MATCHES" ]; then
+    echo "❌ BLOQUEADO: Arquivo sensível detectado no commit:"
+    echo "$MATCHES" | sed 's/^/   /'
+    BLOCKED=1
+  fi
+done
+
+if [ "$BLOCKED" = "1" ]; then
+  echo ""
+  echo "💡 Adicione estes arquivos ao .gitignore e remova-os do staging com:"
+  echo "   git reset HEAD <arquivo>"
+  exit 1
+fi
+
+# Verifica se há chaves/tokens hardcoded (padrões comuns)
+SENSITIVE_REGEX="(MONGODB_URI|JWT_SECRET|ZAPSIGN_API_TOKEN|GEMINI_API_KEY|GOOGLE_CLIENT_SECRET)\s*=\s*['\"][^'\"]{10,}"
+
+FOUND_SECRETS=$(git diff --cached -U0 | grep "+" | grep -E "$SENSITIVE_REGEX" | grep -v "^+++")
+if [ -n "$FOUND_SECRETS" ]; then
+  echo "⚠️  ATENÇÃO: Possível credencial detectada no diff:"
+  echo "$FOUND_SECRETS" | head -5 | sed 's/^/   /'
+  echo ""
+  read -p "   Tem certeza que quer commitar? (s/N) " CONFIRM
+  if [ "$CONFIRM" != "s" ] && [ "$CONFIRM" != "S" ]; then
+    echo "❌ Commit cancelado. Verifique os arquivos acima."
+    exit 1
+  fi
+fi
+
+echo "✅ Verificação de segurança passou."
+exit 0

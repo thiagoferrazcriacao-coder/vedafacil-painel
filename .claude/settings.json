@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push*--force*)",
+      "Bash(git push*-f *)",
+      "Bash(git push*-f)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(git branch -D main*)",
+      "Bash(git branch -d main*)",
+      "Bash(git checkout -- .)",
+      "Bash(git restore .)",
+      "Bash(git clean -f*)",
+      "Bash(*dropDatabase*)",
+      "Bash(*db.dropDatabase*)",
+      "Bash(*deleteMany({})*)",
+      "Bash(*deleteMany( {} )*)",
+      "Bash(*drop()*)",
+      "Bash(vercel project rm*)",
+      "Bash(vercel remove*)",
+      "Bash(vercel env rm*)",
+      "Bash(vercel env remove*)",
+      "Bash(rm -rf painel/lib)",
+      "Bash(rm -rf painel/src)",
+      "Bash(rm -rf medidor-app)",
+      "Bash(rm -rf aplicador-app)",
+      "Bash(rm -rf scripts)",
+      "Bash(rm -rf .claude)"
+    ]
+  }
+}
