@@ -126,6 +126,17 @@ const orcamentoSchema = new mongoose.Schema({
   saldo: { type: Number, default: 0 },
   parcelas: { type: Number, default: 1 },
   valorParcela: { type: Number, default: 0 },
+  desconto1: { type: Number, default: 0 },
+  descontoTipo1: { type: String, default: 'percent' },
+  totalProposta1: { type: Number, default: 0 },
+  desconto2: { type: Number, default: 0 },
+  descontoTipo2: { type: String, default: 'percent' },
+  totalProposta2: { type: Number, default: 0 },
+  entrada2: { type: Number, default: 50 },
+  entradaTipo2: { type: String, default: 'percent' },
+  entradaVal2: { type: Number, default: 0 },
+  saldo2: { type: Number, default: 0 },
+  valorParcela2: { type: Number, default: 0 },
   obsAdicionais: String,
   orcMinimo: { type: Boolean, default: false },
   totalMinimo: { type: Number, default: 0 },
@@ -956,6 +967,12 @@ body { font-family:Arial,sans-serif; font-size:11px; color:#222; }
   const parcelas = o.parcelas || 1;
   const valorParcelaBruto = parcelas > 1 ? (o.totalBruto / parcelas) : o.totalBruto;
 
+  // Two-proposal system
+  const totalProposta1 = o.totalProposta1 || totalLiquido;
+  const totalProposta2 = o.totalProposta2 || totalLiquido;
+  const entradaVal2 = o.entradaVal2 != null ? o.entradaVal2 : (totalProposta2 * (Number(o.entrada2 ?? o.entrada ?? 50)) / 100);
+  const valorParcela2 = o.valorParcela2 || (parcelas > 1 ? ((totalProposta2 - entradaVal2) / parcelas) : 0);
+
   const locais = o.locais || [];
   const locaisRows = locais.map(l => `
     <tr>
@@ -1238,8 +1255,8 @@ ${sec('7','CONDIÇÕES DE PAGAMENTO')}
 <p style="text-align:center;font-weight:bold;font-size:11px;margin:6px 0 4px;">Proposta 1 : &nbsp;<em>(Pagamento à vista)</em></p>
 <table class="pay">
   <tr>
-    <td style="font-style:italic;width:55%"><em>Total Orçamento</em></td>
-    <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;">${fmt(totalLiquido)}</td>
+    <td style="font-style:italic;width:55%"><em>Total à Vista</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;">${fmt(totalProposta1)}</td>
   </tr>
   <tr><td colspan="3" style="font-style:italic;font-size:10px;">${condicaoPgto1Obs}</td></tr>
 </table>
@@ -1247,17 +1264,20 @@ ${sec('7','CONDIÇÕES DE PAGAMENTO')}
 <p style="text-align:center;font-size:10.5px;margin:10px 0 4px;font-weight:bold;">Proposta 2 : &nbsp;<em>(Pagamento Parcelado)</em></p>
 <table class="pay">
   <tr>
-    <td style="font-style:italic;width:45%"><em>Qtde de parcelas</em></td>
-    <td style="text-align:center;font-weight:bold;width:15%">${parcelas}</td>
-    <td style="text-align:right;font-weight:bold;">${fmt(valorParcelaBruto)}</td>
+    <td style="font-style:italic;width:45%"><em>Total Parcelado</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;">${fmt(totalProposta2)}</td>
   </tr>
-  <tr>
-    <td style="font-style:italic;font-weight:bold;background:#fff3e0"><strong>Total</strong></td>
-    <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;background:#fff3e0"><strong>${fmt(o.totalBruto)}</strong></td>
-  </tr>
+  ${entradaVal2 > 0 ? `<tr>
+    <td style="font-style:italic"><em>Entrada</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;">${fmt(entradaVal2)}</td>
+  </tr>` : ''}
+  ${parcelas > 1 ? `<tr>
+    <td style="font-style:italic"><em>${parcelas}x parcela(s)</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;">${fmt(valorParcela2)}</td>
+  </tr>` : ''}
   <tr><td colspan="3" style="font-style:italic;font-size:10px;font-weight:bold;">Observações:</td></tr>
   <tr><td colspan="3" style="font-style:italic;font-size:10px;background:#fff8f0;">${condicaoPgto2Obs1}</td></tr>
-  <tr><td colspan="3" style="font-style:italic;font-size:10px;background:#fff8f0;">${condicaoPgto2Obs2}</td></tr>
+  ${condicaoPgto2Obs2 ? `<tr><td colspan="3" style="font-style:italic;font-size:10px;background:#fff8f0;">${condicaoPgto2Obs2}</td></tr>` : ''}
 </table>
 
 ${obsGeral ? `<div class="obs-box" style="margin-top:10px;font-size:10px;font-style:italic;">${obsGeral}</div>` : ''}
@@ -1268,6 +1288,9 @@ ${sec('8','INFORMAÇÕES ADICIONAIS')}
   <span style="display:inline-block;min-width:36px;border-bottom:1px solid #333;text-align:center;font-weight:bold;margin:0 6px;">${prazoExecucao}</span>
   dias úteis.
 </p>
+${(o.andaime === 'sim' || o.andaime === true) ? `<p style="font-size:11px;margin:8px 0;">
+  &rarr; <strong>Andaime:</strong> necessário${o.andaimeMetros > 0 ? ` — ${o.andaimeMetros}m de altura` : ''}${o.andaimeLargura ? ` — largura ${o.andaimeLargura}` : ''}${o.andaimeRodinhas ? ' — com rodinhas' : ''}${o.andaimeBases ? ' — com bases' : ''}.
+</p>` : ''}
 <p style="margin:12px 0;">A <strong>VEDAFACIL</strong> agradece sua atenção e fica ao seu dispor para maiores esclarecimentos.</p>
 <p style="margin-bottom:18px;">Atenciosamente,</p>
 

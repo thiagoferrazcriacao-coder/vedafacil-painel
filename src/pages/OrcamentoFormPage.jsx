@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
+import { useAuth } from '../App.jsx'
 
 const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
 
@@ -17,14 +18,25 @@ const DEFAULT_ITENS = [
 
 function calcObra(itens) {
   const get = (tipo) => Number((itens || []).find(i => i.tipo === tipo)?.quantidade) || 0
-  const trinca = get('trinca')
-  const juntaFria = get('juntaFria')
+  const trinca     = get('trinca')
+  const juntaFria  = get('juntaFria')
   const juntaDilat = get('juntaDilat')
-  const linear = trinca + juntaFria + juntaDilat
+  const ralo       = get('ralo')
+  const ferragem   = get('ferragem')
+  const cortina    = get('cortina')
+
+  const totalUnidades = trinca + juntaFria + juntaDilat + ralo + ferragem + cortina
+  const consumo = trinca * 1.5 + juntaDilat * 2.0 + juntaFria * 1.0 + ralo * 1.0 + cortina * 2.0
+  const linear  = trinca + juntaFria + juntaDilat // para qtdInjetores
+
+  // Dias: arredonda para cima até o 0,5 mais próximo (ex: 4,75→5 | 5,25→5,5 | 5,5→5,5)
+  const diasArredondado = Math.ceil((totalUnidades / 8) * 2) / 2
+
   return {
-    diasTrabalho: parseFloat((linear / 9).toFixed(2)),
-    consumoProduto: parseFloat((trinca * 1.5 + (juntaFria + juntaDilat) * 1.0).toFixed(1)),
-    qtdInjetores: Math.ceil(linear * 4),
+    diasTrabalho:   diasArredondado,
+    prazoExecucao:  diasArredondado, // prazo = dias calculados pela fórmula
+    consumoProduto: parseFloat(consumo.toFixed(1)),
+    qtdInjetores:   Math.ceil(linear * 4),
   }
 }
 
@@ -34,17 +46,37 @@ function recalculate(orc) {
     subtotal: Number(item.quantidade || 0) * Number(item.valorUnit || 0)
   }))
   const totalBruto = itens.reduce((s, i) => s + i.subtotal, 0)
-  const descontoValor = orc.descontoTipo === 'percent'
-    ? totalBruto * (Number(orc.desconto) || 0) / 100
-    : (Number(orc.desconto) || 0)
-  const totalLiquido = Math.max(0, totalBruto - descontoValor)
-  const entradaValor = totalLiquido * (Number(orc.entrada) || 0) / 100
-  const saldo = Math.max(0, totalLiquido - entradaValor)
-  const parcelas = Math.max(1, Number(orc.parcelas) || 1)
-  const valorParcela = saldo / parcelas
+
+  // Proposta 1 — À Vista (desconto1 / descontoTipo1)
+  const desconto1Val = orc.descontoTipo1 === 'valor'
+    ? (Number(orc.desconto1) || 0)
+    : totalBruto * (Number(orc.desconto1) || 0) / 100
+  const totalProposta1 = Math.max(0, totalBruto - desconto1Val)
+
+  // Proposta 2 — Parcelado (desconto2 / descontoTipo2)
+  const desconto2Val = orc.descontoTipo2 === 'valor'
+    ? (Number(orc.desconto2) || 0)
+    : totalBruto * (Number(orc.desconto2) || 0) / 100
+  const totalProposta2 = Math.max(0, totalBruto - desconto2Val)
+  const entradaTipo2 = orc.entradaTipo2 || 'percent'
+  const entradaVal2 = entradaTipo2 === 'valor'
+    ? (Number(orc.entrada2) || 0)
+    : totalProposta2 * (Number(orc.entrada2) || 0) / 100
+  const saldo2 = Math.max(0, totalProposta2 - entradaVal2)
+  const parcelas2 = Math.max(1, Number(orc.parcelas) || 1)
+  const valorParcela2 = saldo2 / parcelas2
+
+  // Legacy compat — totalLiquido uses proposta1 by default
+  const totalLiquido = totalProposta1
   const obra = calcObra(itens)
 
-  return { ...orc, itens, totalBruto, totalLiquido, saldo, valorParcela, ...obra }
+  return {
+    ...orc, itens, totalBruto, totalLiquido,
+    totalProposta1, totalProposta2,
+    entradaVal2, saldo2, valorParcela2,
+    valorParcela: valorParcela2, // backward compat
+    ...obra
+  }
 }
 
 function Field({ label, children }) {
@@ -60,6 +92,7 @@ export default function OrcamentoFormPage() {
   const { id, medicaoId } = useParams()
   const navigate = useNavigate()
   const isNew = !id || id === 'novo'
+  const { user } = useAuth()
 
   const [orc, setOrc] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -71,6 +104,8 @@ export default function OrcamentoFormPage() {
   useEffect(() => {
     async function load() {
       try {
+        const meNome = user?.username || user?.name || ''
+
         if (!isNew) {
           const data = await api.getOrcamento(id)
           setOrc(recalculate(data))
@@ -84,8 +119,10 @@ export default function OrcamentoFormPage() {
 
           // Create new from measurement
           const data = await api.createOrcamento({ medicaoId: medicaoId || null })
+          // elaboradoPor = usuário logado; avaliadoPor = em branco
+          const elaboradoPor = meNome || data.elaboradoPor || ''
           // Use the pre-fetched number (server already applied it, but ensure it matches)
-          setOrc(recalculate({ ...data, numero: data.numero || proximoNumero }))
+          setOrc(recalculate({ ...data, numero: data.numero || proximoNumero, elaboradoPor, avaliadoPor: '' }))
           // Redirect to the edit URL so saves work
           navigate(`/orcamentos/${data.id}`, { replace: true })
         }
@@ -189,7 +226,7 @@ export default function OrcamentoFormPage() {
               orc.status === 'enviado' ? 'bg-blue-100 text-blue-800' :
               'bg-gray-100 text-gray-700'
             }`}>
-              {orc.status === 'aprovado' ? 'Aprovado' : orc.status === 'enviado' ? 'Enviado' : 'Rascunho'}
+              {orc.status === 'aprovado' ? 'Aprovado' : orc.status === 'enviado' ? 'Enviado' : 'Redigido'}
             </span>
             {saved && <span className="text-green-600 text-xs">Salvo</span>}
           </div>
@@ -197,6 +234,18 @@ export default function OrcamentoFormPage() {
 
         {/* Action buttons */}
         <div className="flex gap-2 flex-wrap">
+          {/* Toggle Orçamento Mínimo */}
+          <button
+            onClick={() => update({ orcMinimo: !orc.orcMinimo })}
+            className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-colors ${
+              orc.orcMinimo
+                ? 'bg-amber-500 text-white border-amber-500'
+                : 'bg-white text-amber-600 border-amber-400 hover:bg-amber-50'
+            }`}
+            title="Modo simplificado: mostra apenas nomes dos locais e valor total"
+          >
+            {orc.orcMinimo ? '🔖 Orç. Mínimo Ativo' : '🔖 Orç. Mínimo'}
+          </button>
           <button onClick={handleSave} disabled={saving} className="btn-secondary">
             {saving ? 'Salvando...' : 'Salvar Rascunho'}
           </button>
@@ -206,11 +255,13 @@ export default function OrcamentoFormPage() {
           <button onClick={handleDownloadExcel} disabled={saving} className="btn-secondary">
             Excel
           </button>
-          {orc.status !== 'aprovado' && (
-            <button onClick={handleApprove} disabled={saving} className="btn-success">
-              Aprovar → Contrato
-            </button>
-          )}
+          <button
+            onClick={async () => { await handleSave(); navigate('/orcamentos') }}
+            disabled={saving}
+            className="btn-primary"
+          >
+            {saving ? 'Salvando...' : '✓ Concluir'}
+          </button>
         </div>
       </div>
 
@@ -224,21 +275,18 @@ export default function OrcamentoFormPage() {
           <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">1</span>
           Dados do Orçamento
         </h2>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Field label="Nº do Orçamento">
             <input className="input" type="number" value={orc.numero || ''} onChange={e => update({ numero: Number(e.target.value) })} />
           </Field>
           <Field label="Data do Orçamento">
             <input className="input" type="text" value={orc.dataOrcamento || ''} onChange={updateField('dataOrcamento')} placeholder="dd/mm/aaaa" />
           </Field>
-          <Field label="Validade">
-            <input className="input" type="text" value={orc.validade || ''} onChange={updateField('validade')} placeholder="Ex: 30 dias" />
+          <Field label="Validade (dias)">
+            <input className="input" type="number" min="1" value={orc.validade || 30} onChange={e => update({ validade: Number(e.target.value) })} />
           </Field>
-          <Field label="Origem">
-            <input className="input" value={orc.origem || ''} onChange={updateField('origem')} />
-          </Field>
-          <Field label="Sigla">
-            <input className="input" value={orc.sigla || ''} onChange={updateField('sigla')} />
+          <Field label="Elaborado Por">
+            <input className="input" value={orc.elaboradoPor || ''} onChange={updateField('elaboradoPor')} />
           </Field>
         </div>
 
@@ -251,9 +299,6 @@ export default function OrcamentoFormPage() {
           </Field>
           <Field label="Técnico Responsável">
             <input className="input" value={orc.tecnicoResponsavel || ''} onChange={updateField('tecnicoResponsavel')} />
-          </Field>
-          <Field label="Elaborado Por">
-            <input className="input" value={orc.elaboradoPor || ''} onChange={updateField('elaboradoPor')} />
           </Field>
         </div>
       </section>
@@ -276,6 +321,9 @@ export default function OrcamentoFormPage() {
           </Field>
           <Field label="Endereço">
             <input className="input" value={orc.endereco || ''} onChange={updateField('endereco')} />
+          </Field>
+          <Field label="Bairro">
+            <input className="input" value={orc.bairro || ''} onChange={updateField('bairro')} />
           </Field>
           <Field label="Cidade">
             <input className="input" value={orc.cidade || ''} onChange={updateField('cidade')} />
@@ -389,114 +437,187 @@ export default function OrcamentoFormPage() {
         </section>
       )}
 
-      {/* ─── Section 4: Discount & Payment ─── */}
+      {/* ─── Orçamento Mínimo Banner ─── */}
+      {orc.orcMinimo && (
+        <section className="card mb-4 border-2 border-amber-400 bg-amber-50">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <h2 className="font-bold text-amber-800 mb-1 flex items-center gap-2">
+                🔖 Modo Orçamento Mínimo
+              </h2>
+              <p className="text-xs text-amber-700 mb-3">
+                O PDF exibirá apenas a lista de nomes dos locais e o valor total abaixo. A tabela de medições não aparecerá.
+              </p>
+              <div>
+                <label className="label">Valor Total (Orçamento Mínimo)</label>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500 text-sm">R$</span>
+                  <input
+                    className="input w-48"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={orc.totalMinimo || 0}
+                    onChange={e => update({ totalMinimo: Number(e.target.value) })}
+                    placeholder="0,00"
+                  />
+                  <span className="text-xs text-gray-500">
+                    (calculado: {fmt(orc.totalLiquido)})
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  Deixe 0 para usar o total calculado automaticamente.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => update({ orcMinimo: false })}
+              className="text-amber-500 hover:text-amber-700 text-sm font-medium flex-shrink-0"
+            >
+              ✕ Desativar
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* ─── Section 4: Propostas ─── */}
       <section className="card mb-4">
         <h2 className="font-semibold text-primary mb-4 flex items-center gap-2">
           <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">4</span>
-          Desconto e Condições de Pagamento
+          Condições de Pagamento e Propostas
         </h2>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-          <div>
-            <label className="label">Tipo de Desconto</label>
-            <select
-              className="input"
-              value={orc.descontoTipo || 'percent'}
-              onChange={e => update({ descontoTipo: e.target.value })}
-            >
-              <option value="percent">Percentual (%)</option>
-              <option value="value">Valor (R$)</option>
-            </select>
-          </div>
-          <Field label={`Desconto (${orc.descontoTipo === 'percent' ? '%' : 'R$'})`}>
-            <input
-              className="input"
-              type="number"
-              min="0"
-              step="0.01"
-              value={orc.desconto || 0}
-              onChange={e => update({ desconto: e.target.value })}
-            />
-          </Field>
-          <div className="md:col-span-2 flex items-end">
-            <div className="bg-gray-50 rounded-lg px-4 py-2.5 w-full text-sm">
-              <span className="text-gray-500">Total com desconto: </span>
-              <span className="font-bold text-primary text-base">{fmt(orc.totalLiquido)}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="mb-3">
-          <label className="label">Garantia (aparece no PDF)</label>
-          <div className="flex gap-4 mt-1">
-            {[7, 15].map(anos => (
-              <label key={anos} className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="garantia"
-                  value={anos}
-                  checked={Number(orc.garantia || 15) === anos}
-                  onChange={() => update({ garantia: anos })}
-                  className="accent-primary"
-                />
-                <span className="text-sm font-medium">{anos} anos</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {/* Prazo + Garantia + Andaime */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5 p-4 bg-gray-50 rounded-xl border border-gray-200">
           <Field label="Prazo de Execução (dias úteis)">
-            <input
-              className="input"
-              type="number"
-              min="1"
-              value={orc.prazoExecucao || 3}
-              onChange={e => update({ prazoExecucao: Number(e.target.value) })}
-            />
-          </Field>
-          <Field label="Nº de Parcelas">
-            <input
-              className="input"
-              type="number"
-              min="1"
-              max="24"
-              step="1"
-              value={orc.parcelas || 1}
-              onChange={e => update({ parcelas: e.target.value })}
-            />
+            <input className="input" type="number" min="1" value={orc.prazoExecucao || 3} onChange={e => update({ prazoExecucao: Number(e.target.value) })} />
           </Field>
           <div>
-            <label className="label">Valor da Parcela (sem desc.)</label>
-            <div className="input bg-gray-50 text-gray-600 font-medium">
-              {fmt((orc.totalBruto || 0) / Math.max(1, Number(orc.parcelas) || 1))}
+            <label className="label">Garantia (aparece no PDF)</label>
+            <div className="flex gap-4 mt-1">
+              {[7, 15].map(anos => (
+                <label key={anos} className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="garantia" value={anos} checked={Number(orc.garantia || 15) === anos} onChange={() => update({ garantia: anos })} className="accent-primary" />
+                  <span className="text-sm font-medium">{anos} anos</span>
+                </label>
+              ))}
             </div>
           </div>
           <div>
-            <label className="label">Total Líquido (à vista)</label>
-            <div className="input bg-gray-50 text-primary font-bold">
-              {fmt(orc.totalLiquido)}
+            <label className="label">Andaime necessário?</label>
+            <div className="flex gap-4 mt-1">
+              {[['nao', 'Não'], ['sim', 'Sim']].map(([val, lbl]) => (
+                <label key={val} className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="andaime" value={val} checked={(orc.andaime || 'nao') === val} onChange={() => update({ andaime: val })} className="accent-primary" />
+                  <span className="text-sm font-medium">{lbl}</span>
+                </label>
+              ))}
             </div>
           </div>
         </div>
 
-        <div className="mt-4 space-y-3">
-          <h3 className="text-sm font-semibold text-gray-600">Textos das Condições (aparecem no PDF)</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Field label="Proposta 1 (à vista) — observação">
-              <input className="input" value={orc.condicaoPgto1Obs || ''} onChange={updateField('condicaoPgto1Obs')} placeholder="*Pgto a vista, na assinatura do contrato." />
+        {/* Total bruto */}
+        <div className="flex items-center gap-2 mb-5 p-3 bg-orange-50 rounded-lg border border-orange-200">
+          <span className="text-sm text-gray-600">Total Bruto dos Serviços:</span>
+          <span className="font-bold text-primary text-lg">{fmt(orc.totalBruto)}</span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+          {/* Proposta 1 — À Vista */}
+          <div className="bg-green-50 border-2 border-green-300 rounded-xl p-4">
+            <div className="font-bold text-green-800 text-sm mb-3 flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-green-600 text-white text-xs flex items-center justify-center">1</span>
+              PROPOSTA 1 — Pagamento à Vista
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <div>
+                <label className="label text-xs">Tipo de Desconto</label>
+                <select className="input py-1 text-sm" value={orc.descontoTipo1 || 'percent'} onChange={e => update({ descontoTipo1: e.target.value })}>
+                  <option value="percent">Percentual (%)</option>
+                  <option value="valor">Valor (R$)</option>
+                </select>
+              </div>
+              <div>
+                <label className="label text-xs">{orc.descontoTipo1 === 'valor' ? 'Desconto (R$)' : 'Desconto (%)'}</label>
+                <input className="input py-1 text-sm" type="number" min="0" step="0.01" value={orc.desconto1 || 0} onChange={e => update({ desconto1: e.target.value })} />
+              </div>
+            </div>
+            <div className="bg-white rounded-lg p-3 text-center border border-green-200">
+              <div className="text-xs text-gray-500 mb-1">TOTAL À VISTA</div>
+              <div className="text-2xl font-bold text-green-700">{fmt(orc.totalProposta1 ?? orc.totalLiquido)}</div>
+            </div>
+            <div className="mt-3">
+              <Field label="Observação (aparece no PDF)">
+                <input className="input text-sm" value={orc.condicaoPgto1Obs || ''} onChange={updateField('condicaoPgto1Obs')} placeholder="*Pgto à vista na assinatura do contrato." />
+              </Field>
+            </div>
+          </div>
+
+          {/* Proposta 2 — Parcelado */}
+          <div className="bg-blue-50 border-2 border-blue-300 rounded-xl p-4">
+            <div className="font-bold text-blue-800 text-sm mb-3 flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center">2</span>
+              PROPOSTA 2 — Pagamento Parcelado
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <div>
+                <label className="label text-xs">Tipo de Desconto</label>
+                <select className="input py-1 text-sm" value={orc.descontoTipo2 || 'percent'} onChange={e => update({ descontoTipo2: e.target.value })}>
+                  <option value="percent">Percentual (%)</option>
+                  <option value="valor">Valor (R$)</option>
+                </select>
+              </div>
+              <div>
+                <label className="label text-xs">{orc.descontoTipo2 === 'valor' ? 'Desconto (R$)' : 'Desconto (%)'}</label>
+                <input className="input py-1 text-sm" type="number" min="0" step="0.01" value={orc.desconto2 || 0} onChange={e => update({ desconto2: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <div>
+                <label className="label text-xs">Nº de Parcelas</label>
+                <input className="input py-1 text-sm" type="number" min="1" max="24" step="1" value={orc.parcelas || 1} onChange={e => update({ parcelas: e.target.value })} />
+              </div>
+              <div>
+                <label className="label text-xs">Tipo de Entrada</label>
+                <select className="input py-1 text-sm" value={orc.entradaTipo2 || 'percent'} onChange={e => update({ entradaTipo2: e.target.value })}>
+                  <option value="percent">Percentual (%)</option>
+                  <option value="valor">Valor (R$)</option>
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <div>
+                <label className="label text-xs">{orc.entradaTipo2 === 'valor' ? 'Entrada (R$)' : 'Entrada (%)'}</label>
+                <input className="input py-1 text-sm" type="number" min="0" step="0.01" value={orc.entrada2 ?? orc.entrada ?? 50} onChange={e => update({ entrada2: e.target.value })} />
+              </div>
+              <div className="flex flex-col justify-end">
+                <div className="bg-white rounded-lg p-2 text-center border border-blue-200">
+                  <div className="text-xs text-gray-400">Valor da Parcela</div>
+                  <div className="font-bold text-blue-700 text-base">{fmt(orc.valorParcela2 ?? orc.valorParcela)}</div>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white rounded-lg p-3 text-center border border-blue-200 mb-3">
+              <div className="text-xs text-gray-500 mb-0.5">TOTAL PARCELADO</div>
+              <div className="text-xl font-bold text-blue-700">{fmt(orc.totalProposta2 ?? orc.totalLiquido)}</div>
+              <div className="text-xs text-gray-400 mt-0.5">
+                Entrada: {fmt(orc.entradaVal2 ?? 0)} + {orc.parcelas || 1}x {fmt(orc.valorParcela2 ?? orc.valorParcela)}
+              </div>
+            </div>
+            <Field label="Obs linha 1">
+              <input className="input text-sm" value={orc.condicaoPgto2Obs1 || ''} onChange={updateField('condicaoPgto2Obs1')} placeholder="* 1ª parcela de entrada na assinatura." />
             </Field>
-            <Field label="Proposta 2 — obs linha 1">
-              <input className="input" value={orc.condicaoPgto2Obs1 || ''} onChange={updateField('condicaoPgto2Obs1')} placeholder="* 1ª parcela de entrada na assinatura do contrato." />
-            </Field>
-            <Field label="Proposta 2 — obs linha 2">
-              <input className="input" value={orc.condicaoPgto2Obs2 || ''} onChange={updateField('condicaoPgto2Obs2')} placeholder="*2ª parcela p/ 30 dias." />
-            </Field>
-            <Field label="Observação geral (itálico abaixo das propostas)">
-              <input className="input" value={orc.obsGeral || ''} onChange={updateField('obsGeral')} placeholder="Obs: O contrato deve ser assinado até 2 dias após recebimento..." />
-            </Field>
+            <div className="mt-2">
+              <Field label="Obs linha 2">
+                <input className="input text-sm" value={orc.condicaoPgto2Obs2 || ''} onChange={updateField('condicaoPgto2Obs2')} placeholder="*2ª parcela p/ 30 dias." />
+              </Field>
+            </div>
           </div>
         </div>
+
+        <Field label="Observação geral (itálico abaixo das propostas)">
+          <input className="input" value={orc.obsGeral || ''} onChange={updateField('obsGeral')} placeholder="Obs: O contrato deve ser assinado até 2 dias após recebimento..." />
+        </Field>
       </section>
 
       {/* ─── Section 5: Locais ─── */}
@@ -507,26 +628,49 @@ export default function OrcamentoFormPage() {
             Detalhamento de Locais
           </h2>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-xs">
               <thead>
-                <tr className="border-b-2 border-primary">
-                  <th className="text-left py-2 pr-3 text-xs font-semibold text-gray-600">Local</th>
-                  <th className="text-right py-2 px-2 text-xs font-semibold text-gray-600">Trincas (m)</th>
-                  <th className="text-right py-2 px-2 text-xs font-semibold text-gray-600">Junta Fria (m)</th>
-                  <th className="text-right py-2 px-2 text-xs font-semibold text-gray-600">Ralos</th>
-                  <th className="text-right py-2 pl-2 text-xs font-semibold text-gray-600">Descrição</th>
+                <tr className="border-b-2 border-primary bg-orange-50">
+                  <th className="text-left py-2 pr-3 font-semibold text-gray-600">Local</th>
+                  <th className="text-right py-2 px-1 font-semibold text-gray-600">Trincas (m)</th>
+                  <th className="text-right py-2 px-1 font-semibold text-gray-600">J. Fria (m)</th>
+                  <th className="text-right py-2 px-1 font-semibold text-gray-600">Ralos</th>
+                  <th className="text-right py-2 px-1 font-semibold text-gray-600">J. Dilat (m)</th>
+                  <th className="text-right py-2 px-1 font-semibold text-gray-600">Ferragem (m)</th>
+                  <th className="text-right py-2 px-1 font-semibold text-gray-600">Cortina (m²)</th>
+                  <th className="text-right py-2 pl-2 font-semibold text-primary">Total</th>
                 </tr>
               </thead>
               <tbody>
-                {orc.locais.map((local, i) => (
-                  <tr key={i} className="border-b border-gray-100">
-                    <td className="py-2 pr-3 font-medium">{local.nome || local.local || `Local ${i + 1}`}</td>
-                    <td className="py-2 px-2 text-right">{local.trinca || '—'}</td>
-                    <td className="py-2 px-2 text-right">{local.juntaFria || '—'}</td>
-                    <td className="py-2 px-2 text-right">{local.ralo || '—'}</td>
-                    <td className="py-2 pl-2 text-right text-gray-500 text-xs">{local.descricao || ''}</td>
-                  </tr>
-                ))}
+                {orc.locais.map((local, i) => {
+                  const total = (Number(local.trinca)||0) + (Number(local.juntaFria)||0) + (Number(local.ralo)||0) + (Number(local.juntaDilat)||0) + (Number(local.ferragem)||0) + (Number(local.cortina)||0)
+                  return (
+                    <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="py-1.5 pr-3 font-medium text-gray-800">{local.nome || local.local || `Local ${i + 1}`}</td>
+                      <td className="py-1.5 px-1 text-right">{Number(local.trinca) > 0 ? local.trinca : '—'}</td>
+                      <td className="py-1.5 px-1 text-right">{Number(local.juntaFria) > 0 ? local.juntaFria : '—'}</td>
+                      <td className="py-1.5 px-1 text-right">{Number(local.ralo) > 0 ? local.ralo : '—'}</td>
+                      <td className="py-1.5 px-1 text-right">{Number(local.juntaDilat) > 0 ? local.juntaDilat : '—'}</td>
+                      <td className="py-1.5 px-1 text-right">{Number(local.ferragem) > 0 ? local.ferragem : '—'}</td>
+                      <td className="py-1.5 px-1 text-right">{Number(local.cortina) > 0 ? local.cortina : '—'}</td>
+                      <td className="py-1.5 pl-2 text-right font-semibold text-primary">{total > 0 ? total : '—'}</td>
+                    </tr>
+                  )
+                })}
+                {/* Totals row */}
+                <tr className="bg-orange-50 font-bold border-t-2 border-primary">
+                  <td className="py-2 pr-3 text-xs font-bold text-gray-700">TOTAL</td>
+                  {['trinca','juntaFria','ralo','juntaDilat','ferragem','cortina'].map(k => (
+                    <td key={k} className="py-2 px-1 text-right text-primary">
+                      {orc.locais.reduce((s,l) => s + (Number(l[k])||0), 0) > 0
+                        ? orc.locais.reduce((s,l) => s + (Number(l[k])||0), 0)
+                        : '—'}
+                    </td>
+                  ))}
+                  <td className="py-2 pl-2 text-right text-primary">
+                    {orc.locais.reduce((s,l) => s + ['trinca','juntaFria','ralo','juntaDilat','ferragem','cortina'].reduce((a,k)=>a+(Number(l[k])||0),0), 0)}
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -550,8 +694,11 @@ export default function OrcamentoFormPage() {
       {/* Sticky Bottom Bar */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-3 justify-end z-10 md:left-56">
         <div className="flex-1 flex items-center gap-4">
-          <span className="text-sm text-gray-500">Total:</span>
-          <span className="text-xl font-bold text-primary">{fmt(orc.totalLiquido)}</span>
+          <span className="text-sm text-gray-500">{orc.orcMinimo ? 'Total Mínimo:' : 'Total:'}</span>
+          <span className="text-xl font-bold text-primary">
+            {fmt(orc.orcMinimo && orc.totalMinimo > 0 ? orc.totalMinimo : orc.totalLiquido)}
+          </span>
+          {orc.orcMinimo && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">🔖 Mínimo</span>}
         </div>
         <button onClick={handleSave} disabled={saving} className="btn-secondary">
           {saving ? 'Salvando...' : 'Salvar Rascunho'}
@@ -562,11 +709,13 @@ export default function OrcamentoFormPage() {
         <button onClick={handleDownloadExcel} disabled={saving} className="btn-secondary">
           Excel
         </button>
-        {orc.status !== 'aprovado' && (
-          <button onClick={handleApprove} disabled={saving} className="btn-success">
-            Aprovar → Gerar Contrato
-          </button>
-        )}
+        <button
+          onClick={async () => { await handleSave(); navigate('/orcamentos') }}
+          disabled={saving}
+          className="btn-primary"
+        >
+          {saving ? 'Salvando...' : '✓ Concluir'}
+        </button>
       </div>
     </div>
   )
