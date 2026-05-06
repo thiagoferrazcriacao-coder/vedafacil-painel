@@ -291,9 +291,26 @@ export default function OrcamentoFormPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
-          <Field label="Avaliado Por">
-            <input className="input" value={orc.avaliadoPor || ''} onChange={updateField('avaliadoPor')} />
-          </Field>
+          <div>
+            <label className="label">Avaliado Por</label>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {['Thiago', 'Alan', 'Fernando', 'Daniel'].map(nome => {
+                const selecionados = (orc.avaliadoPor || '').split(',').map(s => s.trim()).filter(Boolean)
+                const ativo = selecionados.includes(nome)
+                return (
+                  <button key={nome} type="button"
+                    onClick={() => {
+                      const atual = (orc.avaliadoPor || '').split(',').map(s => s.trim()).filter(Boolean)
+                      const novo = ativo ? atual.filter(s => s !== nome) : [...atual, nome]
+                      update({ avaliadoPor: novo.join(', ') })
+                    }}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${ativo ? 'bg-primary text-white border-primary' : 'bg-white text-gray-600 border-gray-300 hover:border-primary hover:text-primary'}`}>
+                    {nome}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
           <Field label="Acompanhado Por">
             <input className="input" value={orc.acompanhadoPor || ''} onChange={updateField('acompanhadoPor')} />
           </Field>

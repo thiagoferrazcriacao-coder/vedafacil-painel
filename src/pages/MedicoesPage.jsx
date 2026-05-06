@@ -1,6 +1,107 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
+import { useAuth } from '../App.jsx'
+
+function NovaMedicaoModal({ onClose, onCreated }) {
+  const EMPTY = { cliente: '', ac: '', celular: '', endereco: '', bairro: '', cidade: '', cep: '', garantia: 15, andaime: 'nao', obs: '', locais: [] }
+  const [form, setForm] = useState(EMPTY)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const upd = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }))
+
+  const handleSubmit = async () => {
+    if (!form.cliente.trim()) { setError('Informe o cliente.'); return }
+    setSaving(true)
+    setError('')
+    try {
+      const result = await api.createMedicaoManual(form)
+      onCreated(result)
+      onClose()
+    } catch (err) {
+      setError(err.message)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-4 border-b">
+          <h2 className="font-bold text-gray-800">Nova Medição Manual</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        </div>
+        <div className="p-4 space-y-3">
+          {error && <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">{error}</div>}
+          <div>
+            <label className="label">Cliente *</label>
+            <input className="input" value={form.cliente} onChange={upd('cliente')} placeholder="Nome do condomínio/empresa" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Responsável (AC)</label>
+              <input className="input" value={form.ac} onChange={upd('ac')} placeholder="Síndico / zelador" />
+            </div>
+            <div>
+              <label className="label">Celular</label>
+              <input className="input" value={form.celular} onChange={upd('celular')} placeholder="(00) 00000-0000" />
+            </div>
+          </div>
+          <div>
+            <label className="label">Endereço</label>
+            <input className="input" value={form.endereco} onChange={upd('endereco')} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Bairro</label>
+              <input className="input" value={form.bairro} onChange={upd('bairro')} />
+            </div>
+            <div>
+              <label className="label">Cidade</label>
+              <input className="input" value={form.cidade} onChange={upd('cidade')} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">CEP</label>
+              <input className="input" value={form.cep} onChange={upd('cep')} placeholder="00000-000" />
+            </div>
+            <div>
+              <label className="label">Garantia</label>
+              <select className="input" value={form.garantia} onChange={upd('garantia')}>
+                <option value={15}>15 anos</option>
+                <option value={7}>7 anos</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="label">Andaime necessário?</label>
+            <div className="flex gap-4 mt-1">
+              {[['nao','Não'],['sim','Sim']].map(([v,l]) => (
+                <label key={v} className="flex items-center gap-2 cursor-pointer text-sm">
+                  <input type="radio" name="andaime_manual" value={v} checked={form.andaime===v} onChange={() => setForm(prev=>({...prev,andaime:v}))} className="accent-primary" />
+                  {l}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="label">Observações</label>
+            <textarea className="input min-h-[60px] resize-y" value={form.obs} onChange={upd('obs')} placeholder="Observações adicionais..." />
+          </div>
+          <p className="text-xs text-gray-400">Após criar, acesse a medição para adicionar locais e quantidades.</p>
+        </div>
+        <div className="flex justify-end gap-3 p-4 border-t">
+          <button onClick={onClose} className="btn-secondary" disabled={saving}>Cancelar</button>
+          <button onClick={handleSubmit} className="btn-primary" disabled={saving}>
+            {saving ? 'Criando...' : '+ Criar Medição'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const STATUS_COLORS = {
   pendente: 'bg-yellow-100 text-yellow-800',
@@ -18,12 +119,15 @@ const STATUS_LABELS = {
 
 export default function MedicoesPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [medicoes, setMedicoes] = useState([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState(null)
   const [checked, setChecked] = useState(new Set())
   const [deleting, setDeleting] = useState(false)
-  const [filters, setFilters] = useState({ medidor: '', status: '', dateFrom: '', dateTo: '', search: '' })
+  const [filters, setFilters] = useState({ medidor: '', status: '', dateFrom: '', dateTo: '', search: '', bairro: '' })
+  const [showManual, setShowManual] = useState(false)
 
   useEffect(() => {
     api.getMedicoes()
@@ -35,9 +139,10 @@ export default function MedicoesPage() {
   const filtered = medicoes.filter(m => {
     if (filters.medidor && (m.user || m.medidor) !== filters.medidor) return false
     if (filters.status && m.status !== filters.status) return false
+    if (filters.bairro && (m.bairro || '') !== filters.bairro) return false
     if (filters.search) {
       const q = filters.search.toLowerCase()
-      const match = [m.cliente, m.nomeCliente, m.cidade, m.user, m.medidor]
+      const match = [m.cliente, m.nomeCliente, m.cidade, m.bairro, m.user, m.medidor]
         .filter(Boolean).some(v => v.toLowerCase().includes(q))
       if (!match) return false
     }
@@ -52,6 +157,7 @@ export default function MedicoesPage() {
   })
 
   const medidores = [...new Set(medicoes.map(m => m.user || m.medidor).filter(Boolean))]
+  const bairros = [...new Set(medicoes.map(m => m.bairro).filter(Boolean))].sort()
 
   const toggleCheck = (id, e) => {
     e.stopPropagation()
@@ -76,8 +182,18 @@ export default function MedicoesPage() {
     setDeleting(false)
   }
 
+  const handleManualCreated = (newMedicao) => {
+    setMedicoes(prev => [{ ...newMedicao, id: newMedicao.id || newMedicao._id }, ...prev])
+  }
+
   return (
     <div className="flex h-full">
+      {showManual && (
+        <NovaMedicaoModal
+          onClose={() => setShowManual(false)}
+          onCreated={handleManualCreated}
+        />
+      )}
       {/* Main List */}
       <div className="flex-1 p-6 overflow-auto min-w-0">
         <div className="flex items-center justify-between mb-5">
@@ -85,23 +201,31 @@ export default function MedicoesPage() {
             <h1 className="text-2xl font-bold text-gray-800">Medições</h1>
             <p className="text-gray-500 text-sm mt-0.5">{filtered.length} registros</p>
           </div>
-          {checked.size > 0 && (
+          <div className="flex items-center gap-2">
             <button
-              onClick={handleDeleteSelected}
-              disabled={deleting}
-              className="btn-danger text-sm ml-4"
+              onClick={() => setShowManual(true)}
+              className="btn-primary text-sm"
             >
-              {deleting ? 'Excluindo...' : `Excluir ${checked.size} selecionado(s)`}
+              + Nova Manual
             </button>
-          )}
+            {isAdmin && checked.size > 0 && (
+              <button
+                onClick={handleDeleteSelected}
+                disabled={deleting}
+                className="btn-danger text-sm"
+              >
+                {deleting ? 'Excluindo...' : `Excluir ${checked.size}`}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Filters */}
         <div className="card mb-4">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
             <input
               className="input col-span-2 md:col-span-1"
-              placeholder="Buscar cliente, cidade..."
+              placeholder="Buscar cliente, bairro, cidade..."
               value={filters.search}
               onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
             />
@@ -112,9 +236,6 @@ export default function MedicoesPage() {
             >
               <option value="">Todos os medidores</option>
               {medidores.map(m => <option key={m} value={m}>{m}</option>)}
-              <option value="Edson">Edson</option>
-              <option value="Fernando">Fernando</option>
-              <option value="Alan">Alan</option>
             </select>
             <select
               className="input"
@@ -125,6 +246,17 @@ export default function MedicoesPage() {
               <option value="pendente">Pendente</option>
               <option value="em_andamento">Em Andamento</option>
               <option value="concluido">Concluído</option>
+              <option value="reaberta">Reaberta</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <select
+              className="input"
+              value={filters.bairro}
+              onChange={e => setFilters(f => ({ ...f, bairro: e.target.value }))}
+            >
+              <option value="">Todos os bairros</option>
+              {bairros.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
             <input
               type="date"
@@ -161,9 +293,9 @@ export default function MedicoesPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-4 py-3 w-10">
+                    {isAdmin && <th className="px-4 py-3 w-10">
                       <input type="checkbox" checked={checked.size === filtered.length && filtered.length > 0} onChange={toggleAll} className="rounded" />
-                    </th>
+                    </th>}
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Nº</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Data/Hora</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Cliente</th>
@@ -181,9 +313,9 @@ export default function MedicoesPage() {
                       className={`hover:bg-gray-50 cursor-pointer transition-colors ${selected?.id === m.id ? 'bg-blue-50' : ''}`}
                       onClick={() => setSelected(selected?.id === m.id ? null : m)}
                     >
-                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                      {isAdmin && <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                         <input type="checkbox" checked={checked.has(m.id)} onChange={e => toggleCheck(m.id, e)} className="rounded" />
-                      </td>
+                      </td>}
                       <td className="px-4 py-3 font-mono text-xs text-gray-500">
                         #{String(m.numeroMedicao || '').padStart(3, '0')}
                       </td>
@@ -199,9 +331,19 @@ export default function MedicoesPage() {
                         {Array.isArray(m.locais) ? m.locais.length : '—'}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`badge ${STATUS_COLORS[m.status] || 'bg-gray-100 text-gray-700'}`}>
-                          {STATUS_LABELS[m.status] || m.status || 'Pendente'}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span className={`badge ${STATUS_COLORS[m.status] || 'bg-gray-100 text-gray-700'}`}>
+                            {STATUS_LABELS[m.status] || m.status || 'Pendente'}
+                          </span>
+                          {m.temOrcamento && (
+                            <span
+                              onClick={(e) => { e.stopPropagation(); navigate('/orcamentos/' + m.orcamentoId) }}
+                              className="text-xs bg-orange-100 text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full cursor-pointer hover:bg-orange-200 font-medium w-fit"
+                            >
+                              📋 Orçamento #{String(m.numeroOrcamento || '').padStart(4, '0')}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <button

@@ -1598,7 +1598,7 @@ app.get('/api/contratos/:id/pdf', async (req, res) => {
 
 // ── Certificado de Garantia PDF ───────────────────────────────────────────────
 
-function buildGarantiaPdfHtml(c) {
+function buildGarantiaPdfHtml(c, osPontos = []) {
   // ── helpers ────────────────────────────────────────────────────────────────
   const fmtDate = (d) => {
     if (!d) return '';
@@ -1743,6 +1743,45 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#222;line-hei
   </div>
 
 </div>
+
+${(() => {
+  // Relatório fotográfico — antes e depois
+  const FOOTER_RF = `<div style="text-align:center;font-size:8.5px;color:#666;margin-top:16px;padding-top:8px;border-top:1px solid #ccc;"><strong style="color:#e87722;">Eliminamos Infiltrações Sem Quebrar!</strong><br>CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015</div>`;
+  const logoGar = LOGO_B64 ? `<div style="text-align:center;margin-bottom:8px;"><img src="data:image/png;base64,${LOGO_B64}" style="height:40px;width:auto;" alt="Vedafácil"></div>` : '';
+  const fotoPages = [];
+  osPontos.forEach(p => {
+    const antesFotos = p.fotosAntes || [];
+    const depoisFotos = p.fotosDepois || [];
+    antesFotos.forEach((f, fi) => {
+      const imgSrc = (f && typeof f === 'object') ? (f.full || f.thumb || f.data) : f;
+      if (!imgSrc) return;
+      fotoPages.push(`<div style="page-break-before:always;padding:10mm 14mm 14mm;max-width:210mm;margin:0 auto;">
+  ${logoGar}
+  <div style="font-size:11px;font-weight:bold;margin-bottom:4px;color:#e87722;">📷 FOTO ANTES — ${p.nome || 'Local'} (${fi + 1}/${antesFotos.length})</div>
+  <div style="border:1px solid #ccc;padding:8px;text-align:center;">
+    <img src="${imgSrc}" style="width:100%;max-height:200mm;object-fit:contain;" alt="">
+    <div style="text-align:center;font-size:9px;color:#555;margin-top:4px;">ANTES — ${p.nome || 'Local'}</div>
+  </div>
+  ${FOOTER_RF}
+</div>`);
+    });
+    depoisFotos.forEach((f, fi) => {
+      const imgSrc = (f && typeof f === 'object') ? (f.full || f.thumb || f.data) : f;
+      if (!imgSrc) return;
+      fotoPages.push(`<div style="page-break-before:always;padding:10mm 14mm 14mm;max-width:210mm;margin:0 auto;">
+  ${logoGar}
+  <div style="font-size:11px;font-weight:bold;margin-bottom:4px;color:#16a34a;">📷 FOTO DEPOIS — ${p.nome || 'Local'} (${fi + 1}/${depoisFotos.length})</div>
+  <div style="border:1px solid #ccc;padding:8px;text-align:center;">
+    <img src="${imgSrc}" style="width:100%;max-height:200mm;object-fit:contain;" alt="">
+    <div style="text-align:center;font-size:9px;color:#555;margin-top:4px;">DEPOIS — ${p.nome || 'Local'}</div>
+  </div>
+  ${FOOTER_RF}
+</div>`);
+    });
+  });
+  return fotoPages.join('');
+})()}
+
 <script>function downloadPDF(){window.print()}</script>
 </body>
 </html>`;
@@ -1775,8 +1814,27 @@ app.get('/api/contratos/:id/garantia', async (req, res) => {
     if (isConnected) c = await Contrato.findOne({ _id: req.params.id });
     else c = memStore.contratos.find(x => x._id === req.params.id);
     if (!c) return res.status(404).json({ error: 'Not found' });
+
+    // Fetch OS photos for relatório fotográfico
+    let osPontos = [];
+    try {
+      let os;
+      if (isConnected) {
+        os = await OS.findOne({ contratoId: req.params.id, tipo: { $ne: 'reparo' } }).lean();
+        if (!os && c.orcamentoId) os = await OS.findOne({ orcamentoId: c.orcamentoId, tipo: { $ne: 'reparo' } }).lean();
+      } else {
+        os = memStore.ordensServico?.find(o => o.contratoId === req.params.id && o.tipo !== 'reparo');
+        if (!os && c.orcamentoId) os = memStore.ordensServico?.find(o => o.orcamentoId === c.orcamentoId && o.tipo !== 'reparo');
+      }
+      if (os && os.pontos) {
+        osPontos = os.pontos.filter(p => (p.fotosAntes?.length || 0) + (p.fotosDepois?.length || 0) > 0);
+      }
+    } catch (photoErr) {
+      console.error('Garantia: erro ao buscar fotos da OS:', photoErr.message);
+    }
+
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.send(buildGarantiaPdfHtml(c));
+    return res.send(buildGarantiaPdfHtml(c, osPontos));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
