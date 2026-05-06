@@ -356,6 +356,9 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
     <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 2px"></div>
     <button onclick="undoCroqui()" style="background:white;border:1.5px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer" title="Desfazer">↩</button>
     <button onclick="limparCroqui()" style="background:white;border:1.5px solid #fca5a5;color:#dc2626;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer" title="Limpar tudo">🗑</button>
+    <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 2px"></div>
+    <button onclick="document.getElementById('croqui-foto-input').click()" style="background:white;border:1.5px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer" title="Importar foto como fundo">📷</button>
+    <input id="croqui-foto-input" type="file" accept="image/*" style="display:none" onchange="importarFotoFundo(this)">
   </div>
   <div style="flex:1;overflow:hidden;position:relative;background:#fff">
     <canvas id="croqui-canvas" style="display:block;touch-action:none;cursor:crosshair"></canvas>
@@ -2005,6 +2008,37 @@ function undoCroqui() {
   const canvas = document.getElementById('croqui-canvas');
   canvas.getContext('2d').putImageData(CQ.history.pop(), 0, 0);
   saveSnapshot();
+}
+
+function importarFotoFundo(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const img = new Image();
+    img.onload = () => {
+      pushHistory();
+      const canvas = document.getElementById('croqui-canvas');
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const W = canvas.width / dpr, H = canvas.height / dpr;
+      // Fundo branco
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, W, H);
+      // Desenha foto proporcionalmente centralizada
+      const scale = Math.min(W / img.width, H / img.height);
+      const imgW = img.width * scale, imgH = img.height * scale;
+      const x = (W - imgW) / 2, y = (H - imgH) / 2;
+      ctx.globalAlpha = 0.35; // transparência para referência
+      ctx.drawImage(img, x, y, imgW, imgH);
+      ctx.globalAlpha = 1.0;
+      saveSnapshot();
+      showToast('Foto importada como fundo. Desenhe por cima!');
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+  input.value = ''; // reset para permitir re-importar a mesma foto
 }
 
 function limparCroqui() {
