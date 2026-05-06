@@ -1,0 +1,14 @@
+{
+  "name": "Vedafácil Aplicador",
+  "short_name": "VF Aplicador",
+  "description": "App de campo para equipes de aplicação Vedafácil",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a5c9a",
+  "theme_color": "#1a5c9a",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

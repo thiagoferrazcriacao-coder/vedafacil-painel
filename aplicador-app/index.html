@@ -1,0 +1,2164 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#e87722">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="VF Aplicador">
+<link rel="manifest" href="/manifest.json">
+<title>Vedafácil Aplicador</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f4f8;color:#1a202c;min-height:100vh;overscroll-behavior:none;font-size:16px}
+.screen{display:none;min-height:100vh;flex-direction:column}
+.screen.active{display:flex}
+
+/* Header */
+.header{background:linear-gradient(135deg,#c45d12,#e87722);color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:10;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
+.header h1{font-size:19px;font-weight:700;flex:1}
+.header .back-btn{background:rgba(255,255,255,0.2);border:none;color:white;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;flex-shrink:0}
+.header .badge{background:#e87722;color:white;font-size:11px;font-weight:700;padding:2px 8px;border-radius:12px}
+
+/* Content */
+.content{flex:1;padding:16px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+
+/* Cards */
+.card{background:white;border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08)}
+/* Stats row */
+.stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+.stat-box{background:white;border-radius:10px;padding:12px 8px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08)}
+.stat-num{font-size:26px;font-weight:800;line-height:1}
+.stat-lbl{font-size:11px;color:#6b7280;margin-top:2px;font-weight:500}
+/* Section header */
+.sec-header{font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.8px;margin:16px 0 8px;display:flex;align-items:center;gap:6px}
+.sec-header .sec-count{background:#e5e7eb;color:#374151;font-size:11px;padding:1px 7px;border-radius:10px;font-weight:700}
+/* Concluída compact card */
+.os-item-compact{background:white;border-radius:10px;padding:11px 14px;margin-bottom:7px;box-shadow:0 1px 3px rgba(0,0,0,0.06);display:flex;justify-content:space-between;align-items:center;gap:8px}
+.os-item-compact .osc-title{font-size:13px;font-weight:700;color:#1a202c}
+.os-item-compact .osc-sub{font-size:11px;color:#6b7280;margin-top:1px}
+.os-item-compact .osc-date{font-size:11px;color:#16a34a;font-weight:600;flex-shrink:0}
+
+/* Buttons */
+.btn{display:block;width:100%;padding:14px;border-radius:10px;border:none;font-size:16px;font-weight:600;cursor:pointer;text-align:center;transition:opacity 0.15s}
+.btn:active{opacity:0.8}
+.btn-primary{background:#e87722;color:white}
+.btn-success{background:#16a34a;color:white}
+.btn-orange{background:#e87722;color:white}
+.btn-outline{background:white;color:#e87722;border:2px solid #e87722}
+.btn-danger{background:#dc2626;color:white}
+.btn-disabled{background:#d1d5db;color:#9ca3af;pointer-events:none;cursor:not-allowed}
+.btn+.btn{margin-top:10px}
+
+/* Form */
+.label{font-size:14px;font-weight:600;color:#4b5563;margin-bottom:4px;display:block}
+.input{width:100%;padding:12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:16px;background:white;outline:none;-webkit-appearance:none}
+.input:focus{border-color:#e87722}
+select.input{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='%236b7280' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+
+/* OS List item */
+.os-item{background:white;border-radius:12px;padding:14px 16px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);cursor:pointer;border-left:4px solid #e87722;transition:transform 0.1s}
+.os-item:active{transform:scale(0.98)}
+.os-item.em_andamento{border-color:#d97706}
+.os-item.reparo{border-left-color:#dc2626;background:#fff8f8}
+.os-item .os-title{font-size:15px;font-weight:700;color:#1a202c;margin-bottom:2px}
+.os-item .os-sub{font-size:13px;color:#6b7280}
+/* Reparo badge */
+.badge-reparo{background:#fee2e2;color:#dc2626;font-size:11px;font-weight:800;padding:3px 8px;border-radius:6px;letter-spacing:0.3px;border:1px solid #fca5a5}
+/* Reparo banner (OS detail) */
+.reparo-banner{background:linear-gradient(135deg,#fef2f2,#fee2e2);border:1.5px solid #fca5a5;border-radius:12px;padding:14px 16px;margin-bottom:14px}
+/* Historico reparo */
+.hist-item{display:flex;gap:10px;padding:10px 12px;border-radius:8px;margin-bottom:6px;background:#f9fafb;border:1px solid #e5e7eb}
+.hist-item.atual{background:#fff7ed;border-color:#fed7aa}
+.hist-item.concluido{background:#f0fdf4;border-color:#86efac}
+.os-status{font-size:12px;font-weight:600;padding:2px 8px;border-radius:10px;display:inline-block;margin-top:4px}
+.status-agendada{background:#dbeafe;color:#1d4ed8}
+.status-em_andamento{background:#fef3c7;color:#d97706}
+.status-concluido,.status-concluida{background:#d1fae5;color:#16a34a}
+.status-pendente{background:#f3f4f6;color:#6b7280}
+
+/* Progress bar */
+.progress-bar{height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin:6px 0}
+.progress-fill{height:100%;background:#e87722;border-radius:4px;transition:width 0.3s}
+.progress-fill.done{background:#16a34a}
+
+/* Ponto list item */
+.ponto-item{border:1.5px solid #e5e7eb;border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;transition:all 0.15s;background:white}
+.ponto-item:active{background:#f9fafb}
+.ponto-item.concluido{border-color:#86efac;background:#f0fdf4}
+.ponto-item.em_andamento{border-color:#fcd34d;background:#fffbeb}
+.p-name{font-size:14px;font-weight:700;color:#1a202c}
+.p-meta{font-size:12px;color:#6b7280;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap}
+.p-status{font-size:11px;font-weight:600;padding:2px 7px;border-radius:8px;flex-shrink:0}
+
+/* Sub-pontos */
+.subponto-item{display:flex;align-items:center;gap:10px;padding:10px;border:1.5px solid #e5e7eb;border-radius:8px;margin-bottom:6px;cursor:pointer;background:white;transition:all 0.15s;user-select:none}
+.subponto-item.feito{background:#f0fdf4;border-color:#86efac}
+.subponto-item:active{opacity:0.8}
+.subponto-checkbox{width:24px;height:24px;border:2px solid #d1d5db;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;transition:all 0.15s}
+.subponto-item.feito .subponto-checkbox{background:#16a34a;border-color:#16a34a;color:white}
+.subponto-label{font-size:14px;color:#374151;flex:1}
+.subponto-item.feito .subponto-label{color:#16a34a;font-weight:500}
+
+/* Photo gallery */
+.foto-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+.foto-thumb{aspect-ratio:1;border-radius:8px;overflow:hidden;position:relative;background:#f3f4f6}
+.foto-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.remove-btn{position:absolute;top:2px;right:2px;background:rgba(220,38,38,0.9);color:white;border:none;border-radius:50%;width:20px;height:20px;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0}
+.foto-add{aspect-ratio:1;border-radius:8px;border:2px dashed #93c5fd;background:#eff6ff;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:12px;color:#3b82f6;gap:4px;transition:all 0.15s}
+.foto-add:active{background:#dbeafe}
+.foto-add-icon{font-size:26px;line-height:1}
+
+/* Section headers */
+.section-title{font-size:13px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin:16px 0 8px}
+.section-title:first-child{margin-top:0}
+
+/* Alerts */
+.alert{padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:12px}
+.alert-error{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
+.alert-info{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+.alert-warning{background:#fffbeb;color:#d97706;border:1px solid #fde68a}
+.alert-success{background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0}
+
+/* Empty state */
+.empty{text-align:center;padding:40px 20px;color:#6b7280}
+.empty-icon{font-size:48px;margin-bottom:12px}
+
+/* Spinner */
+.spinner{width:32px;height:32px;border:3px solid #e5e7eb;border-top-color:#e87722;border-radius:50%;animation:spin 0.7s linear infinite;margin:40px auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Loading overlay */
+.loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,0.8);z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-size:14px;color:#6b7280}
+.loading-overlay.hidden{display:none}
+
+/* Info links (maps/whatsapp) */
+.info-link{display:inline-flex;align-items:center;gap:5px;font-size:13px;padding:6px 12px;border-radius:8px;text-decoration:none;font-weight:600;transition:opacity 0.15s}
+.info-link:active{opacity:0.75}
+.link-maps{background:#e8f0fe;color:#1a73e8;border:1px solid #c5d9f8}
+.link-wa{background:#d9f7e4;color:#1a7a40;border:1px solid #a7e8bd}
+
+/* Signature canvas */
+#sig-canvas{display:block;width:100%;background:white;border-radius:10px;border:2px solid #e87722;touch-action:none;cursor:crosshair}
+.sig-baseline{position:relative;margin:16px 0}
+.finalizar-info{background:#fff8e7;border:1px solid #fde68a;border-radius:10px;padding:14px;font-size:13px;color:#92400e;margin-bottom:14px}
+/* Aguardando assinatura */
+.status-aguardando_assinatura{background:#fef9c3;color:#854d0e}
+.os-item.aguardando_assinatura{border-color:#d97706}
+/* OS Bottom Nav */
+.os-bottom-nav{display:flex;position:fixed;bottom:0;left:0;right:0;background:white;border-top:2px solid #f3f4f6;z-index:20;box-shadow:0 -2px 10px rgba(0,0,0,0.08)}
+.os-nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 2px 18px;border:none;background:transparent;cursor:pointer;color:#9ca3af;transition:all 0.15s;gap:3px;-webkit-tap-highlight-color:transparent}
+.os-nav-btn:active{background:#fff7ed}
+.os-nav-btn .nav-icon{font-size:24px;line-height:1}
+.os-nav-btn .nav-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px}
+.os-nav-btn.active{color:#e87722}
+.os-nav-btn.active .nav-lbl{color:#e87722}
+/* History tabs */
+.hist-tabs{display:flex;gap:2px;background:#e5e7eb;border-radius:10px;padding:3px;margin-bottom:16px}
+.hist-tabs button{flex:1;padding:9px 4px;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;background:transparent;color:#6b7280;transition:all 0.15s}
+.hist-tabs button.active{background:white;color:#e87722;box-shadow:0 1px 4px rgba(0,0,0,0.1)}
+/* Concluir dia badge */
+.dia-badge{display:inline-flex;align-items:center;gap:5px;background:#fff7ed;border:1.5px solid #fed7aa;color:#c2410c;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;margin-bottom:12px}
+/* Toast */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a202c;color:white;padding:12px 24px;border-radius:24px;font-size:14px;font-weight:600;z-index:300;opacity:0;transition:opacity 0.3s;pointer-events:none;white-space:nowrap}
+.toast.show{opacity:1}
+/* Modal overlay */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:250;display:flex;align-items:flex-end;justify-content:center}
+.modal-overlay.hidden{display:none}
+.modal-sheet{background:white;border-radius:20px 20px 0 0;padding:24px;width:100%;max-width:480px}
+/* Celebration */
+.celebrate-overlay{position:fixed;inset:0;background:rgba(22,163,74,0.95);z-index:280;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:32px;color:white}
+.celebrate-overlay.hidden{display:none}
+/* Croqui */
+.croqui-tool{background:white;border:1.5px solid #d1d5db;border-radius:6px;width:32px;height:32px;font-size:15px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all 0.15s}
+.croqui-tool.active{background:#e87722;border-color:#e87722;color:white}
+.croqui-tool:active{opacity:0.8}
+</style>
+</head>
+<body>
+
+<!-- ── LOADING OVERLAY ───────────────────────────────────────────────────── -->
+<div id="loading-overlay" class="loading-overlay">
+  <div class="spinner" style="margin:0"></div>
+  <span id="loading-msg">Aguarde...</span>
+</div>
+
+<!-- ── SCREEN: LOGIN ─────────────────────────────────────────────────────── -->
+<div id="screen-login" class="screen active">
+  <div class="header"><h1>⚡ Vedafácil Aplicador</h1></div>
+  <div class="content">
+    <div style="text-align:center;padding:24px 0 20px">
+      <div style="font-size:52px;margin-bottom:8px">🏗️</div>
+      <h2 style="font-size:20px;font-weight:800;color:#e87722">App do Aplicador</h2>
+      <p style="font-size:13px;color:#6b7280;margin-top:4px">Selecione sua equipe e membro</p>
+    </div>
+    <div class="card">
+      <div style="margin-bottom:14px">
+        <label class="label">Equipe</label>
+        <select id="sel-equipe" class="input">
+          <option value="">Carregando equipes...</option>
+        </select>
+      </div>
+      <div style="margin-bottom:18px">
+        <label class="label">Seu nome</label>
+        <select id="sel-membro" class="input">
+          <option value="">Selecione a equipe primeiro</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="doLogin()">Entrar →</button>
+    </div>
+    <div id="login-error" class="alert alert-error" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ── SCREEN: OS LIST ───────────────────────────────────────────────────── -->
+<div id="screen-os-list" class="screen">
+  <div class="header">
+    <h1>Vedafácil</h1>
+    <span id="equipe-badge" class="badge"></span>
+    <button class="back-btn" onclick="showScreen('screen-login')" title="Trocar equipe">↩</button>
+  </div>
+  <div class="content" style="padding-top:12px;padding-bottom:80px">
+    <div id="os-list-spinner" class="spinner"></div>
+    <div id="os-list-content" style="display:none"></div>
+  </div>
+  <nav class="os-bottom-nav">
+    <button class="os-nav-btn active" id="tab-andamento" onclick="switchOSTab('andamento')">
+      <span class="nav-icon">🔧</span>
+      <span class="nav-lbl">Andamento</span>
+    </button>
+    <button class="os-nav-btn" id="tab-agendadas" onclick="switchOSTab('agendadas')">
+      <span class="nav-icon">📅</span>
+      <span class="nav-lbl">Agendadas</span>
+    </button>
+    <button class="os-nav-btn" id="tab-compartilhadas" onclick="switchOSTab('compartilhadas')">
+      <span class="nav-icon">🤝</span>
+      <span class="nav-lbl">Compartilhadas</span>
+    </button>
+    <button class="os-nav-btn" id="tab-concluidas" onclick="switchOSTab('concluidas')">
+      <span class="nav-icon">✅</span>
+      <span class="nav-lbl">Concluídas</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ── SCREEN: HISTÓRICO ─────────────────────────────────────────────────── -->
+<div id="screen-historico" class="screen">
+  <div class="header">
+    <button class="back-btn" onclick="showScreen('screen-os-list')">←</button>
+    <h1>Histórico do Mês</h1>
+  </div>
+  <div class="content">
+    <div class="hist-tabs">
+      <button class="active" id="hist-tab-concluidas" onclick="filtrarHistorico('concluidas')">✅ Concluídas</button>
+      <button id="hist-tab-ativas" onclick="filtrarHistorico('ativas')">🔧 Em Andamento</button>
+    </div>
+    <div id="hist-spinner" class="spinner" style="display:none"></div>
+    <div id="hist-content"></div>
+  </div>
+</div>
+
+<!-- ── SCREEN: OS DETAIL ─────────────────────────────────────────────────── -->
+<div id="screen-os-detail" class="screen">
+  <div class="header">
+    <button class="back-btn" onclick="voltarParaLista()">←</button>
+    <h1 id="os-detail-title">OS #000</h1>
+  </div>
+  <div class="content">
+    <div id="os-detail-spinner" class="spinner"></div>
+    <div id="os-detail-content" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ── SCREEN: LOCAL ─────────────────────────────────────────────────────── -->
+<div id="screen-local" class="screen">
+  <div class="header">
+    <button class="back-btn" onclick="voltarParaOS()">←</button>
+    <h1 id="local-title">Local</h1>
+  </div>
+  <div class="content" id="local-content">
+    <div class="spinner"></div>
+  </div>
+</div>
+
+<!-- ── SCREEN: RESPONSÁVEL ───────────────────────────────────────────────── -->
+<div id="screen-responsavel" class="screen">
+  <div class="header">
+    <button class="back-btn" onclick="showScreen('screen-os-detail');renderOSDetail()">←</button>
+    <h1>Dados do Responsável</h1>
+  </div>
+  <div class="content">
+    <div class="card" style="margin-bottom:14px">
+      <p style="font-size:13px;color:#6b7280;margin-bottom:16px">
+        Informe o nome e cargo do responsável pelo condomínio que está recebendo a obra.
+      </p>
+      <div style="margin-bottom:14px">
+        <label class="label">Nome completo *</label>
+        <input id="resp-nome" class="input" type="text" placeholder="Ex: João Silva" autocomplete="name">
+      </div>
+      <div style="margin-bottom:18px">
+        <label class="label">Cargo / Função</label>
+        <input id="resp-cargo" class="input" type="text" placeholder="Ex: Síndico, Zelador, Proprietário">
+      </div>
+      <button class="btn btn-primary" onclick="irParaAssinatura()">Próximo: Assinar →</button>
+    </div>
+    <div id="resp-error" class="alert alert-error" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ── SCREEN: ASSINATURA ────────────────────────────────────────────────── -->
+<div id="screen-assinatura" class="screen">
+  <div class="header">
+    <button class="back-btn" onclick="showScreen('screen-responsavel')">←</button>
+    <h1>Assinatura</h1>
+  </div>
+  <div class="content">
+    <div class="finalizar-info">
+      ✍️ <strong id="sig-nome-label">Responsável</strong> — assine no espaço abaixo com o dedo.
+    </div>
+    <div class="card" style="padding:12px">
+      <canvas id="sig-canvas" height="200"></canvas>
+    </div>
+    <button class="btn btn-outline" style="margin-top:10px" onclick="limparAssinatura()">🗑️ Limpar</button>
+    <button class="btn btn-success" style="margin-top:10px" onclick="confirmarAssinatura()">✅ Confirmar Assinatura</button>
+    <div id="sig-error" class="alert alert-error" style="display:none;margin-top:10px"></div>
+  </div>
+</div>
+
+<!-- ── HIDDEN FILE INPUT ─────────────────────────────────────────────────── -->
+<input type="file" id="foto-input" accept="image/*" capture="environment" style="display:none" onchange="handleFotoCapture(event)">
+
+<!-- ── SCREEN: CROQUI ────────────────────────────────────────────────────── -->
+<div id="screen-croqui" class="screen" style="height:100vh;overflow:hidden">
+  <div class="header">
+    <button class="back-btn" id="croqui-back-btn">←</button>
+    <h1 id="croqui-title">Croqui</h1>
+    <button onclick="otimizarCroqui()" style="background:rgba(255,255,255,0.2);border:none;color:white;padding:4px 10px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-left:auto">✨ IA</button>
+  </div>
+  <div style="background:#f8f8f8;border-bottom:1px solid #e5e7eb;padding:8px 12px;display:flex;align-items:center;gap:6px;overflow-x:auto;scrollbar-width:none">
+    <!-- Tools -->
+    <button id="tool-pencil"  class="croqui-tool active" onclick="setTool('pencil')"  title="Lápis">✏️</button>
+    <button id="tool-line"    class="croqui-tool"        onclick="setTool('line')"    title="Linha">╱</button>
+    <button id="tool-rect"    class="croqui-tool"        onclick="setTool('rect')"    title="Retângulo">▭</button>
+    <button id="tool-text"    class="croqui-tool"        onclick="setTool('text')"    title="Texto">T</button>
+    <button id="tool-eraser"  class="croqui-tool"        onclick="setTool('eraser')"  title="Borracha">⌫</button>
+    <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 2px"></div>
+    <!-- Color picker -->
+    <input type="color" id="croqui-color" value="#000000" style="width:28px;height:28px;border:none;border-radius:50%;padding:2px;cursor:pointer;flex-shrink:0" title="Cor">
+    <!-- Line thickness -->
+    <select id="croqui-size" style="font-size:12px;padding:4px 6px;border:1.5px solid #d1d5db;border-radius:6px;background:white;min-width:54px">
+      <option value="2">Fino</option>
+      <option value="4" selected>Médio</option>
+      <option value="8">Grosso</option>
+    </select>
+    <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 2px"></div>
+    <button onclick="undoCroqui()" style="background:white;border:1.5px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer" title="Desfazer">↩</button>
+    <button onclick="limparCroqui()" style="background:white;border:1.5px solid #fca5a5;color:#dc2626;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer" title="Limpar tudo">🗑</button>
+  </div>
+  <div style="flex:1;overflow:hidden;position:relative;background:#fff">
+    <canvas id="croqui-canvas" style="display:block;touch-action:none;cursor:crosshair"></canvas>
+    <!-- Text input overlay (hidden by default) -->
+    <input id="croqui-text-input" type="text" placeholder="Digite o texto..."
+      style="display:none;position:absolute;border:2px dashed #e87722;background:rgba(255,255,255,0.9);padding:4px 8px;font-size:14px;border-radius:4px;outline:none;min-width:120px;z-index:10">
+  </div>
+  <div style="background:white;border-top:1px solid #e5e7eb;padding:10px 12px;display:flex;gap:8px">
+    <button onclick="salvarCroqui()" class="btn btn-primary" style="flex:2;padding:12px">💾 Salvar Croqui</button>
+    <button onclick="descartarCroqui()" class="btn" style="flex:1;padding:12px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db">Cancelar</button>
+  </div>
+  <div id="croqui-ai-status" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center">
+    <div style="background:white;border-radius:16px;padding:24px;text-align:center;max-width:280px">
+      <div style="font-size:32px;margin-bottom:12px">✨</div>
+      <div style="font-weight:700;font-size:16px;margin-bottom:8px">Otimizando com IA...</div>
+      <div style="font-size:13px;color:#6b7280">Aguarde enquanto a IA processa seu croqui</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── TOAST ────────────────────────────────────────────────────────────── -->
+<div id="toast" class="toast"></div>
+
+<!-- ── PHOTO LIGHTBOX ───────────────────────────────────────────────────────── -->
+<div id="foto-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:9999;flex-direction:column;align-items:center;justify-content:center" onclick="fecharFotoOverlay()">
+  <button onclick="fecharFotoOverlay()" style="position:absolute;top:12px;right:16px;background:rgba(255,255,255,0.15);border:none;border-radius:50%;width:40px;height:40px;font-size:24px;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:1">×</button>
+  <button id="foto-overlay-prev" onclick="event.stopPropagation();navegarFoto(-1)" style="position:absolute;left:10px;background:rgba(255,255,255,0.15);border:none;border-radius:50%;width:40px;height:40px;font-size:22px;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center">‹</button>
+  <button id="foto-overlay-next" onclick="event.stopPropagation();navegarFoto(1)" style="position:absolute;right:10px;background:rgba(255,255,255,0.15);border:none;border-radius:50%;width:40px;height:40px;font-size:22px;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center">›</button>
+  <img id="foto-overlay-img" src="" alt="" style="max-width:100%;max-height:90vh;object-fit:contain;border-radius:4px" onclick="event.stopPropagation()">
+  <div id="foto-overlay-caption" style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);color:white;font-size:13px;background:rgba(0,0,0,0.5);padding:4px 12px;border-radius:20px"></div>
+</div>
+
+<!-- ── FECHAR DIA MODAL ───────────────────────────────────────────────────── -->
+<div id="fechar-dia-modal" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <h3 style="font-size:18px;font-weight:800;margin-bottom:4px">🌅 Concluir Período</h3>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:16px">Informe a quantidade de produto <strong>GVF Seal</strong> usada neste período.</p>
+    <label class="label">Produto usado (litros) *</label>
+    <input id="fechar-dia-litros" class="input" type="number" min="0.1" step="0.1" placeholder="Ex: 12.5" style="margin-bottom:12px">
+    <label class="label">Quantidade de injetores utilizados</label>
+    <input id="fechar-dia-injetores" class="input" type="number" min="0" step="1" placeholder="Ex: 48" style="margin-bottom:16px">
+    <div id="fechar-dia-error" class="alert alert-error" style="display:none;margin-bottom:12px"></div>
+    <button class="btn btn-orange" onclick="confirmarFecharDia()">✅ Concluir Período</button>
+    <button class="btn btn-outline" style="margin-top:10px" onclick="fecharDiaModal()">Cancelar</button>
+  </div>
+</div>
+
+<!-- ── CONSUMO MODAL (mantido para compatibilidade) ──────────────────────── -->
+<div id="consumo-modal" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <h3 style="font-size:17px;font-weight:700;margin-bottom:4px">📦 Produto Usado Hoje</h3>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:16px">GVF Seal — informe quantos litros foram usados hoje nesta obra.</p>
+    <label class="label">Quantidade (litros)</label>
+    <input id="consumo-input" class="input" type="number" min="0.1" step="0.1" placeholder="Ex: 12.5" style="margin-bottom:16px">
+    <div id="consumo-error" class="alert alert-error" style="display:none;margin-bottom:12px"></div>
+    <button class="btn btn-primary" onclick="confirmarConsumo()">Confirmar</button>
+    <button class="btn btn-outline" style="margin-top:10px" onclick="fecharConsumoModal()">Cancelar</button>
+  </div>
+</div>
+
+<!-- ── CELEBRAÇÃO ────────────────────────────────────────────────────────── -->
+<div id="celebrate-overlay" class="celebrate-overlay hidden">
+  <div style="font-size:80px;margin-bottom:16px">🎉</div>
+  <h2 style="font-size:26px;font-weight:800;margin-bottom:8px">Parabéns!</h2>
+  <p style="font-size:16px;opacity:0.9;margin-bottom:8px">Obra concluída com sucesso!</p>
+  <p id="celebrate-sub" style="font-size:14px;opacity:0.8;margin-bottom:32px"></p>
+  <button class="btn" style="background:white;color:#16a34a;font-size:16px;width:auto;padding:14px 32px" onclick="fecharCelebracao()">✓ OK</button>
+</div>
+
+<script>
+// ─── Config ───────────────────────────────────────────────────────────────────
+const API_BASE = 'https://vedafacil-painel.vercel.app/api';
+const API = API_BASE + '/aplicador';
+
+// ─── State ───────────────────────────────────────────────────────────────────
+const S = {
+  equipes: [],
+  equipeId: '',
+  equipeNome: '',
+  membro: '',
+  osList: [],
+  currentOS: null,
+  currentPontoIdx: null,
+  fotoAction: null, // 'antes' | 'depois'
+  responsavelNome: '',
+  responsavelCargo: '',
+  historicoReparos: [], // reparos anteriores da mesma OS original
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo(0, 0);
+}
+
+function showLoading(msg = 'Aguarde...') {
+  document.getElementById('loading-msg').textContent = msg;
+  document.getElementById('loading-overlay').classList.remove('hidden');
+}
+
+function hideLoading() {
+  document.getElementById('loading-overlay').classList.add('hidden');
+}
+
+function formatDate(d) {
+  if (!d) return '';
+  try { return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR'); } catch { return d; }
+}
+
+function statusLabel(s) {
+  return { pendente: 'Pendente', em_andamento: 'Em andamento', concluido: 'Concluído', concluida: 'Concluída', agendada: 'Agendada', aguardando_assinatura: '✍️ Aguard. Assinatura' }[s] || s;
+}
+
+function statusClass(s) {
+  return { pendente: 'status-pendente', em_andamento: 'status-em_andamento', concluido: 'status-concluido', concluida: 'status-concluida', agendada: 'status-agendada', aguardando_assinatura: 'status-aguardando_assinatura' }[s] || 'status-pendente';
+}
+
+function hoje() { return new Date().toISOString().split('T')[0]; }
+function hojeTemFechamento(os) {
+  return (os.fechamentosDia || []).some(f => f.data === hoje());
+}
+
+function compressImage(dataUrl, maxW = 1200, quality = 0.75) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let w = img.width, h = img.height;
+      if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.src = dataUrl;
+  });
+}
+
+// Gera dois tamanhos: thumb (minúsculo, para grade) + full (comprimido, para visualização/PDF)
+// Retorna objeto { thumb, full }
+function compressImageDuplo(dataUrl) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      // ── THUMB: 300px, quality 0.40 — exibição na grade (~8-15 KB) ──
+      const thumbCanvas = document.createElement('canvas');
+      const maxThumb = 300;
+      let tw = img.width, th = img.height;
+      if (tw > maxThumb) { th = Math.round(th * maxThumb / tw); tw = maxThumb; }
+      thumbCanvas.width = tw; thumbCanvas.height = th;
+      thumbCanvas.getContext('2d').drawImage(img, 0, 0, tw, th);
+      const thumb = thumbCanvas.toDataURL('image/jpeg', 0.40);
+
+      // ── FULL: 1000px, quality 0.70 — visualização e PDF (~80-150 KB) ──
+      const fullCanvas = document.createElement('canvas');
+      const maxFull = 1000;
+      let fw = img.width, fh = img.height;
+      if (fw > maxFull) { fh = Math.round(fh * maxFull / fw); fw = maxFull; }
+      fullCanvas.width = fw; fullCanvas.height = fh;
+      fullCanvas.getContext('2d').drawImage(img, 0, 0, fw, fh);
+      const full = fullCanvas.toDataURL('image/jpeg', 0.70);
+
+      resolve({ thumb, full });
+    };
+    img.src = dataUrl;
+  });
+}
+
+function saveSession() {
+  localStorage.setItem('vfa_session', JSON.stringify({
+    equipeId: S.equipeId, equipeNome: S.equipeNome, membro: S.membro
+  }));
+}
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+async function boot() {
+  // Restore session
+  try {
+    const saved = JSON.parse(localStorage.getItem('vfa_session') || '{}');
+    if (saved.equipeId) Object.assign(S, saved);
+  } catch {}
+
+  // Load equipes
+  try {
+    const res = await fetch(`${API}/equipes`);
+    S.equipes = await res.json();
+    renderEquipes();
+  } catch (e) {
+    console.warn('Equipes load failed:', e);
+  }
+
+  if (S.equipeId && S.membro) {
+    document.getElementById('equipe-badge').textContent = S.equipeNome || S.membro;
+    showScreen('screen-os-list');
+    loadOSList();
+  } else {
+    hideLoading();
+  }
+}
+
+function renderEquipes() {
+  const sel = document.getElementById('sel-equipe');
+  sel.innerHTML = '<option value="">Selecione a equipe...</option>';
+  S.equipes.forEach(e => {
+    const o = document.createElement('option');
+    o.value = e._id || e.id;
+    o.textContent = e.nome;
+    if (o.value === S.equipeId) o.selected = true;
+    sel.appendChild(o);
+  });
+  if (S.equipeId) renderMembros(S.equipeId);
+}
+
+document.getElementById('sel-equipe').addEventListener('change', function() {
+  renderMembros(this.value);
+});
+
+function renderMembros(equipeId) {
+  const sel = document.getElementById('sel-membro');
+  const eq = S.equipes.find(e => (e._id || e.id) === equipeId);
+  sel.innerHTML = '';
+  if (!eq || !eq.membros?.length) {
+    sel.innerHTML = '<option value="">Nenhum membro</option>';
+    return;
+  }
+  eq.membros.forEach(m => {
+    const o = document.createElement('option');
+    o.value = m; o.textContent = m;
+    if (m === S.membro) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function doLogin() {
+  const equipeId = document.getElementById('sel-equipe').value;
+  const membro   = document.getElementById('sel-membro').value;
+  const errEl    = document.getElementById('login-error');
+  if (!equipeId) { errEl.textContent = 'Selecione a equipe'; errEl.style.display = ''; return; }
+  if (!membro)   { errEl.textContent = 'Selecione seu nome'; errEl.style.display = ''; return; }
+  errEl.style.display = 'none';
+
+  const eq = S.equipes.find(e => (e._id || e.id) === equipeId);
+  S.equipeId   = equipeId;
+  S.equipeNome = eq?.nome || '';
+  S.membro     = membro;
+  saveSession();
+
+  document.getElementById('equipe-badge').textContent = eq?.nome || membro;
+  showScreen('screen-os-list');
+  loadOSList();
+}
+
+// ─── OS List (Painel) ─────────────────────────────────────────────────────────
+function calcOSPct(os) {
+  const pontos = os.pontos || [];
+  let totalSubs = 0, feitosSubs = 0;
+  pontos.forEach(p => {
+    const subs = p.subPontos || [];
+    if (subs.length > 0) { totalSubs += subs.length; feitosSubs += subs.filter(sp => sp.feito).length; }
+    else { totalSubs += 1; feitosSubs += (p.statusLocal||p.status) === 'concluido' ? 1 : 0; }
+  });
+  return totalSubs > 0 ? Math.round(feitosSubs / totalSubs * 100) : (os.progresso || 0);
+}
+
+function renderOSCard(os) {
+  const pontos   = os.pontos || [];
+  const concl    = pontos.filter(p => (p.statusLocal||p.status) === 'concluido').length;
+  const pct      = calcOSPct(os);
+  const statusOS = os.status || 'agendada';
+  const mapsUrl  = buildMapsUrl(os);
+  const waUrl    = buildWaUrl(os);
+  const isAguard = statusOS === 'aguardando_assinatura';
+  const isReparo = (os.tipo || 'normal') === 'reparo';
+  const cardClass = isReparo ? 'reparo' : statusOS;
+  return `<div class="os-item ${cardClass}" onclick="openOS('${os._id}')">
+    ${isReparo ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #fca5a5">
+      <span style="font-size:16px">🔧</span>
+      <span style="font-size:12px;font-weight:800;color:#dc2626;letter-spacing:0.5px;text-transform:uppercase">Ordem de Reparo</span>
+      ${os.tipoReparo ? `<span style="font-size:11px;color:#b91c1c;font-style:italic">— ${os.tipoReparo}</span>` : ''}
+    </div>` : ''}
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px">
+          <span class="os-title" style="margin:0">OS #${String(os.numero||'').padStart(3,'0')}</span>
+          ${isReparo ? `<span class="badge-reparo">🔧 REPARO</span>` : ''}
+          <span class="os-status status-${statusOS}" style="flex-shrink:0">${statusLabel(statusOS)}</span>
+        </div>
+        <div class="os-title" style="font-size:14px;font-weight:600;margin-bottom:1px">${os.cliente||'—'}</div>
+        ${os.endereco ? `<div class="os-sub">${[os.endereco, os.cidade].filter(Boolean).join(' · ')}</div>` : ''}
+        ${os.dataInicio ? `<div class="os-sub" style="margin-top:2px">📅 ${formatDate(os.dataInicio)}</div>` : ''}
+        ${isReparo && os.equipeOriginalNome ? `<div class="os-sub" style="margin-top:2px;color:#b91c1c">⚠️ Equipe original: ${os.equipeOriginalNome}</div>` : ''}
+        ${!isReparo && os.tecnicoResponsavel ? `<div class="os-sub" style="margin-top:2px">👷 Resp: ${os.tecnicoResponsavel}</div>` : ''}
+      </div>
+    </div>
+    ${pontos.length ? `
+      <div class="progress-bar" style="margin-top:10px">
+        <div class="progress-fill${pct===100?' done':''}" style="width:${pct}%"></div>
+      </div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px">${concl}/${pontos.length} locais executados · ${pct}%</div>` : ''}
+    ${(os.totalConsumoReal > 0) ? `<div style="font-size:11px;color:#6b7280;margin-top:4px">🧪 ${os.totalConsumoReal.toLocaleString('pt-BR',{minimumFractionDigits:1})}L registrado</div>` : ''}
+    ${(mapsUrl || waUrl) ? `<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap" onclick="event.stopPropagation()">
+      ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" class="info-link link-maps" onclick="event.stopPropagation()">🗺️ Maps</a>` : ''}
+      ${waUrl   ? `<a href="${waUrl}"   target="_blank" class="info-link link-wa"   onclick="event.stopPropagation()">💬 WhatsApp do Síndico</a>` : ''}
+    </div>` : ''}
+  </div>`;
+}
+
+// ── OS List tabs ─────────────────────────────────────────────────────────────
+let S_osTabs = { tabAtual: 'andamento', ativas: [], concluidas: [], compartilhadas: [] };
+
+function switchOSTab(tab) {
+  S_osTabs.tabAtual = tab;
+  ['andamento','agendadas','compartilhadas','concluidas'].forEach(t => {
+    const el = document.getElementById('tab-' + t);
+    if (el) el.classList.toggle('active', t === tab);
+  });
+  renderOSListTab();
+}
+
+function renderOSListTab() {
+  const content = document.getElementById('os-list-content');
+  const tab = S_osTabs.tabAtual;
+  let html = '';
+
+  if (tab === 'andamento') {
+    const emAndamento      = S_osTabs.ativas.filter(o => o.status === 'em_andamento');
+    const aguardAssinatura = S_osTabs.ativas.filter(o => o.status === 'aguardando_assinatura');
+    if (!emAndamento.length && !aguardAssinatura.length) {
+      html = `<div class="empty"><div class="empty-icon">🔧</div><p>Nenhuma OS em andamento</p></div>`;
+    } else {
+      if (aguardAssinatura.length) {
+        html += `<div class="sec-header">✍️ Aguardando Assinatura <span class="sec-count">${aguardAssinatura.length}</span></div>`;
+        html += aguardAssinatura.map(renderOSCard).join('');
+      }
+      if (emAndamento.length) {
+        html += `<div class="sec-header">🔧 Em Andamento <span class="sec-count">${emAndamento.length}</span></div>`;
+        html += emAndamento.map(renderOSCard).join('');
+      }
+    }
+  } else if (tab === 'agendadas') {
+    const agendadas = S_osTabs.ativas.filter(o => o.status === 'agendada');
+    if (!agendadas.length) {
+      html = `<div class="empty"><div class="empty-icon">📅</div><p>Nenhuma OS agendada</p></div>`;
+    } else {
+      html += `<div class="sec-header">📅 Agendadas <span class="sec-count">${agendadas.length}</span></div>`;
+      html += agendadas.map(renderOSCard).join('');
+    }
+  } else if (tab === 'compartilhadas') {
+    const lista = S_osTabs.compartilhadas;
+    if (!lista.length) {
+      html = `<div class="empty"><div class="empty-icon">🤝</div><p>Nenhuma OS compartilhada</p><p style="font-size:12px;margin-top:4px">Quando outra equipe compartilhar pontos com você, aparecerá aqui</p></div>`;
+    } else {
+      html += `<div class="sec-header">🤝 Compartilhadas <span class="sec-count">${lista.length}</span></div>`;
+      html += lista.map(os => {
+        const equipeAtrib = (os.equipesAtribuidas || []).find(e => e.equipeId === S.equipeId);
+        const pontosAtrib = equipeAtrib ? equipeAtrib.pontos : [];
+        const nomePontos = pontosAtrib.map(i => (os.pontos || [])[i]?.nome || `Local ${i+1}`).join(', ');
+        return `<div class="os-item ${os.status}" onclick="openOS('${os._id || os.id}')">
+          <div class="os-title">OS #${String(os.numero||'').padStart(3,'0')} — ${os.cliente||'—'}</div>
+          <div class="os-sub">${[os.endereco, os.cidade].filter(Boolean).join(' · ')}</div>
+          ${nomePontos ? `<div style="margin-top:6px;font-size:11px;color:#7c3aed;font-weight:600">📌 Pontos: ${nomePontos}</div>` : ''}
+          <div style="margin-top:4px;font-size:11px;color:#6b7280">Equipe principal: ${os.equipeNome || '—'}</div>
+        </div>`;
+      }).join('');
+    }
+  } else if (tab === 'concluidas') {
+    const lista = S_osTabs.concluidas;
+    if (!lista.length) {
+      html = `<div class="empty"><div class="empty-icon">✅</div><p>Nenhuma OS concluída este mês</p></div>`;
+    } else {
+      html += `<div class="sec-header">✅ Concluídas este Mês <span class="sec-count">${lista.length}</span></div>`;
+      html += lista.map(os => {
+        const conclEm = os.concluidaEm ? new Date(os.concluidaEm).toLocaleDateString('pt-BR') : '—';
+        return `<div class="os-item-compact" onclick="openOS('${os._id || os.id}')">
+          <div>
+            <div class="osc-title">OS #${String(os.numero||'').padStart(3,'0')} — ${os.cliente||'—'}</div>
+            <div class="osc-sub">${[os.endereco, os.cidade].filter(Boolean).join(' · ')}</div>
+          </div>
+          <div class="osc-date">✅ ${conclEm}</div>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  content.innerHTML = html;
+  content.style.display = '';
+}
+
+async function loadOSList() {
+  const spinner = document.getElementById('os-list-spinner');
+  const content = document.getElementById('os-list-content');
+  spinner.style.display = ''; content.style.display = 'none';
+  hideLoading();
+
+  try {
+    const [d1, d2, d3] = await Promise.all([
+      fetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}`).then(r=>r.json()).catch(()=>[]),
+      fetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}&historico=1`).then(r=>r.json()).catch(()=>[]),
+      fetch(`${API}/os/compartilhadas?equipeId=${encodeURIComponent(S.equipeId)}`).then(r=>r.json()).catch(()=>[]),
+    ]);
+    S_osTabs.ativas         = Array.isArray(d1) ? d1 : [];
+    S_osTabs.concluidas     = Array.isArray(d2) ? d2 : [];
+    S_osTabs.compartilhadas = Array.isArray(d3) ? d3 : [];
+    S.osList = S_osTabs.ativas;
+
+    spinner.style.display = 'none';
+    renderOSListTab();
+  } catch (e) {
+    spinner.style.display = 'none';
+    content.innerHTML = `<div class="alert alert-error">Erro: ${e.message}<br><button class="btn btn-outline" style="margin-top:10px" onclick="loadOSList()">Tentar novamente</button></div>`;
+    content.style.display = '';
+  }
+}
+
+function voltarParaLista() {
+  showScreen('screen-os-list');
+  loadOSList();
+}
+
+// ─── OS Detail ────────────────────────────────────────────────────────────────
+async function openOS(osId) {
+  showScreen('screen-os-detail');
+  const spinner = document.getElementById('os-detail-spinner');
+  const content = document.getElementById('os-detail-content');
+  spinner.style.display = ''; content.style.display = 'none';
+  S.historicoReparos = [];
+
+  try {
+    const res = await fetch(`${API}/os/${osId}`);
+    const os  = await res.json();
+    S.currentOS = os;
+    document.getElementById('os-detail-title').textContent = `OS #${String(os.numero||'').padStart(3,'0')}`;
+    renderOSDetail();
+    spinner.style.display = 'none'; content.style.display = '';
+
+    // Se é reparo, busca histórico em paralelo e re-renderiza quando chegar
+    if ((os.tipo || 'normal') === 'reparo' && os.osOriginalId) {
+      fetch(`${API}/os/historico-reparos?osOriginalId=${encodeURIComponent(os.osOriginalId)}`)
+        .then(r => r.json())
+        .then(data => {
+          S.historicoReparos = Array.isArray(data) ? data : [];
+          renderOSDetail();
+        })
+        .catch(() => {});
+    }
+  } catch (e) {
+    spinner.style.display = 'none';
+    content.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+    content.style.display = '';
+  }
+}
+
+function buildMapsUrl(os) {
+  const addr = [os.endereco, os.cidade].filter(Boolean).join(', ');
+  if (!addr) return '';
+  return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(addr);
+}
+
+function buildWaUrl(os) {
+  const raw = (os.celular || os.telefone || '').replace(/\D/g, '');
+  if (!raw) return '';
+  const num = raw.startsWith('55') ? raw : '55' + raw;
+  return 'https://wa.me/' + num;
+}
+
+function buildRepararBanner(os) {
+  const hist = S.historicoReparos || [];
+  const osAtualId = os._id || os.id;
+
+  let linhasTempo = '';
+
+  // ── Serviço original ──────────────────────────────────────────────────
+  linhasTempo += `<div class="hist-item" style="background:#fafafa;border-color:#e5e7eb">
+    <div style="width:28px;height:28px;border-radius:50%;background:#6b7280;color:white;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">🏗️</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:13px;font-weight:700;color:#374151">Serviço Original</div>
+      <div style="font-size:12px;color:#6b7280">Equipe: <strong>${os.equipeOriginalNome || '—'}</strong></div>
+    </div>
+  </div>`;
+
+  // ── Reparos históricos ─────────────────────────────────────────────────
+  hist.forEach((r, ri) => {
+    const isCurrent = (r._id === osAtualId);
+    const statusColor  = r.status === 'concluida' ? '#16a34a' : r.status === 'em_andamento' ? '#d97706' : '#6b7280';
+    const statusLbl    = r.status === 'concluida' ? 'Concluído' : r.status === 'em_andamento' ? 'Em Andamento' : r.status === 'agendada' ? 'Agendado' : r.status;
+    const conclData    = r.concluidaEm ? new Date(r.concluidaEm).toLocaleDateString('pt-BR') : '';
+    const inicioData   = r.dataInicio  ? new Date(r.dataInicio).toLocaleDateString('pt-BR')  : '';
+    linhasTempo += `<div class="hist-item ${r.status === 'concluida' ? 'concluido' : isCurrent ? 'atual' : ''}">
+      <div style="width:28px;height:28px;border-radius:50%;background:${isCurrent?'#e87722':'#9ca3af'};color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${ri+1}</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:700;color:#1a202c">Reparo ${ri+1}</span>
+          ${isCurrent ? `<span style="font-size:10px;font-weight:700;background:#e87722;color:white;padding:1px 6px;border-radius:10px">ESTE</span>` : ''}
+          <span style="font-size:11px;font-weight:600;color:${statusColor}">${statusLbl}</span>
+        </div>
+        <div style="font-size:12px;color:#6b7280">Equipe: <strong>${r.equipeNome || '—'}</strong></div>
+        ${r.tipoReparo ? `<div style="font-size:12px;color:#6b7280;font-style:italic">${r.tipoReparo}</div>` : ''}
+        ${inicioData ? `<div style="font-size:11px;color:#9ca3af">📅 ${inicioData}${conclData ? ' → ✅ '+conclData : ''}</div>` : ''}
+      </div>
+    </div>`;
+  });
+
+  return `<div class="reparo-banner">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <span style="font-size:22px">🔧</span>
+      <div>
+        <div style="font-size:15px;font-weight:800;color:#dc2626;text-transform:uppercase;letter-spacing:0.5px">Ordem de Reparo</div>
+        ${os.tipoReparo ? `<div style="font-size:13px;color:#b91c1c;margin-top:1px">${os.tipoReparo}</div>` : ''}
+      </div>
+    </div>
+    ${linhasTempo || hist.length === 0 ? `<div style="font-size:12px;font-weight:700;color:#b91c1c;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Histórico deste Local</div>${linhasTempo}` : ''}
+  </div>`;
+}
+
+function renderOSDetail() {
+  const os     = S.currentOS;
+  const pontos = os.pontos || [];
+  const concl  = pontos.filter(p => (p.statusLocal||p.status) === 'concluido').length;
+  // Progresso por sub-pontos executados (ticados pelo aplicador)
+  let totalSubs = 0, feitosSubs = 0;
+  pontos.forEach(p => {
+    const subs = p.subPontos || [];
+    if (subs.length > 0) { totalSubs += subs.length; feitosSubs += subs.filter(sp => sp.feito).length; }
+    else { totalSubs += 1; feitosSubs += (p.statusLocal||p.status) === 'concluido' ? 1 : 0; }
+  });
+  const pct = totalSubs > 0 ? Math.round(feitosSubs / totalSubs * 100) : (os.progresso || 0);
+  const todosConcluidos = pontos.length > 0 && concl === pontos.length;
+  const jaConcluida = os.status === 'concluida';
+  const aguardandoAssinatura = os.status === 'aguardando_assinatura';
+  const prontoParaFinalizar = (todosConcluidos || aguardandoAssinatura) && !jaConcluida;
+  const temFechamento = hojeTemFechamento(os);
+
+  const mapsUrl = buildMapsUrl(os);
+  const waUrl   = buildWaUrl(os);
+
+  // Último fechamento registrado
+  const ultFd = (os.fechamentosDia||[]).sort((a,b)=>(b.ts||0)-(a.ts||0))[0];
+
+  const isReparo = (os.tipo || 'normal') === 'reparo';
+  const content = document.getElementById('os-detail-content');
+  content.innerHTML = `
+    ${isReparo ? buildRepararBanner(os) : ''}
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+        <div style="font-size:16px;font-weight:700;">${os.cliente||'—'}</div>
+      </div>
+      ${os.endereco ? `<div style="font-size:13px;color:#6b7280">${os.endereco}${os.cidade?', '+os.cidade:''}</div>` : ''}
+      ${os.dataInicio ? `<div style="font-size:13px;color:#6b7280;margin-top:2px">📅 ${formatDate(os.dataInicio)}${os.dataTermino?' → '+formatDate(os.dataTermino):''}</div>` : ''}
+      ${os.tecnicoResponsavel ? `<div style="font-size:13px;color:#6b7280;margin-top:2px">👷 Técnico: <strong>${os.tecnicoResponsavel}</strong></div>` : ''}
+      ${(mapsUrl || waUrl) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" class="info-link link-maps">🗺️ Google Maps</a>` : ''}
+        ${waUrl   ? `<a href="${waUrl}"   target="_blank" class="info-link link-wa">💬 WhatsApp do Síndico</a>`    : ''}
+      </div>` : ''}
+      ${pontos.length ? `<div class="progress-bar" style="margin-top:10px"><div class="progress-fill${pct===100?' done':''}" style="width:${pct}%"></div></div>
+        <div style="font-size:12px;color:#6b7280;margin-top:2px">${totalSubs > 0 ? `${feitosSubs}/${totalSubs} pontos executados (${pct}%)` : `${concl}/${pontos.length} locais (${pct}%)`}</div>` : ''}
+      ${(os.totalConsumoReal > 0) ? `<div style="font-size:12px;color:#6b7280;margin-top:6px">🧪 ${os.totalConsumoReal.toLocaleString('pt-BR',{minimumFractionDigits:1})}L de GVF Seal registrado</div>` : ''}
+      ${ultFd ? `<div style="font-size:11px;color:#6b7280;margin-top:4px">📅 Último fechamento: ${ultFd.data} — ${ultFd.litros}L</div>` : ''}
+    </div>
+    ${os.obs ? `<div class="alert alert-warning">📝 ${os.obs}</div>` : ''}
+
+    ${jaConcluida ? `<div class="alert alert-success" style="margin-bottom:14px;text-align:center;font-weight:700;font-size:15px">✅ OS Concluída!</div>` : ''}
+
+    ${/* ── CONCLUIR DIA: aparece SEMPRE (concluida ou não) se ainda não fechou hoje ── */
+      temFechamento
+        ? `<div class="dia-badge" style="width:100%;justify-content:center;margin-bottom:12px">✅ Período encerrado · ${ultFd ? ultFd.litros+'L de GVF Seal registrado' : ''}</div>
+           <button class="btn btn-outline" style="margin-bottom:10px;font-size:13px" onclick="abrirFecharDiaModal()">
+             🌅 + Novo Período
+           </button>`
+        : `<div class="alert alert-warning" style="margin-bottom:10px;font-size:13px">
+             ⚠️ <strong>Produto não registrado neste período!</strong> Não esqueça de concluir o período.
+           </div>
+           <button class="btn btn-orange" style="margin-bottom:10px" onclick="abrirFecharDiaModal()">
+             🌅 Concluir Período
+           </button>`
+    }
+
+    ${/* ── FINALIZAR OS ── */
+      prontoParaFinalizar
+        ? isReparo
+          ? `<button class="btn btn-success" style="margin-bottom:14px;background:#16a34a" onclick="finalizarReparoDireto()">
+               ✅ Finalizar Reparo
+             </button>`
+          : `<button class="btn btn-success" style="margin-bottom:14px" onclick="iniciarFinalizacao()">
+               🏁 Finalizar OS — Colher Assinatura
+             </button>`
+        : ''
+    }
+
+    ${/* ── REABRIR OS: disponível quando concluída (caso precise corrigir algo) ── */
+      jaConcluida
+        ? `<button class="btn btn-secondary" style="margin-bottom:10px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db" onclick="reabrirOS()">
+             🔓 Reabrir OS para edição
+           </button>`
+        : ''
+    }
+    ${/* ── FOTOS DO PROBLEMA (apenas OS de reparo) ── */
+      isReparo && (os.fotosReparo || []).length > 0 ? `
+        <div class="section-title">📷 Fotos do Problema</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:16px">
+          ${(os.fotosReparo).map(f => {
+            const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.full || '') : (f || '');
+            if (!src) return '';
+            return `<a href="${src}" target="_blank"><img src="${src}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb"></a>`;
+          }).join('')}
+        </div>` : ''
+    }
+    <div class="section-title">Locais de Serviço</div>
+    ${!pontos.length ? '<div class="empty"><div class="empty-icon">📍</div><p>Nenhum local</p></div>' : ''}
+    ${pontos.map((p, i) => {
+      const sl    = p.statusLocal || (p.status === 'concluido' ? 'concluido' : 'pendente');
+      const subs  = p.subPontos || [];
+      const feitos = subs.filter(s => s.feito).length;
+      const antes  = (p.fotosAntes||[]).length;
+      const depois = (p.fotosDepois||[]).length;
+
+      const meds = [];
+      const tipos = [['trinca','m'],['juntaFria','m'],['ralo','un'],['juntaDilat','m'],['ferragem','m'],['cortina','m²']];
+      for (const [k,u] of tipos) {
+        const v = p[k];
+        if (!v) continue;
+        const qt = Array.isArray(v) ? v.reduce((a,b)=>a+parseFloat(b||0),0) : parseFloat(v);
+        if (qt > 0) meds.push(`${qt}${u}`);
+      }
+
+      return `<div class="ponto-item ${sl}" onclick="openLocal(${i})">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div class="p-name">${p.nome||p.local||`Local ${i+1}`}</div>
+          <span class="p-status ${statusClass(sl)}">${statusLabel(sl)}</span>
+        </div>
+        <div class="p-meta">
+          ${meds.length ? `<span>📐 ${meds.join(' · ')}</span>` : ''}
+          ${subs.length  ? `<span>📋 ${feitos}/${subs.length} pts</span>` : ''}
+          ${antes  ? `<span>📷 ${antes}</span>` : ''}
+          ${depois ? `<span>📸 ${depois}</span>` : ''}
+        </div>
+      </div>`;
+    }).join('')}
+  `;
+}
+
+// ─── Local Detail ─────────────────────────────────────────────────────────────
+function openLocal(idx) {
+  S.currentPontoIdx = idx;
+  showScreen('screen-local');
+  renderLocal();
+}
+
+function voltarParaOS() {
+  // Avisa se saiu sem registrar produto do dia
+  if (!hojeTemFechamento(S.currentOS)) {
+    const ok = confirm('⚠️ Você não registrou o produto utilizado neste período!\n\nSair mesmo assim? (Você pode registrar depois na tela da OS)');
+    if (!ok) return;
+  }
+  showScreen('screen-os-detail');
+  renderOSDetail();
+}
+
+function abrirMapaServico() {
+  const os  = S.currentOS;
+  const idx = S.currentPontoIdx;
+  const p   = (os?.pontos || [])[idx];
+  if (!p) return;
+
+  const subs = p.subPontos || [];
+  const feitos = subs.filter(s => s.feito).length;
+  const pct = subs.length > 0 ? Math.round(feitos / subs.length * 100) : 0;
+
+  // Fotos da medição — imagens que vieram do app medidor
+  const fotosRef    = p.fotosMedicao || p.fotosRef || p.fotos || [];
+  const fotosAntes  = p.fotosAntes  || [];
+  const fotosDepois = p.fotosDepois || [];
+  const isReparoOS  = (os.tipo || 'normal') === 'reparo';
+  const nReparo     = os.numReparo || os.reparoNumero || 1;
+
+  let html = `
+    <div id="mapa-servico-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 0">
+      <div style="background:white;border-radius:16px;width:100%;max-width:480px;margin:auto;overflow:hidden">
+        <div style="background:linear-gradient(135deg,#c45d12,#e87722);padding:16px 20px;display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-size:11px;font-weight:600;letter-spacing:1px;color:rgba(255,255,255,0.8);text-transform:uppercase">Mapa de Serviço</div>
+            <div style="font-size:17px;font-weight:700;color:white;margin-top:2px">${p.nome || p.local || `Local ${idx + 1}`}</div>
+          </div>
+          <button onclick="document.getElementById('mapa-servico-modal').remove()" style="background:rgba(255,255,255,0.2);border:none;border-radius:50%;width:32px;height:32px;font-size:18px;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center">×</button>
+        </div>
+        <div style="padding:20px">`;
+
+  // Progresso
+  if (subs.length > 0) {
+    html += `<div style="margin-bottom:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:13px;font-weight:600;color:#374151">Progresso dos Sub-pontos</span>
+        <span style="font-size:13px;font-weight:700;color:${feitos===subs.length?'#16a34a':'#e87722'}">${feitos}/${subs.length}</span>
+      </div>
+      <div style="background:#f3f4f6;border-radius:99px;height:8px;overflow:hidden">
+        <div style="background:${feitos===subs.length?'#16a34a':'#e87722'};height:100%;border-radius:99px;width:${pct}%;transition:width 0.3s"></div>
+      </div>
+    </div>`;
+
+    html += `<div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Itens a Executar</div>`;
+    html += subs.map((sp, si) => {
+      const execInfo = sp.feito && sp.executadoEm
+        ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px">✅ ${sp.executadoEm}${sp.executadoPorMembro ? ` · ${sp.executadoPorMembro}` : ''}</div>`
+        : '';
+      return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:8px;margin-bottom:6px;background:${sp.feito?'#f0fdf4':'#f9fafb'};border:1.5px solid ${sp.feito?'#86efac':'#e5e7eb'}">
+        <div style="width:22px;height:22px;border-radius:50%;background:${sp.feito?'#16a34a':'white'};border:2px solid ${sp.feito?'#16a34a':'#d1d5db'};flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:white;margin-top:1px">${sp.feito?'✓':''}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;color:${sp.feito?'#16a34a':'#374151'};font-weight:${sp.feito?'500':'400'}">${sp.desc}</div>
+          ${execInfo}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Fotos de referência da medição (se existirem)
+  if (fotosRef.length > 0) {
+    html += `<div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-top:16px;margin-bottom:10px">📷 Fotos da Medição (referência)</div>`;
+    html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">`;
+    fotosRef.forEach(f => {
+      const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.thumb || f.full || '') : (f || '');
+      if (!src) return;
+      html += `<a href="${src}" target="_blank"><img src="${src}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb"></a>`;
+    });
+    html += `</div>`;
+  }
+
+  // Fotos ANTES / Reparo
+  if (fotosAntes.length > 0) {
+    const antesTitle = isReparoOS ? `📷 Foto do Reparo ${nReparo}` : '📷 Fotos ANTES';
+    html += `<div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-top:16px;margin-bottom:10px">${antesTitle} (${fotosAntes.length})</div>`;
+    html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">`;
+    fotosAntes.forEach(f => {
+      const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.thumb || f.full || '') : (f || '');
+      if (!src) return;
+      html += `<a href="${src}" target="_blank"><img src="${src}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #fca5a5"></a>`;
+    });
+    html += `</div>`;
+  }
+
+  // Fotos DEPOIS
+  if (fotosDepois.length > 0) {
+    html += `<div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-top:16px;margin-bottom:10px">📸 Fotos DEPOIS (${fotosDepois.length})</div>`;
+    html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">`;
+    fotosDepois.forEach(f => {
+      const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.thumb || f.full || '') : (f || '');
+      if (!src) return;
+      html += `<a href="${src}" target="_blank"><img src="${src}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #86efac"></a>`;
+    });
+    html += `</div>`;
+  }
+
+  // Observações do ponto
+  if (p.obs) {
+    html += `<div style="margin-top:16px;background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:12px">
+      <div style="font-size:12px;font-weight:600;color:#92400e;margin-bottom:4px">📝 Observações</div>
+      <div style="font-size:13px;color:#78350f">${p.obs}</div>
+    </div>`;
+  }
+
+  if (subs.length === 0 && fotosRef.length === 0 && fotosAntes.length === 0 && fotosDepois.length === 0 && !p.obs) {
+    html += `<div style="text-align:center;padding:20px;color:#9ca3af;font-size:14px">Nenhuma informação adicional para este local.</div>`;
+  }
+
+  html += `
+        </div>
+        <div style="padding:0 20px 20px">
+          <button onclick="document.getElementById('mapa-servico-modal').remove()" style="width:100%;padding:12px;background:#f3f4f6;border:none;border-radius:10px;font-size:15px;font-weight:600;color:#374151;cursor:pointer">Fechar</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function acaoReabrir() {
+  if (!confirm('Reabrir este local para edição?')) return;
+  if (await patchPonto('reabrir')) {
+    renderLocal();
+    showToast('🔓 Local reaberto para edição');
+  }
+}
+
+async function reabrirOS() {
+  if (!confirm('Reabrir a OS? Ela voltará ao status "Em Andamento" e precisará ser finalizada novamente.')) return;
+  try {
+    showLoading('Reabrindo OS...');
+    const res = await fetch(`${API}/os/${S.currentOS._id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'em_andamento' })
+    });
+    hideLoading();
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status) S.currentOS.status = data.status;
+      renderOSDetail();
+      showToast('🔓 OS reaberta para edição');
+    } else {
+      alert('Erro ao reabrir OS');
+    }
+  } catch (e) {
+    hideLoading();
+    alert('Erro de conexão: ' + e.message);
+  }
+}
+
+function renderLocal() {
+  const os  = S.currentOS;
+  const idx = S.currentPontoIdx;
+  const p   = (os?.pontos || [])[idx];
+  if (!p) return;
+
+  const sl      = p.statusLocal || (p.status === 'concluido' ? 'concluido' : 'pendente');
+  const subs    = p.subPontos   || [];
+  const feitos  = subs.filter(s => s.feito).length;
+  const fotosA    = p.fotosAntes   || [];
+  const fotosD    = p.fotosDepois  || [];
+  const fotosMed  = p.fotosMedicao || p.fotosRef || p.fotos || [];
+
+  const canIniciar  = sl === 'pendente' && fotosA.length > 0;
+  const isReparo    = (os.tipo || 'normal') === 'reparo';
+  const canConcluir = sl === 'em_andamento'
+    && (isReparo ? fotosA.length > 0 : fotosD.length > 0)
+    && (subs.length === 0 || feitos === subs.length);
+
+  document.getElementById('local-title').textContent = p.nome || p.local || `Local ${idx + 1}`;
+
+  let html = '';
+
+  // Status pill
+  html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+    <span class="p-status ${statusClass(sl)}" style="font-size:13px;padding:4px 12px">${statusLabel(sl)}</span>
+    <span style="font-size:12px;color:#6b7280">${os.cliente||''}</span>
+  </div>`;
+
+  // ── FOTOS DO PROBLEMA (reparo) ───────────────────────────────────────────
+  const fotosProblema = (os.fotosReparo || []).filter(Boolean);
+  if ((os.tipo || 'normal') === 'reparo' && fotosProblema.length > 0) {
+    html += `<div class="section-title">⚠️ Fotos do Problema</div>`;
+    html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:16px">`;
+    fotosProblema.slice(0, 6).forEach(f => {
+      const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.full || '') : (f || '');
+      if (!src) return;
+      html += `<img src="${src}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #fca5a5;cursor:pointer" onclick="this.style.display='none'" loading="lazy">`;
+    });
+    html += `</div>`;
+  }
+
+  // ── FOTOS DA MEDIÇÃO (referência) ────────────────────────────────────────
+  if (fotosMed.length > 0) {
+    html += `<div class="section-title">📌 Fotos da Medição (referência)</div>`;
+    html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:16px">`;
+    fotosMed.slice(0, 6).forEach(f => {
+      const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.thumb || f.full || '') : (f || '');
+      if (!src) return;
+      html += `<a href="${src}" target="_blank"><img src="${src}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb"></a>`;
+    });
+    html += `</div>`;
+  }
+
+  // ── MAPA DE SERVIÇO ───────────────────────────────────────────────────────
+  if (subs.length > 0) {
+    html += `<button class="btn btn-outline" style="margin-bottom:16px;padding:10px" onclick="abrirMapaServico()">
+      📋 Ver Mapa de Serviço
+    </button>`;
+  }
+
+  // ── FOTOS ANTES ──────────────────────────────────────────────────────────
+  const numReparo  = os.numReparo || os.reparoNumero || 1;
+  const antesLabel = isReparo ? `📷 Foto do Reparo ${numReparo} (${fotosA.length})` : `📷 Fotos ANTES (${fotosA.length})`;
+  html += `<div class="section-title">${antesLabel}</div>`;
+  if (sl === 'pendente') {
+    html += `<div class="alert alert-info">${isReparo ? `Adicione ao menos 1 foto para registrar o reparo ${numReparo}.` : 'Adicione ao menos 1 foto do estado ANTES para iniciar.'}</div>`;
+  }
+  html += renderFotoGrid(fotosA, 'antes', sl !== 'concluido');
+
+  // ── INICIAR ───────────────────────────────────────────────────────────────
+  if (sl === 'pendente') {
+    html += `<button class="btn ${canIniciar ? 'btn-orange' : 'btn-disabled'}" style="margin-top:16px" ${canIniciar ? 'onclick="acaoIniciar()"' : ''}>
+      ▶ Iniciar Serviço
+    </button>`;
+    if (!canIniciar) html += `<p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:6px">Adicione fotos ANTES para habilitar</p>`;
+  }
+
+  // ── SUB-PONTOS ────────────────────────────────────────────────────────────
+  if (subs.length > 0) {
+    html += `<div class="section-title" style="margin-top:20px">📋 ${sl === 'pendente' ? 'Serviços previstos' : `Sub-pontos (${feitos}/${subs.length})`}</div>`;
+    if (sl !== 'pendente') {
+      const pct = Math.round(feitos / subs.length * 100);
+      html += `<div class="progress-bar"><div class="progress-fill${feitos===subs.length?' done':''}" style="width:${pct}%"></div></div>`;
+    }
+    html += subs.map((sp, si) => {
+      const podeToggle = sl === 'em_andamento';
+      const infoExec = sp.feito && sp.executadoEm
+        ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px">📅 ${sp.executadoEm}${sp.executadoPorMembro ? ` · ${sp.executadoPorMembro}` : ''}</div>`
+        : '';
+      return `<div class="subponto-item ${sp.feito ? 'feito' : ''}" ${podeToggle ? `onclick="toggleSubponto(${si})"` : 'style="cursor:default"'}>
+        <div class="subponto-checkbox">${sp.feito ? '✓' : ''}</div>
+        <div style="flex:1;min-width:0">
+          <span class="subponto-label">${sp.desc}</span>
+          ${infoExec}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ── FOTOS DEPOIS (apenas OS normais — reparo não exige) ───────────────────
+  if (!isReparo && (sl === 'em_andamento' || sl === 'concluido')) {
+    html += `<div class="section-title" style="margin-top:20px">📸 Fotos DEPOIS (${fotosD.length})</div>`;
+    if (sl === 'em_andamento') {
+      html += `<div class="alert alert-info">Adicione fotos DEPOIS para poder concluir.</div>`;
+    }
+    html += renderFotoGrid(fotosD, 'depois', sl !== 'concluido');
+  }
+
+  // ── CONCLUIR ─────────────────────────────────────────────────────────────
+  if (sl === 'em_andamento') {
+    const motivos = [];
+    if (!isReparo && fotosD.length === 0) motivos.push('fotos DEPOIS');
+    if (isReparo  && fotosA.length === 0) motivos.push(`foto do Reparo ${numReparo}`);
+    if (subs.length > 0 && feitos < subs.length) motivos.push(`${subs.length - feitos} sub-ponto(s)`);
+    html += `<button class="btn ${canConcluir ? 'btn-success' : 'btn-disabled'}" style="margin-top:16px" ${canConcluir ? 'onclick="acaoConcluir()"' : ''}>
+      ✅ Concluir Local
+    </button>`;
+    if (!canConcluir && motivos.length) html += `<p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:6px">Pendente: ${motivos.join(', ')}</p>`;
+  }
+
+  // ── CROQUI (ocultado em OS de reparo) ────────────────────────────────────
+  const isReparoLocal = (os.tipo || 'normal') === 'reparo';
+  if (!isReparoLocal) {
+    const croquiExiste = p.croquiOtimizado || p.croquiBase64;
+    html += `<div class="section-title" style="margin-top:20px">🗺️ Croqui do Local</div>`;
+    if (croquiExiste) {
+      html += `<div style="margin-bottom:10px"><img src="${p.croquiOtimizado || p.croquiBase64}" style="width:100%;border-radius:10px;border:1px solid #e5e7eb" onclick="abrirCroqui(${idx},'screen-local')"></div>`;
+    }
+    html += `<button class="btn btn-outline" style="margin-bottom:16px" onclick="abrirCroqui(${idx},'screen-local')">
+      ${croquiExiste ? '✏️ Editar Croqui' : '🗺️ Desenhar Croqui'}
+    </button>`;
+  }
+
+  // ── CONCLUÍDO ─────────────────────────────────────────────────────────────
+  if (sl === 'concluido') {
+    html += `<div class="alert alert-success" style="margin-top:16px;text-align:center;font-weight:600">✅ Local concluído!</div>`;
+    html += `<button class="btn" style="margin-top:12px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;font-size:13px" onclick="acaoReabrir()">
+      🔓 Reabrir para editar
+    </button>`;
+  }
+
+  document.getElementById('local-content').innerHTML = html;
+}
+
+function renderFotoGrid(fotos, tipo, canAdd) {
+  let html = '<div class="foto-grid">';
+  fotos.forEach((f, fi) => {
+    // Usa thumb (minúsculo) na grade → tela carrega rápida
+    // f pode ser objeto {thumb, full} ou string legacy
+    const src = (typeof f === 'object') ? (f.thumb || f.full || f.data) : f;
+    html += `<div class="foto-thumb">
+      <img src="${src}" alt="${tipo} ${fi+1}" loading="lazy" onclick="abrirFoto('${tipo}',${fi})">
+      ${canAdd ? `<button class="remove-btn" onclick="event.stopPropagation();removeFoto('${tipo}',${fi})">×</button>` : ''}
+    </div>`;
+  });
+  if (canAdd) {
+    html += `<div class="foto-add" onclick="triggerFoto('${tipo}')">
+      <span class="foto-add-icon">📷</span>
+      <span>Tirar foto</span>
+    </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+// ─── Actions ──────────────────────────────────────────────────────────────────
+async function patchPonto(action, extra = {}) {
+  const os  = S.currentOS;
+  const idx = S.currentPontoIdx;
+  showLoading('Salvando...');
+  try {
+    const res = await fetch(`${API}/os/${os._id}/pontos/${idx}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, membro: S.membro, ...extra })
+    });
+    const data = await res.json();
+    hideLoading();
+    if (!res.ok) { alert(data.error || 'Erro ao salvar'); return false; }
+    if (data.ponto) {
+      S.currentOS.pontos[idx] = data.ponto;
+    }
+    if (data.progresso !== undefined) S.currentOS.progresso = data.progresso;
+    if (data.status) S.currentOS.status = data.status;
+    return true;
+  } catch (e) {
+    hideLoading();
+    alert('Erro de conexão: ' + e.message);
+    return false;
+  }
+}
+
+async function acaoIniciar() {
+  if (await patchPonto('iniciar')) renderLocal();
+}
+
+async function acaoConcluir() {
+  const ok = await patchPonto('concluir');
+  if (!ok) return;
+  renderLocal();
+  showToast('✅ Local concluído!');
+  // Checar se todos os locais estão concluídos
+  const todos = S.currentOS.pontos.every(p => (p.statusLocal || p.status) === 'concluido');
+  if (todos) {
+    setTimeout(() => {
+      voltarParaOS();
+      setTimeout(() => mostrarCelebracao(false), 300);
+    }, 800);
+  }
+}
+
+// Debounce map: key = `${osId}_${pontoIdx}_${spIdx}`, value = {timer, snapshot}
+const _toggleDebounce = {};
+
+function toggleSubponto(spIdx) {
+  // Atualização otimista: muda estado local e re-renderiza IMEDIATAMENTE (sem loading)
+  const p = S.currentOS.pontos[S.currentPontoIdx];
+  if (!p || !p.subPontos || p.subPontos[spIdx] === undefined) return;
+  p.subPontos[spIdx].feito = !p.subPontos[spIdx].feito;
+  renderLocal(); // feedback instantâneo
+  // Debounce: agrupa cliques rápidos antes de enviar ao servidor
+  const key = `${S.currentOS._id}_${S.currentPontoIdx}_${spIdx}`;
+  const snapshot = p.subPontos[spIdx].feito; // estado atual após toggle
+  if (_toggleDebounce[key]) clearTimeout(_toggleDebounce[key].timer);
+  _toggleDebounce[key] = {
+    timer: setTimeout(() => _syncToggleSubponto(spIdx, snapshot, p.subPontos[spIdx]), 400),
+    snapshot
+  };
+}
+
+async function _syncToggleSubponto(spIdx, expectedFeito, spRef) {
+  const key = `${S.currentOS._id}_${S.currentPontoIdx}_${spIdx}`;
+  delete _toggleDebounce[key];
+  const anterior = !expectedFeito; // estado antes do toggle local
+  try {
+    const res = await fetch(`${API}/os/${S.currentOS._id}/pontos/${S.currentPontoIdx}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'toggle_subponto', spIdx, membro: S.membro })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (spRef) spRef.feito = anterior; // reverte
+      renderLocal();
+      showToast('⚠️ Erro ao salvar');
+    } else {
+      // ⚠️ NÃO substitui o ponto inteiro — apenas atualiza o subponto específico
+      // Isso evita sobrescrever toggles pendentes de outros subpontos marcados rapidamente
+      const pontoLocal = S.currentOS.pontos[S.currentPontoIdx];
+      if (data.ponto && pontoLocal) {
+        // Atualiza só o subponto que foi sincronizado
+        const spServidor = data.ponto.subPontos?.[spIdx];
+        if (spServidor && pontoLocal.subPontos?.[spIdx] !== undefined) {
+          pontoLocal.subPontos[spIdx] = spServidor;
+        }
+        // Atualiza status/statusLocal do ponto sem tocar nos outros subpontos
+        pontoLocal.statusLocal = data.ponto.statusLocal;
+        pontoLocal.status      = data.ponto.status;
+      }
+      if (data.progresso !== undefined) S.currentOS.progresso = data.progresso;
+      if (data.status) S.currentOS.status = data.status;
+      renderLocal();
+    }
+  } catch (e) {
+    if (spRef) spRef.feito = anterior; // reverte
+    renderLocal();
+    showToast('⚠️ Sem conexão');
+  }
+}
+
+// ─── Fotos ────────────────────────────────────────────────────────────────────
+function triggerFoto(action) {
+  S.fotoAction = action;
+  const inp = document.getElementById('foto-input');
+  inp.value = '';
+  inp.click();
+}
+
+async function handleFotoCapture(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  event.target.value = '';
+  showLoading('Processando foto...');
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      // Gera thumb (grade) + full (visualização/PDF)
+      const { thumb, full } = await compressImageDuplo(e.target.result);
+      const fotoObj = { thumb, full };
+      const apiAction = S.fotoAction === 'antes' ? 'add_foto_antes' : 'add_foto_depois';
+      // hideLoading will be called inside patchPonto
+      const ok = await patchPonto(apiAction, { foto: fotoObj });
+      if (ok) renderLocal();
+    } catch (err) {
+      hideLoading();
+      alert('Erro ao processar foto: ' + err.message);
+    }
+  };
+  reader.onerror = () => { hideLoading(); alert('Erro ao ler arquivo'); };
+  reader.readAsDataURL(file);
+}
+
+async function removeFoto(tipo, fi) {
+  if (!confirm('Remover esta foto?')) return;
+  const p = S.currentOS.pontos[S.currentPontoIdx];
+  const action = tipo === 'antes' ? 'remove_foto_antes' : 'remove_foto_depois';
+  showLoading('Removendo foto...');
+  const ok = await patchPonto(action, { fi });
+  if (ok) {
+    // Sincroniza localmente após confirmação do servidor
+    if (tipo === 'antes') (p.fotosAntes || []).splice(fi, 1);
+    else (p.fotosDepois || []).splice(fi, 1);
+    renderLocal();
+  }
+}
+
+// ─── Lightbox ─────────────────────────────────────────────────────────────────
+let _fotoOverlayTipo = null, _fotoOverlayIdx = 0;
+
+function abrirFoto(tipo, fi) {
+  const p = S.currentOS?.pontos?.[S.currentPontoIdx];
+  if (!p) return;
+  _fotoOverlayTipo = tipo;
+  _fotoOverlayIdx  = fi;
+  _mostrarFotoOverlay();
+}
+
+function _mostrarFotoOverlay() {
+  const p = S.currentOS?.pontos?.[S.currentPontoIdx];
+  if (!p) return;
+  const fotos = _fotoOverlayTipo === 'antes' ? p.fotosAntes : p.fotosDepois;
+  if (!fotos?.length) return;
+  const f = fotos[_fotoOverlayIdx];
+  const src = (typeof f === 'object') ? (f.full || f.thumb || f.data) : f;
+  document.getElementById('foto-overlay-img').src = src;
+  document.getElementById('foto-overlay-caption').textContent = `${_fotoOverlayTipo === 'antes' ? 'Antes' : 'Depois'} — ${_fotoOverlayIdx + 1} / ${fotos.length}`;
+  document.getElementById('foto-overlay-prev').style.display = _fotoOverlayIdx > 0 ? 'flex' : 'none';
+  document.getElementById('foto-overlay-next').style.display = _fotoOverlayIdx < fotos.length - 1 ? 'flex' : 'none';
+  const overlay = document.getElementById('foto-overlay');
+  overlay.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function fecharFotoOverlay() {
+  document.getElementById('foto-overlay').style.display = 'none';
+  document.getElementById('foto-overlay-img').src = '';
+  document.body.style.overflow = '';
+}
+
+function navegarFoto(dir) {
+  const p = S.currentOS?.pontos?.[S.currentPontoIdx];
+  if (!p) return;
+  const fotos = _fotoOverlayTipo === 'antes' ? p.fotosAntes : p.fotosDepois;
+  const next = _fotoOverlayIdx + dir;
+  if (next >= 0 && next < fotos.length) { _fotoOverlayIdx = next; _mostrarFotoOverlay(); }
+}
+document.addEventListener('keydown', e => {
+  if (document.getElementById('foto-overlay')?.style.display === 'flex') {
+    if (e.key === 'Escape') fecharFotoOverlay();
+    if (e.key === 'ArrowLeft') navegarFoto(-1);
+    if (e.key === 'ArrowRight') navegarFoto(1);
+  }
+});
+
+// ─── Finalização direta (OS de reparo — sem assinatura) ──────────────────────
+async function finalizarReparoDireto() {
+  if (!confirm('Finalizar este reparo? A OS será marcada como concluída.')) return;
+  showLoading('Finalizando reparo...');
+  try {
+    const res = await fetch(`${API}/os/${S.currentOS._id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'concluida' })
+    });
+    const data = await res.json();
+    hideLoading();
+    if (!res.ok) { alert(data.error || 'Erro ao finalizar reparo'); return; }
+    S.currentOS.status    = 'concluida';
+    S.currentOS.progresso = 100;
+    renderOSDetail();
+    setTimeout(() => mostrarCelebracao(true), 300);
+  } catch (e) {
+    hideLoading();
+    alert('Erro de conexão: ' + e.message);
+  }
+}
+
+// ─── Finalização + Assinatura ─────────────────────────────────────────────────
+function iniciarFinalizacao() {
+  // Clear previous inputs
+  document.getElementById('resp-nome').value  = S.responsavelNome  || '';
+  document.getElementById('resp-cargo').value = S.responsavelCargo || '';
+  document.getElementById('resp-error').style.display = 'none';
+  showScreen('screen-responsavel');
+}
+
+function irParaAssinatura() {
+  const nome  = document.getElementById('resp-nome').value.trim();
+  const cargo = document.getElementById('resp-cargo').value.trim();
+  const errEl = document.getElementById('resp-error');
+  if (!nome) { errEl.textContent = 'Informe o nome do responsável'; errEl.style.display = ''; return; }
+  errEl.style.display = 'none';
+  S.responsavelNome  = nome;
+  S.responsavelCargo = cargo;
+  document.getElementById('sig-nome-label').textContent = nome;
+  showScreen('screen-assinatura');
+  initCanvas();
+}
+
+// ─── Canvas Signature ─────────────────────────────────────────────────────────
+let sigDrawing = false;
+let sigLastX = 0, sigLastY = 0;
+
+function initCanvas() {
+  const canvas = document.getElementById('sig-canvas');
+  const ctx = canvas.getContext('2d');
+  // Size canvas to match display width
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const W = rect.width || canvas.offsetWidth || 320;
+  const H = 200;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.height = H + 'px';
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+  // Draw baseline
+  ctx.strokeStyle = '#d1d5db';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(20, H * 0.65); ctx.lineTo(W - 20, H * 0.65); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle = '#e87722';
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  sigDrawing = false;
+
+  document.getElementById('sig-error').style.display = 'none';
+
+  // Remove old listeners
+  canvas.replaceWith(canvas.cloneNode(true));
+  const c2 = document.getElementById('sig-canvas');
+  const ctx2 = c2.getContext('2d');
+  c2.width = canvas.width; c2.height = canvas.height;
+  ctx2.scale(dpr, dpr);
+  // Redraw baseline
+  ctx2.strokeStyle = '#d1d5db'; ctx2.lineWidth = 1; ctx2.setLineDash([4, 4]);
+  ctx2.beginPath(); ctx2.moveTo(20, H * 0.65); ctx2.lineTo(W - 20, H * 0.65); ctx2.stroke();
+  ctx2.setLineDash([]); ctx2.strokeStyle = '#e87722'; ctx2.lineWidth = 2.5;
+  ctx2.lineCap = 'round'; ctx2.lineJoin = 'round';
+
+  function getPos(e) {
+    const r = c2.getBoundingClientRect();
+    const src = e.touches ? e.touches[0] : e;
+    return { x: src.clientX - r.left, y: src.clientY - r.top };
+  }
+  c2.addEventListener('touchstart',  e => { e.preventDefault(); const {x,y} = getPos(e); sigDrawing=true; sigLastX=x; sigLastY=y; }, { passive:false });
+  c2.addEventListener('touchmove',   e => { e.preventDefault(); if(!sigDrawing)return; const {x,y}=getPos(e); drawLine(ctx2,sigLastX,sigLastY,x,y); sigLastX=x; sigLastY=y; }, { passive:false });
+  c2.addEventListener('touchend',    e => { sigDrawing=false; });
+  c2.addEventListener('mousedown',   e => { const {x,y}=getPos(e); sigDrawing=true; sigLastX=x; sigLastY=y; });
+  c2.addEventListener('mousemove',   e => { if(!sigDrawing)return; const {x,y}=getPos(e); drawLine(ctx2,sigLastX,sigLastY,x,y); sigLastX=x; sigLastY=y; });
+  c2.addEventListener('mouseup',     () => { sigDrawing=false; });
+  c2.addEventListener('mouseleave',  () => { sigDrawing=false; });
+}
+
+function drawLine(ctx, x1, y1, x2, y2) {
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+}
+
+function limparAssinatura() {
+  initCanvas();
+}
+
+function isCanvasBlank(canvas) {
+  const ctx = canvas.getContext('2d');
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  // Verifica pixel não-branco com alfa visível (funciona com qualquer cor de traço)
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
+    if (a > 30 && !(r > 230 && g > 230 && b > 230)) return false;
+  }
+  return true;
+}
+
+async function confirmarAssinatura() {
+  const canvas = document.getElementById('sig-canvas');
+  const errEl  = document.getElementById('sig-error');
+  if (isCanvasBlank(canvas)) {
+    errEl.textContent = 'Por favor, desenhe a assinatura antes de confirmar.';
+    errEl.style.display = '';
+    return;
+  }
+  errEl.style.display = 'none';
+  const assinaturaBase64 = canvas.toDataURL('image/png');
+  showLoading('Finalizando OS...');
+  try {
+    const res = await fetch(`${API}/os/${S.currentOS._id}/finalizar`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nomeResponsavel:  S.responsavelNome,
+        cargoResponsavel: S.responsavelCargo,
+        assinaturaBase64,
+      })
+    });
+    const data = await res.json();
+    hideLoading();
+    if (!res.ok) { errEl.textContent = data.error || 'Erro ao finalizar'; errEl.style.display = ''; return; }
+    // Update local state
+    S.currentOS.status = 'concluida';
+    S.currentOS.progresso = 100;
+    S.currentOS.nomeResponsavel = S.responsavelNome;
+    S.currentOS.cargoResponsavel = S.responsavelCargo;
+    showScreen('screen-os-detail');
+    renderOSDetail();
+    setTimeout(() => mostrarCelebracao(true), 300);
+  } catch (e) {
+    hideLoading();
+    errEl.textContent = 'Erro de conexão: ' + e.message;
+    errEl.style.display = '';
+  }
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ─── Consumo Modal ────────────────────────────────────────────────────────────
+function abrirConsumoModal() {
+  document.getElementById('consumo-input').value = '';
+  document.getElementById('consumo-error').style.display = 'none';
+  document.getElementById('consumo-modal').classList.remove('hidden');
+}
+function fecharConsumoModal() {
+  document.getElementById('consumo-modal').classList.add('hidden');
+}
+async function confirmarConsumo() {
+  const litros = parseFloat(document.getElementById('consumo-input').value);
+  const errEl  = document.getElementById('consumo-error');
+  if (!litros || litros <= 0) { errEl.textContent = 'Informe uma quantidade válida'; errEl.style.display = ''; return; }
+  errEl.style.display = 'none';
+  fecharConsumoModal();
+  showLoading('Registrando...');
+  try {
+    const res = await fetch(`${API}/os/${S.currentOS._id}/consumo`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ litros, membro: S.membro })
+    });
+    const data = await res.json();
+    hideLoading();
+    if (!res.ok) { alert(data.error || 'Erro ao registrar'); return; }
+    S.currentOS.totalConsumoReal = data.totalConsumoReal;
+    S.currentOS.consumosDiarios  = data.consumosDiarios;
+    showToast(`📦 ${litros}L registrado!`);
+    renderOSDetail();
+  } catch (e) {
+    hideLoading();
+    alert('Erro: ' + e.message);
+  }
+}
+
+// ─── Fechar Dia ──────────────────────────────────────────────────────────────
+function abrirFecharDiaModal() {
+  document.getElementById('fechar-dia-litros').value = '';
+  document.getElementById('fechar-dia-injetores').value = '';
+  document.getElementById('fechar-dia-error').style.display = 'none';
+  document.getElementById('fechar-dia-modal').classList.remove('hidden');
+}
+function fecharDiaModal() {
+  document.getElementById('fechar-dia-modal').classList.add('hidden');
+}
+async function confirmarFecharDia() {
+  const litros   = parseFloat(document.getElementById('fechar-dia-litros').value);
+  const injetores = parseInt(document.getElementById('fechar-dia-injetores').value) || 0;
+  const errEl    = document.getElementById('fechar-dia-error');
+  if (!litros || litros <= 0) { errEl.textContent = 'Informe uma quantidade válida em litros'; errEl.style.display = ''; return; }
+  errEl.style.display = 'none';
+  fecharDiaModal();
+  showLoading('Fechando dia...');
+  try {
+    const body = { litros, membro: S.membro };
+    if (injetores > 0) body.injetores = injetores;
+    const res = await fetch(`${API}/os/${S.currentOS._id}/fechar-dia`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    hideLoading();
+    if (!res.ok) { showToast('⚠️ ' + (data.error || 'Erro ao fechar dia')); return; }
+    S.currentOS.fechamentosDia  = data.fechamentosDia;
+    S.currentOS.totalConsumoReal = data.totalConsumoReal;
+    renderOSDetail();
+    const injetMsg = injetores > 0 ? ` · ${injetores} injetores` : '';
+    showToast(`🌅 Dia fechado! ${litros}L${injetMsg}`);
+  } catch (e) {
+    hideLoading();
+    showToast('⚠️ Erro de conexão');
+  }
+}
+
+// ─── Histórico ────────────────────────────────────────────────────────────────
+let S_historico = { ativas: [], concluidas: [], filtro: 'concluidas' };
+
+async function abrirHistorico() {
+  showScreen('screen-historico');
+  S_historico.filtro = 'concluidas';
+  document.getElementById('hist-tab-concluidas').classList.add('active');
+  document.getElementById('hist-tab-ativas').classList.remove('active');
+  await carregarHistorico();
+}
+
+async function carregarHistorico() {
+  const spinner = document.getElementById('hist-spinner');
+  const content = document.getElementById('hist-content');
+  spinner.style.display = ''; content.innerHTML = '';
+  try {
+    const [rConcl, rAtivas] = await Promise.all([
+      fetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}&historico=1`),
+      fetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}`)
+    ]);
+    S_historico.concluidas = await rConcl.json();
+    S_historico.ativas     = await rAtivas.json();
+    spinner.style.display = 'none';
+    renderHistorico();
+  } catch (e) {
+    spinner.style.display = 'none';
+    content.innerHTML = `<div class="alert alert-error">Erro ao carregar: ${e.message}</div>`;
+  }
+}
+
+function filtrarHistorico(filtro) {
+  S_historico.filtro = filtro;
+  document.getElementById('hist-tab-concluidas').classList.toggle('active', filtro === 'concluidas');
+  document.getElementById('hist-tab-ativas').classList.toggle('active', filtro === 'ativas');
+  renderHistorico();
+}
+
+function renderHistorico() {
+  const lista = S_historico.filtro === 'concluidas' ? S_historico.concluidas : S_historico.ativas;
+  const content = document.getElementById('hist-content');
+  if (!lista.length) {
+    content.innerHTML = `<div class="empty"><div class="empty-icon">${S_historico.filtro === 'concluidas' ? '✅' : '🔧'}</div><p>${S_historico.filtro === 'concluidas' ? 'Nenhuma OS concluída este mês' : 'Nenhuma OS em andamento'}</p></div>`;
+    return;
+  }
+  content.innerHTML = lista.map(os => {
+    const statusOS = os.status || 'agendada';
+    const conclEm = os.concluidaEm ? new Date(os.concluidaEm).toLocaleDateString('pt-BR') : '—';
+    const consumo = os.totalConsumoReal > 0 ? `🧪 ${os.totalConsumoReal.toLocaleString('pt-BR',{minimumFractionDigits:1})}L` : '';
+    return `<div class="os-item ${statusOS}" style="cursor:default">
+      <div class="os-title">OS #${String(os.numero||'').padStart(3,'0')} — ${os.cliente||'—'}</div>
+      <div class="os-sub">${[os.endereco, os.cidade].filter(Boolean).join(' · ')}</div>
+      ${os.dataInicio ? `<div class="os-sub" style="margin-top:2px">📅 Início: ${formatDate(os.dataInicio)}</div>` : ''}
+      ${os.concluidaEm ? `<div class="os-sub" style="margin-top:2px">✅ Concluída: ${conclEm}</div>` : ''}
+      ${consumo ? `<div class="os-sub" style="margin-top:2px">${consumo} de GVF Seal</div>` : ''}
+      <span class="os-status ${statusClass(statusOS)}">${statusLabel(statusOS)}</span>
+    </div>`;
+  }).join('');
+}
+
+// ─── Celebração ───────────────────────────────────────────────────────────────
+function mostrarCelebracao(finalOS) {
+  const el = document.getElementById('celebrate-overlay');
+  const sub = document.getElementById('celebrate-sub');
+  if (finalOS) {
+    sub.textContent = 'OS #' + String(S.currentOS.numero||'').padStart(3,'0') + ' — ' + (S.currentOS.cliente || '');
+  } else {
+    const temFd = hojeTemFechamento(S.currentOS);
+    sub.textContent = temFd
+      ? 'Todos os locais concluídos! Agora colete a assinatura para finalizar.'
+      : 'Todos os locais concluídos! Registre o produto usado neste período para finalizar.';
+  }
+  el.classList.remove('hidden');
+}
+function fecharCelebracao() {
+  document.getElementById('celebrate-overlay').classList.add('hidden');
+}
+
+// ─── Croqui Canvas ────────────────────────────────────────────────────────────
+const CQ = {
+  tool: 'pencil',
+  color: '#000000',
+  size: 4,
+  drawing: false,
+  startX: 0, startY: 0,
+  history: [], // snapshots for undo
+  snapshot: null, // current snapshot for preview (line/rect)
+  pontoIdx: null,
+  returnScreen: 'screen-local',
+};
+
+function abrirCroqui(pontoIdx, returnScreen) {
+  CQ.pontoIdx    = pontoIdx != null ? pontoIdx : S.currentPontoIdx;
+  CQ.returnScreen = returnScreen || 'screen-local';
+  document.getElementById('croqui-title').textContent = 'Croqui — ' + ((S.currentOS?.pontos?.[CQ.pontoIdx]?.nome) || `Local ${CQ.pontoIdx + 1}`);
+  document.getElementById('croqui-back-btn').onclick = descartarCroqui;
+  showScreen('screen-croqui');
+  // Aguarda 1 frame para o layout flex calcular as dimensões antes de iniciar o canvas
+  requestAnimationFrame(() => {
+    initCroquiCanvas();
+    // Load existing croqui if any
+    const p = S.currentOS?.pontos?.[CQ.pontoIdx];
+    const existing = p?.croquiOtimizado || p?.croquiBase64;
+    if (existing) {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.getElementById('croqui-canvas');
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const W = canvas.width / dpr, H = canvas.height / dpr;
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
+        drawGrid(ctx, W, H);
+        ctx.drawImage(img, 0, 0, W, H);
+        CQ.history = [];
+        saveSnapshot();
+      };
+      img.src = existing;
+    }
+  });
+}
+
+function initCroquiCanvas() {
+  // Clona para remover listeners antigos
+  const old = document.getElementById('croqui-canvas');
+  const fresh = old.cloneNode(false);
+  old.parentNode.replaceChild(fresh, old);
+  const canvas = document.getElementById('croqui-canvas');
+
+  const parent = canvas.parentElement;
+  const W = parent.clientWidth  || window.innerWidth;
+  const H = parent.clientHeight || (window.innerHeight - 200);
+  const dpr = window.devicePixelRatio || 1;
+  CQ.dpr = dpr;
+
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);   // uma única vez — converte coords CSS para físicas
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
+  drawGrid(ctx, W, H);
+  CQ.history = [];
+  saveSnapshot();
+
+  // ── Event helpers ──────────────────────────────────────────────────────────
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const src  = e.touches ? e.touches[0] : e;
+    // Coordenadas CSS (não físicas) — compatíveis com ctx.scale(dpr,dpr)
+    return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+  }
+  function getColor() { return document.getElementById('croqui-color').value; }
+  function getSize()  { return parseInt(document.getElementById('croqui-size').value, 10); }
+
+  function onStart(e) {
+    e.preventDefault();
+    if (CQ.tool === 'text') { handleTextTool(e, canvas); return; }
+    pushHistory();
+    const {x, y} = getPos(e);
+    CQ.drawing = true; CQ.startX = x; CQ.startY = y;
+    if (CQ.tool === 'pencil' || CQ.tool === 'eraser') {
+      ctx.beginPath(); ctx.moveTo(x, y);
+    }
+    saveSnapshot();
+  }
+
+  function onMove(e) {
+    e.preventDefault();
+    if (!CQ.drawing) return;
+    const {x, y} = getPos(e);
+    const color = getColor(), size = getSize();
+    if (CQ.tool === 'pencil') {
+      ctx.strokeStyle = color; ctx.lineWidth = size; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.lineTo(x, y); ctx.stroke();
+    } else if (CQ.tool === 'eraser') {
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = size * 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.lineTo(x, y); ctx.stroke();
+    } else if (CQ.tool === 'line' || CQ.tool === 'rect') {
+      ctx.putImageData(CQ.snapshot, 0, 0);
+      ctx.strokeStyle = color; ctx.lineWidth = size; ctx.lineCap = 'round';
+      ctx.beginPath();
+      if (CQ.tool === 'line') {
+        ctx.moveTo(CQ.startX, CQ.startY); ctx.lineTo(x, y); ctx.stroke();
+      } else {
+        ctx.strokeRect(CQ.startX, CQ.startY, x - CQ.startX, y - CQ.startY);
+      }
+    }
+  }
+
+  function onEnd() {
+    if (!CQ.drawing) return;
+    CQ.drawing = false;
+    saveSnapshot();
+  }
+
+  canvas.addEventListener('touchstart', onStart, { passive: false });
+  canvas.addEventListener('touchmove',  onMove,  { passive: false });
+  canvas.addEventListener('touchend',   onEnd,   { passive: false });
+  canvas.addEventListener('mousedown',  onStart);
+  canvas.addEventListener('mousemove',  onMove);
+  canvas.addEventListener('mouseup',    onEnd);
+  canvas.addEventListener('mouseleave', onEnd);
+}
+
+function drawGrid(ctx, W, H) {
+  ctx.save();
+  ctx.strokeStyle = '#e5e7eb';
+  ctx.lineWidth = 0.5;
+  const step = 24;
+  for (let x = 0; x <= W; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y <= H; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.restore();
+}
+
+function saveSnapshot() {
+  const canvas = document.getElementById('croqui-canvas');
+  CQ.snapshot = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+}
+
+function pushHistory() {
+  const canvas = document.getElementById('croqui-canvas');
+  const snap = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+  CQ.history.push(snap);
+  if (CQ.history.length > 30) CQ.history.shift();
+}
+
+function undoCroqui() {
+  if (!CQ.history.length) return;
+  const canvas = document.getElementById('croqui-canvas');
+  canvas.getContext('2d').putImageData(CQ.history.pop(), 0, 0);
+  saveSnapshot();
+}
+
+function limparCroqui() {
+  if (!confirm('Limpar todo o croqui?')) return;
+  pushHistory();
+  const canvas = document.getElementById('croqui-canvas');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.width / dpr, H = canvas.height / dpr;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
+  drawGrid(ctx, W, H);
+  saveSnapshot();
+}
+
+function setTool(tool) {
+  CQ.tool = tool;
+  document.querySelectorAll('.croqui-tool').forEach(b => b.classList.remove('active'));
+  const el = document.getElementById('tool-' + tool);
+  if (el) el.classList.add('active');
+}
+
+
+function handleTextTool(e, canvas) {
+  const {x, y} = getCroquiPos(e, canvas);
+  const input = document.getElementById('croqui-text-input');
+  input.style.left = x + 'px';
+  input.style.top  = (y - 16) + 'px';
+  input.style.display = 'block';
+  input.value = '';
+  input.focus();
+  input.onkeydown = (ke) => {
+    if (ke.key === 'Enter' || ke.key === 'Escape') {
+      if (ke.key === 'Enter' && input.value.trim()) {
+        pushHistory();
+        const ctx = canvas.getContext('2d');
+        const color = document.getElementById('croqui-color').value;
+        const size = parseInt(document.getElementById('croqui-size').value, 10);
+        ctx.fillStyle = color;
+        ctx.font = `${Math.max(12, size * 4)}px -apple-system,sans-serif`;
+        ctx.fillText(input.value.trim(), x, y);
+        saveSnapshot();
+      }
+      input.style.display = 'none';
+      input.value = '';
+    }
+  };
+}
+
+async function otimizarCroqui() {
+  const canvas = document.getElementById('croqui-canvas');
+  const aiStatus = document.getElementById('croqui-ai-status');
+  // Exporta em resolução CSS (1x) — a IA não precisa de imagem em alta resolução
+  const dpr  = CQ.dpr || window.devicePixelRatio || 1;
+  const cssW = Math.round(canvas.width  / dpr);
+  const cssH = Math.round(canvas.height / dpr);
+  const maxW = 900;
+  const scale = cssW > maxW ? maxW / cssW : 1;
+  const tmpAI = document.createElement('canvas');
+  tmpAI.width  = Math.round(cssW * scale);
+  tmpAI.height = Math.round(cssH * scale);
+  const ctxAI = tmpAI.getContext('2d');
+  ctxAI.fillStyle = '#FFFFFF'; ctxAI.fillRect(0, 0, tmpAI.width, tmpAI.height);
+  ctxAI.drawImage(canvas, 0, 0, tmpAI.width, tmpAI.height);
+  const base64 = tmpAI.toDataURL('image/jpeg', 0.88);
+  aiStatus.style.display = 'flex';
+  try {
+    const res = await fetch(`${API_BASE}/croqui/otimizar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imagem: base64 })
+    });
+    const data = await res.json();
+    aiStatus.style.display = 'none';
+    if (data.imagemOtimizada) {
+      const img = new Image();
+      img.onload = () => {
+        pushHistory();
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const W = canvas.width / dpr, H = canvas.height / dpr;
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(img, 0, 0, W, H);
+        saveSnapshot();
+        showToast('✨ Croqui otimizado pela IA!');
+      };
+      const src = data.imagemOtimizada.startsWith('data:') ? data.imagemOtimizada : 'data:image/png;base64,' + data.imagemOtimizada;
+      img.src = src;
+    } else {
+      showToast(data.msg || data.aviso || '⚠️ IA indisponível');
+    }
+  } catch (err) {
+    aiStatus.style.display = 'none';
+    showToast('⚠️ Erro ao otimizar: ' + err.message);
+  }
+}
+
+async function salvarCroqui() {
+  const canvas = document.getElementById('croqui-canvas');
+  // Exporta em resolução CSS (1x) para manter tamanho do arquivo controlado.
+  // O canvas interno usa dpr×pixels; aqui reduzimos para os pixels lógicos (CSS).
+  const dpr  = CQ.dpr || window.devicePixelRatio || 1;
+  const cssW = Math.round(canvas.width  / dpr);
+  const cssH = Math.round(canvas.height / dpr);
+  // Limita largura máxima a 900 px para evitar arquivos grandes em tablets
+  const maxW  = 900;
+  const scale = cssW > maxW ? maxW / cssW : 1;
+  const outW  = Math.round(cssW * scale);
+  const outH  = Math.round(cssH * scale);
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width  = outW;
+  tempCanvas.height = outH;
+  const ctx2 = tempCanvas.getContext('2d');
+  ctx2.fillStyle = '#FFFFFF'; ctx2.fillRect(0, 0, outW, outH);
+  ctx2.drawImage(canvas, 0, 0, outW, outH);
+  // JPEG garante tamanho pequeno (fundo branco já garantido acima)
+  const base64 = tempCanvas.toDataURL('image/jpeg', 0.88);
+  const p = S.currentOS?.pontos?.[CQ.pontoIdx];
+  if (!p) { showToast('Erro: ponto não encontrado'); return; }
+  showLoading('Salvando croqui...');
+  try {
+    const res = await fetch(`${API}/os/${S.currentOS._id}/pontos/${CQ.pontoIdx}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save_croqui', croquiBase64: base64, membro: S.membro })
+    });
+    const data = await res.json();
+    hideLoading();
+    if (!res.ok) { showToast('⚠️ Erro ao salvar'); return; }
+    if (data.ponto) S.currentOS.pontos[CQ.pontoIdx] = data.ponto;
+    showToast('💾 Croqui salvo!');
+    showScreen(CQ.returnScreen);
+    if (CQ.returnScreen === 'screen-local') renderLocal();
+    else renderOSDetail();
+  } catch (e) {
+    hideLoading();
+    showToast('⚠️ Erro: ' + e.message);
+  }
+}
+
+function descartarCroqui() {
+  showScreen(CQ.returnScreen);
+  if (CQ.returnScreen === 'screen-local') renderLocal();
+  else renderOSDetail();
+}
+
+// ─── Service Worker ───────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+boot();
+</script>
+</body>
+</html>
