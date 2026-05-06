@@ -64,6 +64,26 @@ const navItems = [
     )
   },
   {
+    to: '/agenda',
+    label: 'Agenda de Obras',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    )
+  },
+  {
+    to: '/reparos',
+    label: 'Reparos',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+      </svg>
+    )
+  },
+  {
     to: '/equipes',
     label: 'Equipes',
     icon: (
@@ -74,6 +94,19 @@ const navItems = [
     )
   },
   {
+    to: '/croqui',
+    label: 'Croqui',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+      </svg>
+    )
+  },
+]
+
+const adminNavItems = [
+  {
     to: '/config',
     label: 'Configurações',
     icon: (
@@ -83,10 +116,7 @@ const navItems = [
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
       </svg>
     )
-  }
-]
-
-const adminNavItems = [
+  },
   {
     to: '/usuarios',
     label: 'Usuários',
@@ -96,11 +126,34 @@ const adminNavItems = [
           d="M17 20h5v-2a4 4 0 00-4-4h-1M9 20H4v-2a4 4 0 014-4h1m4-4a4 4 0 100-8 4 4 0 000 8zm6 0a3 3 0 100-6 3 3 0 000 6zM3 20v-2a3 3 0 013-3h1" />
       </svg>
     )
+  },
+  {
+    to: '/lixeira',
+    label: 'Lixeira',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+      </svg>
+    )
   }
 ]
 
+const operadorNavItems = [
+  {
+    to: '/perfil',
+    label: 'Meu Perfil',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+      </svg>
+    )
+  },
+]
+
 export default function Layout({ children }) {
-  const { user, logout } = useAuth()
+  const { user, logout, isAdmin } = useAuth()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -112,21 +165,14 @@ export default function Layout({ children }) {
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
       {/* Brand */}
-      <div className="px-4 py-5 border-b border-primary-dark">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-            <span className="text-primary font-black text-sm">V</span>
-          </div>
-          <div>
-            <div className="text-white font-bold text-sm leading-tight">Vedafácil</div>
-            <div className="text-blue-200 text-xs">Painel Administrativo</div>
-          </div>
-        </div>
+      <div className="px-4 py-4 border-b border-white/20 flex flex-col items-center">
+        <img src="/logo.png" alt="Vedafácil" className="w-28 h-auto drop-shadow-md mb-1" />
+        <div className="text-white/70 text-xs">Painel Administrativo</div>
       </div>
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {[...navItems, ...(user?.role === 'admin' ? adminNavItems : [])].map(item => (
+        {[...navItems, ...(isAdmin ? adminNavItems : []), ...(user?.role === 'operador' ? operadorNavItems : [])].map(item => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -135,7 +181,7 @@ export default function Layout({ children }) {
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                 isActive
                   ? 'bg-white/20 text-white'
-                  : 'text-blue-100 hover:bg-white/10 hover:text-white'
+                  : 'text-white/80 hover:bg-white/10 hover:text-white'
               }`
             }
           >
@@ -146,21 +192,30 @@ export default function Layout({ children }) {
       </nav>
 
       {/* User */}
-      <div className="px-4 py-4 border-t border-primary-dark">
+      <div className="px-4 py-4 border-t border-white/20">
         <div className="flex items-center gap-3 mb-3">
-          <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
-            <span className="text-white text-sm font-medium">
-              {user?.username?.charAt(0).toUpperCase() || 'A'}
-            </span>
+          <div className="w-8 h-8 rounded-full overflow-hidden bg-white/20 flex items-center justify-center shrink-0">
+            {user?.picture ? (
+              <img
+                src={user.picture}
+                alt="avatar"
+                className="w-full h-full object-cover"
+                onError={e => { e.currentTarget.style.display = 'none' }}
+              />
+            ) : (
+              <span className="text-white text-sm font-medium">
+                {user?.username?.charAt(0).toUpperCase() || 'A'}
+              </span>
+            )}
           </div>
-          <div>
-            <div className="text-white text-sm font-medium capitalize">{user?.username || 'Admin'}</div>
-            <div className="text-blue-200 text-xs capitalize">{user?.role || 'admin'}</div>
+          <div className="min-w-0">
+            <div className="text-white text-sm font-medium truncate">{user?.username || 'Admin'}</div>
+            <div className="text-white/70 text-xs capitalize">{user?.role || 'admin'}</div>
           </div>
         </div>
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-2 px-3 py-2 text-blue-100 hover:text-white hover:bg-white/10 rounded-lg text-sm transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg text-sm transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -175,7 +230,7 @@ export default function Layout({ children }) {
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex flex-col w-56 bg-primary flex-shrink-0">
+      <aside className="hidden md:flex flex-col w-56 flex-shrink-0" style={{ background: 'linear-gradient(180deg, #c45d12 0%, #e87722 50%, #f59340 100%)' }}>
         <SidebarContent />
       </aside>
 
@@ -183,7 +238,7 @@ export default function Layout({ children }) {
       {mobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute left-0 top-0 bottom-0 w-56 bg-primary flex flex-col">
+          <aside className="absolute left-0 top-0 bottom-0 w-56 flex flex-col" style={{ background: 'linear-gradient(180deg, #c45d12 0%, #e87722 50%, #f59340 100%)' }}>
             <SidebarContent />
           </aside>
         </div>
@@ -201,7 +256,7 @@ export default function Layout({ children }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <span className="font-bold text-primary">Vedafácil</span>
+          <span className="font-bold text-[#e87722]">Vedafácil</span>
         </header>
 
         {/* Content */}

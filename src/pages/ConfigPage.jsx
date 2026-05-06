@@ -25,12 +25,15 @@ const PRICE_UNITS = {
 
 const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
 
+const DEFAULT_TECNICOS = ['Alan', 'Fernando', 'Thiago', 'Daniel']
+
 export default function ConfigPage() {
   const [precos, setPrecos] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
+  const [novoTecnico, setNovoTecnico] = useState('')
 
   useEffect(() => {
     api.getPrecos()
@@ -148,24 +151,76 @@ export default function ConfigPage() {
         )}
       </div>
 
-      {/* Numero do Orcamento */}
+      {/* Numeração */}
       <div className="card mt-4">
-        <h2 className="font-semibold text-gray-700 mb-4 text-sm uppercase tracking-wide">Numeração de Orçamentos</h2>
-        <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+        <h2 className="font-semibold text-gray-700 mb-4 text-sm uppercase tracking-wide">Numeração</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
             <label className="label">Número atual do orçamento</label>
             <input
-              type="number"
-              min="1"
-              step="1"
-              className="input w-36"
+              type="number" min="1" step="1" className="input w-36"
               value={precos?.numOrcamento ?? 1}
-              onChange={e => handleNumOrcamentoChange(e.target.value)}
+              onChange={e => setPrecos(prev => ({ ...prev, numOrcamento: Number(e.target.value) })) || setSaved(false)}
             />
-            <p className="text-xs text-gray-400 mt-1">
-              Próximo orçamento será gerado com este número. Altere apenas se necessário.
-            </p>
+            <p className="text-xs text-gray-400 mt-1">Próximo orçamento terá este número.</p>
           </div>
+          <div>
+            <label className="label">Número atual das medições</label>
+            <input
+              type="number" min="1" step="1" className="input w-36"
+              value={precos?.numMedicao ?? 1}
+              onChange={e => { setPrecos(prev => ({ ...prev, numMedicao: Number(e.target.value) })); setSaved(false) }}
+            />
+            <p className="text-xs text-gray-400 mt-1">Próxima medição recebida terá este número.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Técnicos Responsáveis */}
+      <div className="card mt-4">
+        <h2 className="font-semibold text-gray-700 mb-1 text-sm uppercase tracking-wide">Técnicos Responsáveis</h2>
+        <p className="text-xs text-gray-400 mb-4">Lista usada nas OS e no App do Aplicador como ponto de contato</p>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {(precos?.tecnicos || DEFAULT_TECNICOS).map((t, i) => (
+            <div key={i} className="flex items-center gap-1.5 bg-orange-50 border border-orange-200 rounded-full px-3 py-1.5">
+              <span className="text-sm font-medium text-orange-800">{t}</span>
+              <button
+                onClick={() => {
+                  const arr = [...(precos?.tecnicos || DEFAULT_TECNICOS)]
+                  arr.splice(i, 1)
+                  setPrecos(prev => ({ ...prev, tecnicos: arr }))
+                  setSaved(false)
+                }}
+                className="text-orange-400 hover:text-red-500 text-xs leading-none ml-1"
+                title="Remover"
+              >×</button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            className="input flex-1"
+            placeholder="Nome do técnico..."
+            value={novoTecnico}
+            onChange={e => setNovoTecnico(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && novoTecnico.trim()) {
+                setPrecos(prev => ({ ...prev, tecnicos: [...(prev?.tecnicos || DEFAULT_TECNICOS), novoTecnico.trim()] }))
+                setNovoTecnico('')
+                setSaved(false)
+              }
+            }}
+          />
+          <button
+            onClick={() => {
+              if (!novoTecnico.trim()) return
+              setPrecos(prev => ({ ...prev, tecnicos: [...(prev?.tecnicos || DEFAULT_TECNICOS), novoTecnico.trim()] }))
+              setNovoTecnico('')
+              setSaved(false)
+            }}
+            className="btn-primary px-4"
+          >+ Adicionar</button>
         </div>
       </div>
 

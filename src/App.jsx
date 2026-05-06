@@ -13,8 +13,13 @@ import GarantiasPage from './pages/GarantiasPage.jsx'
 import EquipesPage from './pages/EquipesPage.jsx'
 import OrdensServicoPage from './pages/OrdensServicoPage.jsx'
 import OSDetailPage from './pages/OSDetailPage.jsx'
+import ReparosPage from './pages/ReparosPage.jsx'
+import LixeiraPage from './pages/LixeiraPage.jsx'
+import CroquiPage from './pages/CroquiPage.jsx'
 import ConfigPage from './pages/ConfigPage.jsx'
 import UsersPage from './pages/UsersPage.jsx'
+import AgendaPage from './pages/AgendaPage.jsx'
+import PerfilPage from './pages/PerfilPage.jsx'
 
 // ─── Auth Context ─────────────────────────────────────────────────────────────
 export const AuthContext = createContext(null)
@@ -62,18 +67,21 @@ function AuthProvider({ children }) {
   }
 
   const isAuthenticated = !!token
+  const isAdmin = user?.role === 'admin'
 
   return (
-    <AuthContext.Provider value={{ token, user, login, logout, isAuthenticated }}>
+    <AuthContext.Provider value={{ token, user, login, logout, isAuthenticated, isAdmin, mustChangePassword: user?.mustChangePassword === true }}>
       {children}
     </AuthContext.Provider>
   )
 }
 
 // ─── Protected Route ──────────────────────────────────────────────────────────
-function ProtectedRoute({ children }) {
-  const { isAuthenticated } = useAuth()
+function ProtectedRoute({ children, adminOnly = false }) {
+  const { isAuthenticated, isAdmin, mustChangePassword } = useAuth()
   if (!isAuthenticated) return <Navigate to="/login" replace />
+  if (mustChangePassword && window.location.pathname !== '/perfil') return <Navigate to="/perfil" replace />
+  if (adminOnly && !isAdmin) return <Navigate to="/medicoes" replace />
   return children
 }
 
@@ -109,8 +117,13 @@ export default function App() {
                   <Route path="/equipes" element={<EquipesPage />} />
                   <Route path="/ordens-servico" element={<OrdensServicoPage />} />
                   <Route path="/ordens-servico/:id" element={<OSDetailPage />} />
-                  <Route path="/config" element={<ConfigPage />} />
-                  <Route path="/usuarios" element={<UsersPage />} />
+                  <Route path="/agenda" element={<AgendaPage />} />
+                  <Route path="/reparos" element={<ReparosPage />} />
+                  <Route path="/lixeira" element={<ProtectedRoute adminOnly><LixeiraPage /></ProtectedRoute>} />
+                  <Route path="/croqui" element={<CroquiPage />} />
+                  <Route path="/config" element={<ProtectedRoute adminOnly><ConfigPage /></ProtectedRoute>} />
+                  <Route path="/usuarios" element={<ProtectedRoute adminOnly><UsersPage /></ProtectedRoute>} />
+                  <Route path="/perfil" element={<PerfilPage />} />
                 </Routes>
               </Layout>
             </ProtectedRoute>

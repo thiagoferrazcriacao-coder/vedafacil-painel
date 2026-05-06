@@ -59,9 +59,10 @@ function recalculate(orc) {
     : totalBruto * (Number(orc.desconto2) || 0) / 100
   const totalProposta2 = Math.max(0, totalBruto - desconto2Val)
   const entradaTipo2 = orc.entradaTipo2 || 'percent'
+  const entrada2Pct = orc.entrada2 != null ? Number(orc.entrada2) : (orc.entrada != null ? Number(orc.entrada) : 50)
   const entradaVal2 = entradaTipo2 === 'valor'
     ? (Number(orc.entrada2) || 0)
-    : totalProposta2 * (Number(orc.entrada2) || 0) / 100
+    : totalProposta2 * entrada2Pct / 100
   const saldo2 = Math.max(0, totalProposta2 - entradaVal2)
   const parcelas2 = Math.max(1, Number(orc.parcelas) || 1)
   const valorParcela2 = saldo2 / parcelas2

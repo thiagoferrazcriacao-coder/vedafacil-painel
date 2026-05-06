@@ -13,6 +13,44 @@ function Field({ label, children }) {
   )
 }
 
+// Adiciona N dias a uma string 'YYYY-MM-DD'
+function addDays(dateStr, days) {
+  if (!dateStr) return ''
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() + days)
+  const yy = dt.getFullYear()
+  const mm = String(dt.getMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
+// Adiciona N dias ÚTEIS (pula sábado=6, domingo=0) a uma string 'YYYY-MM-DD'
+function addBusinessDays(dateStr, businessDays) {
+  if (!dateStr || !businessDays) return ''
+  const [y, m, d] = dateStr.split('-').map(Number)
+  let dt = new Date(y, m - 1, d)
+  let count = 0
+  while (count < businessDays) {
+    dt.setDate(dt.getDate() + 1)
+    const dow = dt.getDay()
+    if (dow !== 0 && dow !== 6) count++
+  }
+  const yy = dt.getFullYear()
+  const mm = String(dt.getMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
+// Gera array de parcelas com datas de 30 em 30 dias
+function generateParcelas(n, valor, firstDate) {
+  return Array.from({ length: n }, (_, i) => ({
+    numero: i + 1,
+    data: addDays(firstDate || '', i * 30),
+    valor: parseFloat((valor).toFixed(2)),
+  }))
+}
+
 export default function ContratoFormPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -21,7 +59,7 @@ export default function ContratoFormPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
-  const [zapsignLoading, setZapsignLoading] = useState(false)
+  const [uploadingArquivo, setUploadingArquivo] = useState(false)
 
   useEffect(() => {
     api.getContrato(id)
@@ -54,29 +92,65 @@ export default function ContratoFormPage() {
     }
   }
 
-  const handleZapSign = async () => {
-    if (!confirm('Enviar contrato para assinatura via ZapSign?')) return
-    setZapsignLoading(true)
+  const handleUpdateStatus = async (newStatus) => {
+    const labels = { rascunho: 'Rascunho', pendente_assinatura: 'Pend. Assinatura', assinado: 'Assinado' }
+    if (!confirm(`Alterar status para "${labels[newStatus]}"?`)) return
     setError('')
     try {
-      await handleSave()
-      const email = (c.emailCliente || '').trim()
-      if (!email) { alert('Preencha o E-mail do Signatario em Dados do Cliente'); setZapsignLoading(false); return }
-      const res = await api.sendToZapSign(id, email, c.sindico || c.ac || c.cliente)
-      setC(prev => ({ ...prev, zapsignDocId: res.docToken, zapsignSignUrl: res.signUrl }))
-      if (res.signUrl) {
-        alert(`Contrato enviado! Link de assinatura:\n${res.signUrl}`)
-      } else {
-        alert('Contrato enviado para ZapSign com sucesso!')
-      }
+      const updated = await api.updateContratoStatus(id, newStatus)
+      setC(prev => ({ ...prev, status: updated.status || newStatus }))
+      setSaved(false)
     } catch (err) {
       setError(err.message)
-    } finally {
-      setZapsignLoading(false)
     }
   }
 
-  // Cronograma helpers
+  const handleUploadArquivo = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setUploadingArquivo(true)
+    try {
+      const reader = new FileReader()
+      reader.onload = async (ev) => {
+        const base64 = ev.target.result
+        const updated = await api.updateContrato(c._id || c.id || id, {
+          contratoArquivo: base64,
+          contratoArquivoNome: file.name,
+        })
+        setC(updated)
+        setUploadingArquivo(false)
+      }
+      reader.readAsDataURL(file)
+    } catch (err) {
+      alert('Erro ao enviar: ' + err.message)
+      setUploadingArquivo(false)
+    }
+  }
+
+  const handleRemoverArquivo = async () => {
+    if (!confirm('Remover contrato assinado?')) return
+    const updated = await api.updateContrato(c._id || c.id || id, { contratoArquivo: '', contratoArquivoNome: '' })
+    setC(updated)
+  }
+
+  // ── Proposta selection ──────────────────────────────────────────────────────
+  const handleSelectProposta = (proposta) => {
+    const firstData = (c.parcelasContrato?.[0]?.data) || ''
+    let parcelas
+    if (proposta === 1) {
+      // À vista: 1 parcela, valor = totalLiquido (com desconto)
+      parcelas = generateParcelas(1, c.totalLiquido || 0, firstData)
+    } else {
+      // Parcelado: N parcelas, valor = totalBruto / N (sem desconto)
+      const n = Math.max(1, Number(c.parcelas) || 1)
+      const valorParcela = (c.totalBruto || 0) / n
+      parcelas = generateParcelas(n, valorParcela, firstData)
+    }
+    setC(prev => ({ ...prev, propostaEscolhida: proposta, parcelasContrato: parcelas }))
+    setSaved(false)
+  }
+
+  // ── Cronograma helpers ──────────────────────────────────────────────────────
   const addCronograma = () => {
     const cron = [...(c.cronograma || []), { local: '', dataInicio: '', dataFim: '' }]
     updateNested('cronograma', cron)
@@ -93,7 +167,7 @@ export default function ContratoFormPage() {
     updateNested('cronograma', cron)
   }
 
-  // Parcelas helpers
+  // ── Parcelas helpers ────────────────────────────────────────────────────────
   const addParcela = () => {
     const parcels = [...(c.parcelasContrato || []), { numero: (c.parcelasContrato || []).length + 1, data: '', valor: 0 }]
     updateNested('parcelasContrato', parcels)
@@ -107,6 +181,14 @@ export default function ContratoFormPage() {
   const updateParcela = (i, field, value) => {
     const parcels = [...(c.parcelasContrato || [])]
     parcels[i] = { ...parcels[i], [field]: field === 'valor' ? Number(value) : value }
+
+    // Se editou a data da 1ª parcela, propaga +30 dias para as demais
+    if (field === 'data' && i === 0 && parcels.length > 1) {
+      for (let j = 1; j < parcels.length; j++) {
+        parcels[j] = { ...parcels[j], data: addDays(value, j * 30) }
+      }
+    }
+
     updateNested('parcelasContrato', parcels)
   }
 
@@ -130,6 +212,8 @@ export default function ContratoFormPage() {
     : c.status === 'aguardando_assinatura' ? 'bg-orange-100 text-orange-800'
     : 'bg-gray-100 text-gray-700'
 
+  const totalParcelasContrato = (c.parcelasContrato || []).reduce((s, p) => s + (Number(p.valor) || 0), 0)
+
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto pb-24">
       {/* Header */}
@@ -147,6 +231,21 @@ export default function ContratoFormPage() {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
+          {/* Status buttons */}
+          {[
+            { key: 'rascunho', label: '📝 Rascunho', active: 'bg-gray-600 text-white border-gray-600', inactive: 'border border-gray-300 text-gray-600 bg-white hover:bg-gray-50' },
+            { key: 'pendente_assinatura', label: '⏳ Pend. Assinatura', active: 'bg-orange-600 text-white border-orange-600', inactive: 'border border-orange-300 text-orange-600 bg-white hover:bg-orange-50' },
+            { key: 'assinado', label: '✅ Assinado', active: 'bg-green-600 text-white border-green-600', inactive: 'border border-green-300 text-green-600 bg-white hover:bg-green-50' },
+          ].map(btn => (
+            <button
+              key={btn.key}
+              onClick={() => handleUpdateStatus(btn.key)}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${c.status === btn.key ? btn.active : btn.inactive}`}
+            >
+              {btn.label}
+            </button>
+          ))}
+          <div className="w-px bg-gray-200 mx-1 self-stretch" />
           <button onClick={handleSave} disabled={saving} className="btn-secondary">
             {saving ? 'Salvando...' : 'Salvar'}
           </button>
@@ -168,15 +267,12 @@ export default function ContratoFormPage() {
           >
             ART
           </button>
-          {c.status !== 'assinado' && (
-            <button
-              onClick={handleZapSign}
-              disabled={zapsignLoading}
-              className="btn-primary"
-            >
-              {zapsignLoading ? 'Enviando...' : c.zapsignDocId ? 'Reenviar ZapSign' : 'Enviar ZapSign'}
-            </button>
-          )}
+          <button
+            onClick={() => navigate(`/ordens-servico?contratoId=${id}&tipo=reparo`)}
+            className="bg-amber-50 text-amber-700 border border-amber-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-amber-100 transition-colors"
+          >
+            🔧 Assistência Técnica
+          </button>
         </div>
       </div>
 
@@ -184,26 +280,7 @@ export default function ContratoFormPage() {
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
       )}
 
-      {/* ZapSign info */}
-      {c.zapsignDocId && (
-        <div className="mb-4 p-3 bg-purple-50 border border-purple-200 rounded-lg text-sm">
-          <div className="font-medium text-purple-800 mb-1">Enviado para ZapSign</div>
-          <div className="text-purple-600">Doc ID: {c.zapsignDocId}</div>
-          {c.zapsignSignUrl && (
-            <a href={c.zapsignSignUrl} target="_blank" rel="noreferrer"
-              className="text-purple-800 underline hover:text-purple-900">
-              Link de assinatura
-            </a>
-          )}
-          {c.assinadoEm && (
-            <div className="text-green-700 font-medium mt-1">
-              Assinado em: {new Date(c.assinadoEm).toLocaleString('pt-BR')}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Section 1: Dados do Cliente */}
+      {/* ── Seção 1: Dados do Cliente ── */}
       <section className="card mb-4">
         <h2 className="font-semibold text-primary mb-4 flex items-center gap-2">
           <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">1</span>
@@ -245,6 +322,9 @@ export default function ContratoFormPage() {
               <input className="input" value={c.endereco || ''} onChange={update('endereco')} />
             </Field>
           </div>
+          <Field label="Bairro">
+            <input className="input" value={c.bairro || ''} onChange={update('bairro')} />
+          </Field>
           <Field label="Cidade">
             <input className="input" value={c.cidade || ''} onChange={update('cidade')} />
           </Field>
@@ -254,7 +334,7 @@ export default function ContratoFormPage() {
         </div>
       </section>
 
-      {/* Section 2: Informações do Contrato */}
+      {/* ── Seção 2: Informações do Contrato ── */}
       <section className="card mb-4">
         <h2 className="font-semibold text-primary mb-4 flex items-center gap-2">
           <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">2</span>
@@ -265,16 +345,27 @@ export default function ContratoFormPage() {
             <input className="input" type="date" value={c.dataAssinatura || ''} onChange={update('dataAssinatura')} />
           </Field>
           <Field label="Data de Início">
-            <input className="input" type="date" value={c.dataInicio || ''} onChange={update('dataInicio')} />
+            <input className="input" type="date" value={c.dataInicio || ''} onChange={e => {
+              const inicio = e.target.value
+              const prazo = Number(c.prazoExecucao) || 0
+              const termino = prazo > 0 ? addBusinessDays(inicio, prazo) : (c.dataTermino || '')
+              setC(prev => ({ ...prev, dataInicio: inicio, dataTermino: termino }))
+              setSaved(false)
+            }} />
           </Field>
-          <Field label="Data de Término">
+          <Field label="Prazo de Execução (dias úteis)">
+            <input className="input" type="number" min="1" value={c.prazoExecucao || 3} onChange={e => {
+              const prazo = Number(e.target.value)
+              const termino = prazo > 0 && c.dataInicio ? addBusinessDays(c.dataInicio, prazo) : (c.dataTermino || '')
+              setC(prev => ({ ...prev, prazoExecucao: prazo, dataTermino: termino }))
+              setSaved(false)
+            }} />
+          </Field>
+          <Field label="Data de Término (calculada automaticamente)">
             <input className="input" type="date" value={c.dataTermino || ''} onChange={update('dataTermino')} />
           </Field>
           <Field label="Foro">
             <input className="input" value={c.foro || 'Rio de Janeiro'} onChange={update('foro')} />
-          </Field>
-          <Field label="Prazo de Execução (dias úteis)">
-            <input className="input" type="number" min="1" value={c.prazoExecucao || 3} onChange={e => updateNested('prazoExecucao', Number(e.target.value))} />
           </Field>
         </div>
         <div className="mt-3">
@@ -297,7 +388,7 @@ export default function ContratoFormPage() {
         </div>
       </section>
 
-      {/* Section 3: Resumo Financeiro */}
+      {/* ── Seção 3: Resumo Financeiro ── */}
       <section className="card mb-4">
         <h2 className="font-semibold text-primary mb-4 flex items-center gap-2">
           <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">3</span>
@@ -342,6 +433,12 @@ export default function ContratoFormPage() {
               }}
             />
           </Field>
+          <Field label="Nº de Parcelas (Proposta 2)">
+            <input className="input" type="number" min="1" max="24" step="1"
+              value={c.parcelas || 1}
+              onChange={e => updateNested('parcelas', Number(e.target.value))}
+            />
+          </Field>
           <Field label="ISS (%)">
             <input className="input" type="number" min="0" step="0.1"
               value={c.issPercent || 3}
@@ -359,7 +456,7 @@ export default function ContratoFormPage() {
             <div className="font-bold text-red-600">{fmt(descontoValor)}</div>
           </div>
           <div className="bg-green-50 rounded-lg p-3">
-            <div className="text-gray-500 text-xs mb-1">Total Líquido</div>
+            <div className="text-gray-500 text-xs mb-1">Total Líquido (à vista)</div>
             <div className="font-bold text-green-700 text-lg">{fmt(c.totalLiquido)}</div>
           </div>
           <div className="bg-blue-50 rounded-lg p-3">
@@ -369,11 +466,99 @@ export default function ContratoFormPage() {
         </div>
       </section>
 
-      {/* Section 4: Itens do Serviço */}
+      {/* ── Seção 4: Proposta Aceita pelo Cliente ── */}
+      <section className="card mb-4">
+        <h2 className="font-semibold text-primary mb-4 flex items-center gap-2">
+          <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">4</span>
+          Proposta Aceita pelo Cliente
+        </h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          {/* Proposta 1 — À Vista */}
+          <label
+            className={`cursor-pointer border-2 rounded-xl p-4 flex items-start gap-3 transition-all ${
+              c.propostaEscolhida === 1
+                ? 'border-primary bg-blue-50 shadow-md'
+                : 'border-gray-200 hover:border-primary/40'
+            }`}
+          >
+            <input
+              type="radio"
+              name="proposta"
+              checked={c.propostaEscolhida === 1}
+              onChange={() => handleSelectProposta(1)}
+              className="mt-1 accent-primary"
+            />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-bold text-gray-800">Proposta 1</span>
+                <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">À Vista</span>
+              </div>
+              <div className="text-2xl font-bold text-primary">{fmt(c.totalLiquido)}</div>
+              {(Number(c.desconto) > 0) && (
+                <div className="text-xs text-green-600 mt-1">
+                  ✓ Desconto de {c.descontoTipo === 'percent' ? `${c.desconto}%` : fmt(Number(c.desconto))} aplicado
+                </div>
+              )}
+              <div className="text-xs text-gray-500 mt-2 italic">
+                {c.condicaoPgto1Obs || '*Pgto a vista, na assinatura do contrato.'}
+              </div>
+            </div>
+          </label>
+
+          {/* Proposta 2 — Parcelado */}
+          <label
+            className={`cursor-pointer border-2 rounded-xl p-4 flex items-start gap-3 transition-all ${
+              c.propostaEscolhida === 2
+                ? 'border-primary bg-blue-50 shadow-md'
+                : 'border-gray-200 hover:border-primary/40'
+            }`}
+          >
+            <input
+              type="radio"
+              name="proposta"
+              checked={c.propostaEscolhida === 2}
+              onChange={() => handleSelectProposta(2)}
+              className="mt-1 accent-primary"
+            />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-bold text-gray-800">Proposta 2</span>
+                <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">Parcelado</span>
+              </div>
+              <div className="text-2xl font-bold text-gray-700">{fmt(c.totalBruto)}</div>
+              <div className="text-sm text-gray-600 mt-1 font-medium">
+                {Math.max(1, Number(c.parcelas) || 1)}x de {fmt((c.totalBruto || 0) / Math.max(1, Number(c.parcelas) || 1))}
+              </div>
+              <div className="text-xs text-gray-500 mt-2 italic">
+                {c.condicaoPgto2Obs1 || '* 1ª parcela de entrada na assinatura do contrato.'}
+              </div>
+            </div>
+          </label>
+        </div>
+
+        {c.propostaEscolhida ? (
+          <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 rounded-lg px-3 py-2">
+            <span>✅</span>
+            <span>
+              <strong>Proposta {c.propostaEscolhida}</strong> selecionada.
+              As parcelas abaixo foram preenchidas automaticamente.
+              Editando a <strong>data da 1ª parcela</strong>, as demais são ajustadas (+30 dias cada). Todos os campos são editáveis.
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+            <span>⚠️</span>
+            <span>Selecione a proposta aceita pelo cliente para preencher as parcelas automaticamente.</span>
+          </div>
+        )}
+      </section>
+
+      {/* ── Seção 5: Itens do Serviço ── */}
       {Array.isArray(c.itens) && c.itens.length > 0 && (
         <section className="card mb-4">
           <h2 className="font-semibold text-primary mb-3 flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">4</span>
+            <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">5</span>
             Itens do Serviço
           </h2>
           <div className="overflow-x-auto">
@@ -403,11 +588,11 @@ export default function ContratoFormPage() {
         </section>
       )}
 
-      {/* Section 5: Cronograma */}
+      {/* ── Seção 6: Cronograma ── */}
       <section className="card mb-4">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-primary flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">5</span>
+            <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">6</span>
             Cronograma de Obras
           </h2>
           <button onClick={addCronograma} className="btn-secondary text-sm py-1 px-3">
@@ -458,23 +643,31 @@ export default function ContratoFormPage() {
         </div>
       </section>
 
-      {/* Section 6: Parcelas */}
+      {/* ── Seção 7: Parcelas ── */}
       <section className="card mb-4">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-primary flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">6</span>
+            <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">7</span>
             Parcelas do Contrato
           </h2>
           <button onClick={addParcela} className="btn-secondary text-sm py-1 px-3">
             + Parcela
           </button>
         </div>
+
+        {/* Dica de auto-propagação */}
+        {(c.parcelasContrato || []).length > 1 && (
+          <div className="mb-3 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+            💡 Editando a <strong>data da 1ª parcela</strong>, as datas das demais são recalculadas automaticamente (+30 dias cada).
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b-2 border-primary">
                 <th className="text-center py-2 px-2 text-xs font-semibold text-gray-600 w-16">Nº</th>
-                <th className="text-center py-2 px-2 text-xs font-semibold text-gray-600 w-40">Data</th>
+                <th className="text-center py-2 px-2 text-xs font-semibold text-gray-600 w-44">Data de Vencimento</th>
                 <th className="text-right py-2 px-2 text-xs font-semibold text-gray-600">Valor (R$)</th>
                 <th className="w-10"></th>
               </tr>
@@ -483,14 +676,17 @@ export default function ContratoFormPage() {
               {(c.parcelasContrato || []).length === 0 ? (
                 <tr>
                   <td colSpan={4} className="text-center py-4 text-gray-400 text-sm">
-                    Nenhuma parcela. Clique em "+ Parcela" para adicionar.
+                    Selecione uma proposta acima ou clique em "+ Parcela" para adicionar manualmente.
                   </td>
                 </tr>
               ) : (
                 <>
                   {(c.parcelasContrato || []).map((p, i) => (
-                    <tr key={i} className="border-b border-gray-100">
-                      <td className="text-center py-2 px-2 text-gray-500 font-medium">{p.numero || i + 1}</td>
+                    <tr key={i} className={`border-b border-gray-100 ${i === 0 ? 'bg-blue-50/40' : ''}`}>
+                      <td className="text-center py-2 px-2 text-gray-500 font-medium">
+                        {p.numero || i + 1}
+                        {i === 0 && <span className="ml-1 text-xs text-blue-400">★</span>}
+                      </td>
                       <td className="py-2 px-2">
                         <input className="input py-1 w-full" type="date" value={p.data || ''}
                           onChange={e => updateParcela(i, 'data', e.target.value)} />
@@ -505,13 +701,27 @@ export default function ContratoFormPage() {
                       </td>
                     </tr>
                   ))}
-                  <tr className="border-t-2 border-primary">
-                    <td colSpan={2} className="py-2 px-2 text-right font-semibold">Total</td>
-                    <td className="py-2 px-2 text-right font-bold text-primary text-base">
-                      {fmt((c.parcelasContrato || []).reduce((s, p) => s + (Number(p.valor) || 0), 0))}
+                  <tr className="border-t-2 border-primary bg-gray-50">
+                    <td colSpan={2} className="py-2 px-2 text-right font-semibold text-sm">Total das Parcelas</td>
+                    <td className={`py-2 px-2 text-right font-bold text-base ${
+                      Math.abs(totalParcelasContrato - (c.propostaEscolhida === 1 ? c.totalLiquido : c.totalBruto)) > 1
+                        ? 'text-red-600' : 'text-primary'
+                    }`}>
+                      {fmt(totalParcelasContrato)}
                     </td>
                     <td></td>
                   </tr>
+                  {/* Alerta se total das parcelas diverge do valor da proposta */}
+                  {c.propostaEscolhida && Math.abs(totalParcelasContrato - (c.propostaEscolhida === 1 ? c.totalLiquido : c.totalBruto)) > 1 && (
+                    <tr>
+                      <td colSpan={4} className="py-2 px-2">
+                        <div className="text-xs text-red-600 bg-red-50 rounded px-2 py-1">
+                          ⚠️ Total das parcelas ({fmt(totalParcelasContrato)}) difere do valor da Proposta {c.propostaEscolhida} ({fmt(c.propostaEscolhida === 1 ? c.totalLiquido : c.totalBruto)}).
+                          Verifique os valores.
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                 </>
               )}
             </tbody>
@@ -519,11 +729,37 @@ export default function ContratoFormPage() {
         </div>
       </section>
 
+      {/* ── Upload contrato assinado ── */}
+      <div className="card mt-4 mb-4">
+        <h3 className="font-semibold text-gray-700 mb-3">📎 Contrato Assinado</h3>
+        {c.contratoArquivo ? (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-600">📄 {c.contratoArquivoNome || 'contrato-assinado'}</span>
+            <a href={c.contratoArquivo} download={c.contratoArquivoNome || 'contrato.pdf'}
+               className="text-xs text-primary hover:underline">Baixar</a>
+            <button onClick={() => handleRemoverArquivo()} className="text-xs text-red-500 hover:underline">Remover</button>
+          </div>
+        ) : (
+          <div>
+            <label className="cursor-pointer">
+              <span className="btn-secondary text-sm">📎 Selecionar arquivo (PDF ou imagem)</span>
+              <input type="file" accept=".pdf,image/*" className="hidden" onChange={handleUploadArquivo} />
+            </label>
+            <p className="text-xs text-gray-400 mt-1">PDF ou imagem do contrato físico assinado</p>
+          </div>
+        )}
+        {uploadingArquivo && <p className="text-xs text-gray-500 mt-1">Enviando...</p>}
+      </div>
+
       {/* Sticky Bottom */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-3 justify-end z-10 md:left-56">
         <div className="flex-1 flex items-center gap-4">
-          <span className="text-sm text-gray-500">Total:</span>
-          <span className="text-xl font-bold text-primary">{fmt(c.totalLiquido)}</span>
+          <span className="text-sm text-gray-500">
+            {c.propostaEscolhida ? `Proposta ${c.propostaEscolhida} —` : 'Total:'}
+          </span>
+          <span className="text-xl font-bold text-primary">
+            {fmt(c.propostaEscolhida === 2 ? c.totalBruto : c.totalLiquido)}
+          </span>
         </div>
         <button onClick={handleSave} disabled={saving} className="btn-secondary">
           {saving ? 'Salvando...' : 'Salvar'}
@@ -537,11 +773,6 @@ export default function ContratoFormPage() {
         <button onClick={() => window.open(api.getArtPdfUrl(id), '_blank')} className="btn-secondary">
           ART
         </button>
-        {c.status !== 'assinado' && (
-          <button onClick={handleZapSign} disabled={zapsignLoading} className="btn-primary">
-            {zapsignLoading ? 'Enviando...' : 'Enviar ZapSign'}
-          </button>
-        )}
       </div>
     </div>
   )

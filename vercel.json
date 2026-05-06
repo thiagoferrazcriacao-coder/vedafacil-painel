@@ -24,6 +24,17 @@
     { "source": "/api/ordens-servico/:path*", "destination": "/api/index.js" },
     { "source": "/api/ordens-servico", "destination": "/api/index.js" },
     { "source": "/api/aplicador/:path*", "destination": "/api/index.js" },
+    { "source": "/api/aplicador", "destination": "/api/index.js" },
+    { "source": "/api/aplicador/:path*", "destination": "/api/index.js" },
+    { "source": "/api/aplicador", "destination": "/api/index.js" },
+    { "source": "/api/dashboard/:path*", "destination": "/api/index.js" },
+    { "source": "/api/dashboard", "destination": "/api/index.js" },
+    { "source": "/api/croqui/:path*", "destination": "/api/index.js" },
+    { "source": "/api/croqui", "destination": "/api/index.js" },
+    { "source": "/api/lixeira/:path*", "destination": "/api/index.js" },
+    { "source": "/api/lixeira", "destination": "/api/index.js" },
+    { "source": "/api/reparos/:path*", "destination": "/api/index.js" },
+    { "source": "/api/reparos", "destination": "/api/index.js" },
     { "source": "/api/debug-zapsign", "destination": "/api/index.js" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]

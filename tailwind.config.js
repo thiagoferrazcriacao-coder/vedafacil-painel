@@ -3,7 +3,11 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: { DEFAULT: '#1a5c9a', light: '#2771c0', dark: '#144878' }
+        primary: { DEFAULT: '#e87722', light: '#f59340', dark: '#c45d12' }
+      },
+      backgroundImage: {
+        'gradient-orange':   'linear-gradient(180deg, #c45d12 0%, #e87722 50%, #f59340 100%)',
+        'gradient-orange-h': 'linear-gradient(135deg, #c45d12 0%, #e87722 100%)',
       }
     }
   },

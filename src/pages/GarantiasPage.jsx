@@ -8,12 +8,122 @@ const fmtDate = (ts) => {
   return new Date(ts).toLocaleDateString('pt-BR')
 }
 
+function EditModal({ contrato, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    razaoSocial: contrato.razaoSocial || contrato.cliente || '',
+    cnpj: contrato.cnpj || '',
+    endereco: contrato.endereco || '',
+    bairro: contrato.bairro || '',
+    cidade: contrato.cidade || '',
+    cep: contrato.cep || '',
+    garantia: contrato.garantia || 15,
+    totalLiquido: contrato.totalLiquido || 0,
+    dataInicio: contrato.dataInicio ? new Date(contrato.dataInicio).toISOString().slice(0, 10) : '',
+    dataTermino: contrato.dataTermino ? new Date(contrato.dataTermino).toISOString().slice(0, 10) : '',
+    obsGarantia: contrato.obsGarantia || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const upd = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }))
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError('')
+    try {
+      const updated = await api.updateContrato(contrato.id, form)
+      onSaved(updated)
+      onClose()
+    } catch (err) {
+      setError(err.message)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-4 border-b">
+          <h2 className="font-bold text-gray-800">Editar Garantia #{String(contrato.numero || 0).padStart(4, '0')}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        </div>
+        <div className="p-4 space-y-3">
+          {error && <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">{error}</div>}
+
+          <div>
+            <label className="label">Razão Social / Cliente</label>
+            <input className="input" value={form.razaoSocial} onChange={upd('razaoSocial')} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">CNPJ/CPF</label>
+              <input className="input" value={form.cnpj} onChange={upd('cnpj')} />
+            </div>
+            <div>
+              <label className="label">CEP</label>
+              <input className="input" value={form.cep} onChange={upd('cep')} />
+            </div>
+          </div>
+          <div>
+            <label className="label">Endereço</label>
+            <input className="input" value={form.endereco} onChange={upd('endereco')} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Bairro</label>
+              <input className="input" value={form.bairro} onChange={upd('bairro')} />
+            </div>
+            <div>
+              <label className="label">Cidade</label>
+              <input className="input" value={form.cidade} onChange={upd('cidade')} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Garantia (anos)</label>
+              <select className="input" value={form.garantia} onChange={upd('garantia')}>
+                <option value={7}>7 anos</option>
+                <option value={15}>15 anos</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Valor Total (R$)</label>
+              <input className="input" type="number" min="0" step="0.01" value={form.totalLiquido} onChange={upd('totalLiquido')} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Data Início</label>
+              <input className="input" type="date" value={form.dataInicio} onChange={upd('dataInicio')} />
+            </div>
+            <div>
+              <label className="label">Data Término</label>
+              <input className="input" type="date" value={form.dataTermino} onChange={upd('dataTermino')} />
+            </div>
+          </div>
+          <div>
+            <label className="label">Observações (Garantia)</label>
+            <textarea className="input min-h-[60px] resize-y" value={form.obsGarantia} onChange={upd('obsGarantia')} placeholder="Observações adicionais para o certificado..." />
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 p-4 border-t">
+          <button onClick={onClose} className="btn-secondary" disabled={saving}>Cancelar</button>
+          <button onClick={handleSave} className="btn-primary" disabled={saving}>
+            {saving ? 'Salvando...' : '💾 Salvar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function GarantiasPage() {
   const navigate = useNavigate()
   const [contratos, setContratos] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [marking, setMarking] = useState(null)
+  const [editingContrato, setEditingContrato] = useState(null)
 
   useEffect(() => {
     api.getContratos()
@@ -33,6 +143,10 @@ export default function GarantiasPage() {
     }
   }
 
+  const handleSaved = (updated) => {
+    setContratos(prev => prev.map(c => c.id === updated.id ? { ...c, ...updated } : c))
+  }
+
   const filtered = contratos.filter(c => {
     const q = search.toLowerCase()
     return !q || (c.cliente || '').toLowerCase().includes(q) || (c.razaoSocial || '').toLowerCase().includes(q) || String(c.numero || '').includes(q)
@@ -46,6 +160,14 @@ export default function GarantiasPage() {
 
   return (
     <div className="p-4 md:p-6">
+      {editingContrato && (
+        <EditModal
+          contrato={editingContrato}
+          onClose={() => setEditingContrato(null)}
+          onSaved={handleSaved}
+        />
+      )}
+
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div>
           <h1 className="text-xl font-bold text-gray-800">Certificados de Garantia</h1>
@@ -95,7 +217,7 @@ export default function GarantiasPage() {
                     </td>
                     <td className="py-3 px-4">
                       <div className="font-medium text-gray-800">{c.razaoSocial || c.cliente || '—'}</div>
-                      {c.cidade && <div className="text-xs text-gray-400">{c.cidade}</div>}
+                      {c.cidade && <div className="text-xs text-gray-400">{c.bairro ? `${c.bairro} · ` : ''}{c.cidade}</div>}
                     </td>
                     <td className="py-3 px-4 text-center">
                       <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
@@ -120,16 +242,22 @@ export default function GarantiasPage() {
                       {c.garantiaEnviadaEm ? fmtDate(c.garantiaEnviadaEm) : '—'}
                     </td>
                     <td className="py-3 px-4">
-                      <div className="flex gap-2 justify-end flex-wrap">
+                      <div className="flex gap-1.5 justify-end flex-wrap">
                         <button
                           onClick={() => window.open(api.getGarantiaPdfUrl(c.id), '_blank')}
-                          className="btn-secondary text-xs py-1 px-2"
+                          className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 font-medium"
                         >
-                          Ver PDF
+                          📄 PDF
+                        </button>
+                        <button
+                          onClick={() => setEditingContrato(c)}
+                          className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200"
+                        >
+                          ✏️ Editar
                         </button>
                         <button
                           onClick={() => navigate(`/contratos/${c.id}`)}
-                          className="btn-secondary text-xs py-1 px-2"
+                          className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200"
                         >
                           Contrato
                         </button>
@@ -137,9 +265,9 @@ export default function GarantiasPage() {
                           <button
                             onClick={() => handleMarcarEnviada(c.id)}
                             disabled={marking === c.id}
-                            className="btn-success text-xs py-1 px-2"
+                            className="text-xs px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200 font-semibold disabled:opacity-40"
                           >
-                            {marking === c.id ? '...' : 'Marcar Enviada'}
+                            {marking === c.id ? '...' : '✓ Enviada'}
                           </button>
                         )}
                       </div>

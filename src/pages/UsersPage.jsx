@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../api/client.js'
 
-const ROLE_LABELS = { admin: 'Admin', medidor: 'Medidor' }
+const ROLE_LABELS = { admin: 'Admin', medidor: 'Medidor', operador: 'Operador' }
 
-const emptyForm = { email: '', name: '', role: 'medidor' }
+const emptyForm = { email: '', name: '', role: 'operador' }
 
 export default function UsersPage() {
   const [users, setUsers] = useState([])
@@ -145,9 +145,13 @@ export default function UsersPage() {
                 onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
               >
+                <option value="operador">Operador</option>
                 <option value="medidor">Medidor</option>
                 <option value="admin">Admin</option>
               </select>
+              {form.role === 'operador' && !editingEmail && (
+                <p className="text-xs text-amber-600 mt-1">Senha temporária: <strong>123456</strong>. O usuário deverá trocá-la no primeiro acesso.</p>
+              )}
             </div>
             <div className="flex gap-2">
               <button
@@ -217,6 +221,8 @@ export default function UsersPage() {
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                       u.role === 'admin'
                         ? 'bg-blue-100 text-blue-700'
+                        : u.role === 'operador'
+                        ? 'bg-orange-100 text-orange-700'
                         : 'bg-gray-100 text-gray-600'
                     }`}>
                       {ROLE_LABELS[u.role] || u.role}

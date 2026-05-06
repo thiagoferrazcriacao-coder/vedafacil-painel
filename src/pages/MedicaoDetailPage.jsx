@@ -63,6 +63,16 @@ export default function MedicaoDetailPage() {
     navigate(`/orcamentos/novo/${medicao.id}`)
   }
 
+  const handleReabrir = async () => {
+    if (!confirm('Reabrir esta medição para que o medidor possa corrigir e reenviar?')) return
+    try {
+      await api.updateMedicaoStatus(medicao._id || medicao.id, 'reaberta')
+      setMedicao(prev => ({ ...prev, status: 'reaberta' }))
+    } catch (err) {
+      alert('Erro ao reabrir: ' + err.message)
+    }
+  }
+
   // Seleção Parcial → abre modal com checklist
   const handleParcial = () => {
     setSelectedLocais((medicao.locais || []).map((_, i) => i))
@@ -117,6 +127,11 @@ export default function MedicaoDetailPage() {
         <div className="ml-auto flex gap-2 flex-wrap">
           {!editing && (
             <>
+              {medicao.status === 'recebida' && (
+                <button onClick={handleReabrir} className="btn-secondary text-amber-700 border-amber-300 hover:bg-amber-50">
+                  🔓 Reabrir
+                </button>
+              )}
               <button onClick={handleEdit} className="btn-secondary">
                 ✏️ Editar
               </button>

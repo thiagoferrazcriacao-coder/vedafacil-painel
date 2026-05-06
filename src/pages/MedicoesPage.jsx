@@ -299,7 +299,7 @@ export default function MedicoesPage() {
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Nº</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Data/Hora</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Cliente</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Cidade</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Bairro / Cidade</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Medidor</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Locais</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
@@ -325,7 +325,10 @@ export default function MedicoesPage() {
                       <td className="px-4 py-3 font-medium text-gray-800">
                         {m.cliente || m.nomeCliente || '—'}
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{m.cidade || '—'}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {m.bairro && <div className="text-xs font-medium text-gray-700">{m.bairro}</div>}
+                        <div className="text-xs">{m.cidade || '—'}</div>
+                      </td>
                       <td className="px-4 py-3 text-gray-600">{m.user || m.medidor || '—'}</td>
                       <td className="px-4 py-3 text-gray-600">
                         {Array.isArray(m.locais) ? m.locais.length : '—'}
