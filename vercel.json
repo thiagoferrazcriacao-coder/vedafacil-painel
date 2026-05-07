@@ -36,6 +36,9 @@
     { "source": "/api/reparos/:path*", "destination": "/api/index.js" },
     { "source": "/api/reparos", "destination": "/api/index.js" },
     { "source": "/api/debug-zapsign", "destination": "/api/index.js" },
+    { "source": "/api/produtos/:path*", "destination": "/api/index.js" },
+    { "source": "/api/produtos", "destination": "/api/index.js" },
+    { "source": "/api/me", "destination": "/api/index.js" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
