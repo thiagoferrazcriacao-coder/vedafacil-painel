@@ -118,6 +118,12 @@ export const api = {
   updatePrecos: (data) => request('PUT', '/config/precos', data),
   getProximoOrcamento: () => request('GET', '/config/proximo-orcamento'),
 
+  // Produtos
+  getProdutosDashboard: () => request('GET', '/produtos/dashboard'),
+  getCompras: () => request('GET', '/produtos/compras'),
+  addCompra: (data) => request('POST', '/produtos/compras', data),
+  deleteCompra: (id) => request('DELETE', `/produtos/compras/${id}`),
+
   // Usuários
   getUsuarios: () => request('GET', '/usuarios'),
   createUsuario: (data) => request('POST', '/usuarios', data),

@@ -20,6 +20,7 @@ import ConfigPage from './pages/ConfigPage.jsx'
 import UsersPage from './pages/UsersPage.jsx'
 import AgendaPage from './pages/AgendaPage.jsx'
 import PerfilPage from './pages/PerfilPage.jsx'
+import ProdutosPage from './pages/ProdutosPage.jsx'
 
 // ─── Auth Context ─────────────────────────────────────────────────────────────
 export const AuthContext = createContext(null)
@@ -121,6 +122,7 @@ export default function App() {
                   <Route path="/reparos" element={<ReparosPage />} />
                   <Route path="/lixeira" element={<ProtectedRoute adminOnly><LixeiraPage /></ProtectedRoute>} />
                   <Route path="/croqui" element={<CroquiPage />} />
+                  <Route path="/produtos" element={<ProdutosPage />} />
                   <Route path="/config" element={<ProtectedRoute adminOnly><ConfigPage /></ProtectedRoute>} />
                   <Route path="/usuarios" element={<ProtectedRoute adminOnly><UsersPage /></ProtectedRoute>} />
                   <Route path="/perfil" element={<PerfilPage />} />

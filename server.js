@@ -307,6 +307,15 @@ const lixeiraSchema = new mongoose.Schema({
 
 const Lixeira = mongoose.models.Lixeira || mongoose.model('Lixeira', lixeiraSchema, 'lixeira');
 
+// ── Compras de Produto ────────────────────────────────────────────────────────
+const compraSchema = new mongoose.Schema({
+  data: { type: Date, default: Date.now },
+  quantidade: { type: Number, required: true }, // litros
+  obs: { type: String, default: '' },
+  criadoEm: { type: Date, default: Date.now }
+});
+const Compra = mongoose.model('Compra', compraSchema, 'compras');
+
 // In-memory fallback (when no MongoDB)
 const memStore = { medicoes: [], orcamentos: [], contratos: [], config: null, users: [], equipes: [], ordens: [], lixeira: [] };
 
@@ -4375,6 +4384,100 @@ app.post('/api/croqui/otimizar', async (req, res) => {
     console.error('Croqui otimizar error:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Produtos / Estoque ────────────────────────────────────────────────────────
+app.get('/api/produtos/compras', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const compras = await Compra.find().sort({ data: -1 }).lean();
+    res.json(compras);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/produtos/compras', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const { data, quantidade, obs } = req.body;
+    if (!quantidade || isNaN(parseFloat(quantidade))) return res.status(400).json({ error: 'Informe a quantidade' });
+    const compra = new Compra({ data: data ? new Date(data) : new Date(), quantidade: parseFloat(quantidade), obs: obs || '' });
+    await compra.save();
+    res.json(compra);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/produtos/compras/:id', auth, async (req, res) => {
+  try {
+    await connectDB();
+    await Compra.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/produtos/dashboard', auth, async (req, res) => {
+  try {
+    await connectDB();
+    // 1) Total comprado
+    const compras = await Compra.find().sort({ data: 1 }).lean();
+    const totalComprado = compras.reduce((s, c) => s + (c.quantidade || 0), 0);
+
+    // 2) Consumo de todas as OSes (fechamentosDia[].litros)
+    const todasOS = await OS.find({}, { equipeNome: 1, tipo: 1, numOS: 1, cliente: 1, status: 1, fechamentosDia: 1, totalConsumoReal: 1 }).lean();
+
+    let totalGasto = 0;
+    const porEquipe = {};
+    let gastoObras = 0;
+    let gastoReparos = 0;
+    const osConsumo = [];
+
+    todasOS.forEach(os => {
+      const fechamentos = os.fechamentosDia || [];
+      const totalOS = fechamentos.reduce((s, f) => s + (f.litros || 0), 0);
+      if (totalOS === 0) return;
+
+      totalGasto += totalOS;
+
+      // Por equipe
+      const equipe = os.equipeNome || 'Sem equipe';
+      porEquipe[equipe] = (porEquipe[equipe] || 0) + totalOS;
+
+      // Por tipo
+      if (os.tipo === 'reparo') gastoReparos += totalOS;
+      else gastoObras += totalOS;
+
+      osConsumo.push({
+        id: os._id,
+        numOS: os.numOS || '',
+        cliente: os.cliente || '',
+        tipo: os.tipo || 'normal',
+        equipeNome: os.equipeNome || '',
+        status: os.status || '',
+        litros: totalOS
+      });
+    });
+
+    // Top 10 OSes por consumo
+    const topOS = osConsumo.sort((a, b) => b.litros - a.litros).slice(0, 10);
+
+    // Gasto por equipe ordenado
+    const gastoPorEquipe = Object.entries(porEquipe)
+      .map(([equipeNome, litros]) => ({ equipeNome, litros }))
+      .sort((a, b) => b.litros - a.litros);
+
+    const saldoAtual = totalComprado - totalGasto;
+
+    res.json({
+      totalComprado,
+      totalGasto,
+      saldoAtual,
+      gastoObras,
+      gastoReparos,
+      gastoPorEquipe,
+      topOS,
+      compras,
+      alertaBaixoEstoque: saldoAtual < 100
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── SPA fallback ──────────────────────────────────────────────────────────────
