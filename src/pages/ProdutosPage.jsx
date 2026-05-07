@@ -76,39 +76,53 @@ export default function ProdutosPage() {
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
       )}
 
-      {/* Alerta baixo estoque */}
-      {alerta && (
-        <div className="mb-5 p-4 bg-red-50 border-l-4 border-red-500 rounded-lg flex items-start gap-3">
-          <span className="text-2xl">⚠️</span>
-          <div>
-            <div className="font-bold text-red-800">Estoque baixo!</div>
-            <div className="text-red-700 text-sm mt-0.5">
-              Saldo atual: <strong>{fmt(saldo)}L</strong>. Mínimo recomendado: 100L. <strong>Compre mais produto!</strong>
-            </div>
+
+      {/* Saldo em destaque — hero card */}
+      <div className={`rounded-2xl p-6 mb-4 shadow-md flex flex-col md:flex-row items-center justify-between gap-4 ${
+        alerta ? 'bg-gradient-to-r from-red-500 to-red-600' :
+        saldo < 200 ? 'bg-gradient-to-r from-yellow-400 to-orange-400' :
+        'bg-gradient-to-r from-green-500 to-emerald-600'
+      }`}>
+        <div className="text-center md:text-left">
+          <div className="text-white/80 text-sm font-medium uppercase tracking-wide mb-1">🧴 Saldo Atual em Estoque</div>
+          <div className="text-white font-black" style={{ fontSize: '3.5rem', lineHeight: 1 }}>
+            {fmt(saldo)}<span className="text-3xl font-bold ml-1">L</span>
+          </div>
+          <div className="text-white/80 text-sm mt-2">
+            {alerta ? '⚠️ Estoque crítico — compre mais produto!' :
+             saldo < 200 ? '⚠️ Estoque baixo — atenção!' :
+             '✅ Estoque normal'}
           </div>
         </div>
-      )}
+        {/* Mini barra de nível */}
+        <div className="flex flex-col items-center gap-2 min-w-[140px]">
+          <div className="w-full bg-white/20 rounded-full h-4 overflow-hidden">
+            <div
+              className="h-full bg-white rounded-full transition-all"
+              style={{ width: `${Math.min(100, (saldo / Math.max(dash?.totalComprado || 1, saldo)) * 100)}%` }}
+            />
+          </div>
+          <div className="flex justify-between w-full text-white/70 text-xs">
+            <span>0L</span>
+            <span>mín. 100L</span>
+            <span>{fmt(dash?.totalComprado)}L</span>
+          </div>
+        </div>
+      </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      {/* KPI Cards secundários */}
+      <div className="grid grid-cols-3 gap-3 mb-6">
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="text-xs text-gray-500 mb-1">Total Comprado</div>
-          <div className="text-2xl font-bold text-blue-600">{fmt(dash?.totalComprado)}L</div>
+          <div className="text-xl font-bold text-blue-600">{fmt(dash?.totalComprado)}L</div>
         </div>
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="text-xs text-gray-500 mb-1">Total Gasto</div>
-          <div className="text-2xl font-bold text-red-600">{fmt(dash?.totalGasto)}L</div>
-        </div>
-        <div className={`rounded-xl p-4 shadow-sm border ${alerta ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100'}`}>
-          <div className="text-xs text-gray-500 mb-1">Saldo Atual</div>
-          <div className={`text-2xl font-bold ${alerta ? 'text-red-600' : saldo < 200 ? 'text-yellow-600' : 'text-green-600'}`}>
-            {fmt(saldo)}L
-          </div>
-          {alerta && <div className="text-xs text-red-500 mt-1 font-medium">⚠ Comprar!</div>}
+          <div className="text-xl font-bold text-red-500">{fmt(dash?.totalGasto)}L</div>
         </div>
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="text-xs text-gray-500 mb-1">Alerta Mínimo</div>
-          <div className="text-2xl font-bold text-gray-400">100L</div>
+          <div className="text-xl font-bold text-gray-400">100L</div>
         </div>
       </div>
 
