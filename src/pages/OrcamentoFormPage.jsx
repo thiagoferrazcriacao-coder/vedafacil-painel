@@ -290,7 +290,7 @@ export default function OrcamentoFormPage() {
             <input className="input" type="text" value={orc.dataOrcamento || ''} onChange={updateField('dataOrcamento')} placeholder="dd/mm/aaaa" />
           </Field>
           <Field label="Validade (dias)">
-            <input className="input" type="number" min="1" value={orc.validade || 30} onChange={e => update({ validade: Number(e.target.value) })} />
+            <input className="input" type="number" min="1" value={orc.validade || 30} onChange={e => update({ validade: String(Number(e.target.value)) })} />
           </Field>
           <Field label="Elaborado Por">
             <input className="input" value={orc.elaboradoPor || ''} onChange={updateField('elaboradoPor')} />

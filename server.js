@@ -733,7 +733,7 @@ app.post('/api/orcamentos', auth, async (req, res) => {
       ac: medicao?.ac || '',
       celular: medicao?.celular || '',
       dataOrcamento: new Date().toISOString().split('T')[0],
-      validade: '',
+      validade: '30',
       avaliadoPor: medicao?.avaliadoPor || '', acompanhadoPor: '', tecnicoResponsavel: 'Thiago Ramos Ferraz', elaboradoPor: '',
       origem: '', sigla: '',
       garantia: Number(medicao?.garantia) || 15,
@@ -1131,7 +1131,7 @@ ${LOGO_HTML}
   <div class="hbox-r">
     <div style="font-size:13px;font-weight:bold;text-align:right;margin-bottom:6px;">ORÇAMENTO Nº ${o.numero || 1}</div>
     <div style="display:flex;justify-content:space-between;"><span>Data Medição:</span><strong>${fmtDate(o.dataOrcamento)}</strong></div>
-    <div style="display:flex;justify-content:space-between;"><span>Validade da Proposta:</span><strong>${fmtValidade(o.validade) || '—'}</strong></div>
+    <div style="display:flex;justify-content:space-between;"><span>Validade da Proposta:</span><strong>${fmtValidade(o.validade || '30')}</strong></div>
   </div>
 </div>
 
