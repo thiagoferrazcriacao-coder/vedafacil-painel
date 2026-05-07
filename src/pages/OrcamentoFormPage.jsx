@@ -76,7 +76,13 @@ function recalculate(orc) {
     totalProposta1, totalProposta2,
     entradaVal2, saldo2, valorParcela2,
     valorParcela: valorParcela2, // backward compat
-    ...obra
+    diasTrabalho:   obra.diasTrabalho,
+    consumoProduto: obra.consumoProduto,
+    qtdInjetores:   obra.qtdInjetores,
+    // Prazo: auto-calcula a partir dos serviços, mas preserva se o usuário editou manualmente
+    prazoExecucao: orc.prazoManual
+      ? (orc.prazoExecucao || obra.prazoExecucao || 3)
+      : Math.max(1, obra.prazoExecucao || 3),
   }
 }
 
@@ -507,8 +513,18 @@ export default function OrcamentoFormPage() {
 
         {/* Prazo + Garantia + Andaime */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5 p-4 bg-gray-50 rounded-xl border border-gray-200">
-          <Field label="Prazo de Execução (dias úteis)">
-            <input className="input" type="number" min="1" value={orc.prazoExecucao || 3} onChange={e => update({ prazoExecucao: Number(e.target.value) })} />
+          <Field label={<span>Prazo de Execução (dias úteis) {orc.prazoManual ? <span className="text-xs text-amber-600 font-normal ml-1">(editado)</span> : <span className="text-xs text-green-600 font-normal ml-1">(automático)</span>}</span>}>
+            <div className="flex gap-2 items-center">
+              <input className="input" type="number" min="1" value={orc.prazoExecucao || 3}
+                onChange={e => update({ prazoExecucao: Number(e.target.value), prazoManual: true })} />
+              {orc.prazoManual && (
+                <button type="button" title="Recalcular automaticamente"
+                  onClick={() => update({ prazoManual: false })}
+                  className="px-2 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 text-gray-600 whitespace-nowrap">
+                  🔄 Auto
+                </button>
+              )}
+            </div>
           </Field>
           <div>
             <label className="label">Garantia (aparece no PDF)</label>

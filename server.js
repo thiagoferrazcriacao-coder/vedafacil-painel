@@ -1257,9 +1257,19 @@ ${sec('6','VALORES')}
     </tr>
   </thead>
   <tbody>${valuesRows}</tbody>
+  <tfoot>
+    <tr>
+      <td colspan="5" style="text-align:right;font-weight:bold;background:#fff3e0;padding:6px 8px;">TOTAL DOS SERVIÇOS</td>
+      <td style="text-align:right;font-weight:bold;background:#e87722;color:white;font-size:12px;padding:6px 8px;">${fmt(o.totalBruto || totalProposta1)}</td>
+    </tr>
+  </tfoot>
 </table>
 
 ${sec('7','CONDIÇÕES DE PAGAMENTO')}
+<div style="border:2px solid #e87722;border-radius:6px;padding:12px 16px;margin:10px 0 14px;display:flex;justify-content:space-between;align-items:center;background:#fff8f0;">
+  <div style="font-size:12px;font-weight:bold;color:#555;">VALOR TOTAL DOS SERVIÇOS</div>
+  <div style="font-size:22px;font-weight:900;color:#e87722;">${fmt(o.totalBruto || totalProposta1)}</div>
+</div>
 
 <p style="text-align:center;font-weight:bold;font-size:11px;margin:6px 0 4px;">Proposta 1 : &nbsp;<em>(Pagamento à vista)</em></p>
 <table class="pay">
