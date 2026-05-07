@@ -1208,7 +1208,19 @@ ${sec('4','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
   <p>✓ Disponibilizar vaga para veículo da VEDAFACIL.</p>
   <p>✓ Fornecer ponto de energia elétrica;</p>
   <p>✓ Providenciar liberação da área a ser trabalhada, acesso desobstruído e livre de circulação de pessoas.</p>
+  ${(o.andaime === 'sim' || o.andaime === true) ? `<p>✓ Autorizar entrada e providenciar local para armazenamento do andaime durante a execução.</p>` : ''}
 </div>
+
+${(o.andaime === 'sim' || o.andaime === true) ? `
+<div style="background:#fff8f0;border:1.5px solid #e87722;border-radius:6px;padding:10px 14px;margin:10px 0 4px;display:flex;align-items:flex-start;gap:10px;">
+  <div style="font-size:20px;line-height:1;flex-shrink:0;">🏗️</div>
+  <div>
+    <div style="font-weight:bold;font-size:11px;color:#c45d12;margin-bottom:3px;">ANDAIME NECESSÁRIO</div>
+    <div style="font-size:10.5px;line-height:1.6;color:#333;">
+      Para a execução desta obra será necessário andaime${o.andaimeMetros > 0 ? ` de <strong>${o.andaimeMetros}m</strong> de altura` : ''}${o.andaimeLargura ? `, largura <strong>${o.andaimeLargura}</strong>` : ''}${o.andaimeRodinhas ? ', <strong>com rodinhas</strong>' : ''}${o.andaimeBases ? ', <strong>com bases ajustáveis</strong>' : ''}.
+    </div>
+  </div>
+</div>` : ''}
 
 ${sec('5','LOCALIZAÇÃO')}
 <table class="loc">
