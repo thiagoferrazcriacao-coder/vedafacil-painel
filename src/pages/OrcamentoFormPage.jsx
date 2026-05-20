@@ -403,6 +403,9 @@ export default function OrcamentoFormPage() {
           <Field label="CEP">
             <input className="input" value={orc.cep || ''} onChange={updateField('cep')} placeholder="00000-000" />
           </Field>
+          <Field label="E-mail do Cliente">
+            <input className="input" type="email" value={orc.emailCliente || ''} onChange={updateField('emailCliente')} placeholder="email@exemplo.com" />
+          </Field>
         </div>
       </section>
 
