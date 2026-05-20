@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
 import { useAuth } from '../App.jsx'
+import WorkdayPicker from '../components/WorkdayPicker.jsx'
 
 const STATUS_OPTIONS = [
   { value: 'agendada',              label: 'Agendada',              color: 'bg-blue-100 text-blue-700' },
@@ -325,6 +326,8 @@ export default function OSDetailPage() {
   const statusCfg = STATUS_OPTIONS.find(s => s.value === os.status) || STATUS_OPTIONS[0]
   const d = editing ? editData : os
   const pontos = os.pontos || []
+  const temCroqui = pontos.some(p => p.croquiBase64 || p.croquiOtimizado)
+  const pendenteCroqui = pontos.length > 0 && !temCroqui && os.status !== 'cancelada'
   const concluidos = pontos.filter(p => (p.statusLocal || p.status) === 'concluido').length
   const totalFotosAntes = pontos.reduce((s, p) => s + (p.fotosAntes?.length || 0), 0)
   const totalFotosDepois = pontos.reduce((s, p) => s + (p.fotosDepois?.length || 0), 0)
@@ -376,6 +379,11 @@ export default function OSDetailPage() {
         <button onClick={() => navigate('/ordens-servico')} className="btn-secondary">Voltar</button>
         <h1 className="text-xl font-bold text-gray-800">OS #{String(os.numero || '').padStart(3, '0')}</h1>
         <span className={`text-sm px-3 py-1 rounded-full ${statusCfg.color}`}>{statusCfg.label}</span>
+        {pendenteCroqui && (
+          <span className="text-sm bg-purple-100 text-purple-700 border border-purple-300 px-3 py-1 rounded-full font-semibold flex items-center gap-1">
+            📐 Pendente de Croqui
+          </span>
+        )}
         <div className="ml-auto flex gap-2 flex-wrap">
           {os.status === 'concluida' && (
             <>
@@ -467,17 +475,39 @@ export default function OSDetailPage() {
                     <option key={eq.id || eq._id} value={eq.id || eq._id}>{eq.nome}</option>
                   ))}
                 </select>
+                {/* Membros da equipe selecionada */}
+                {editData.equipeId && (() => {
+                  const eq = equipes.find(x => (x.id || x._id) === editData.equipeId)
+                  return eq?.membros?.length > 0 ? (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {eq.membros.map((m, i) => (
+                        <span key={i} className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full">
+                          👤 {m}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null
+                })()}
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="label">Início</label>
-                  <input type="date" className="input" value={editData.dataInicio || ''} onChange={e => setEditData(p => ({ ...p, dataInicio: e.target.value }))} />
+                  <input type="date" className="input" value={editData.dataInicio || ''}
+                    onChange={e => setEditData(p => ({ ...p, dataInicio: e.target.value, diasAtivos: [] }))} />
                 </div>
                 <div>
                   <label className="label">Término</label>
-                  <input type="date" className="input" value={editData.dataTermino || ''} onChange={e => setEditData(p => ({ ...p, dataTermino: e.target.value }))} />
+                  <input type="date" className="input" value={editData.dataTermino || ''}
+                    onChange={e => setEditData(p => ({ ...p, dataTermino: e.target.value, diasAtivos: [] }))} />
                 </div>
               </div>
+              {/* Seletor de dias de trabalho */}
+              <WorkdayPicker
+                dataInicio={editData.dataInicio || ''}
+                dataTermino={editData.dataTermino || ''}
+                diasAtivos={editData.diasAtivos || []}
+                onChange={dias => setEditData(p => ({ ...p, diasAtivos: dias }))}
+              />
               <div>
                 <label className="label">Técnico Responsável</label>
                 <select className="input" value={editData.tecnicoResponsavel || ''} onChange={e => setEditData(p => ({ ...p, tecnicoResponsavel: e.target.value }))}>
@@ -503,13 +533,49 @@ export default function OSDetailPage() {
                 ['Técnico', os.tecnicoResponsavel || null],
                 ['Início', os.dataInicio ? new Date(os.dataInicio + 'T12:00:00').toLocaleDateString('pt-BR') : null],
                 ['Término', os.dataTermino ? new Date(os.dataTermino + 'T12:00:00').toLocaleDateString('pt-BR') : null],
-                ['Dias Obra', os.diasTrabalho ? `${os.diasTrabalho} dia(s)` : null],
+                ['Dias Obra', (os.diasAtivos?.length || os.diasTrabalho) ? `${os.diasAtivos?.length || os.diasTrabalho} dia(s)` : null],
               ].map(([k,v]) => v ? (
                 <div key={k} className="flex gap-2">
                   <dt className="font-medium text-gray-500 w-20 flex-shrink-0">{k}:</dt>
                   <dd className="text-gray-800">{v}</dd>
                 </div>
               ) : null)}
+              {/* Membros da equipe */}
+              {os.equipeId && (() => {
+                const eq = equipes.find(x => (x.id || x._id) === os.equipeId)
+                return eq?.membros?.length > 0 ? (
+                  <div className="flex gap-2 pt-1">
+                    <dt className="font-medium text-gray-500 w-20 flex-shrink-0 text-sm">Membros:</dt>
+                    <dd className="flex flex-wrap gap-1">
+                      {eq.membros.map((m, i) => (
+                        <span key={i} className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full">
+                          👤 {m}
+                        </span>
+                      ))}
+                    </dd>
+                  </div>
+                ) : null
+              })()}
+              {/* Dias de trabalho selecionados */}
+              {os.diasAtivos?.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-gray-100">
+                  <div className="text-xs font-medium text-gray-500 mb-1.5">📅 Dias de trabalho ({os.diasAtivos.length}):</div>
+                  <div className="flex flex-wrap gap-1">
+                    {os.diasAtivos.map((d, i) => {
+                      const dt = new Date(d + 'T12:00:00')
+                      const dow = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dt.getDay()]
+                      const isSat = dt.getDay() === 6
+                      return (
+                        <span key={i} className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          isSat ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'
+                        }`}>
+                          {dow} {dt.getDate()}/{dt.getMonth()+1}
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               {os.obs && (
                 <div className="mt-2 p-2 bg-yellow-50 rounded text-gray-700">{os.obs}</div>
               )}

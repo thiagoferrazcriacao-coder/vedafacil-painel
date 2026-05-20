@@ -17,6 +17,9 @@ import {
   calcObra, expandSubPontos, ensureSubPontos, calcProgressoOS,
   pushStatusHistorico, extenso, valorExtenso,
 } from './lib/helpers.js';
+import {
+  isR2Configured, processLocaisPhotos, resolvePhotosForPdf, getPhotoUrl, isR2Key,
+} from './lib/storage.js';
 
 let puppeteerLauncher = null;
 const require = createRequire(import.meta.url);
@@ -99,6 +102,7 @@ const medicaoSchema = new mongoose.Schema({
   andaimeLargura: { type: String, default: '1m' },
   locais: [mongoose.Schema.Types.Mixed],
   fotos: [mongoose.Schema.Types.Mixed],
+  dadosAlterados: { type: mongoose.Schema.Types.Mixed, default: null }, // payload do reenvio aguardando revisão
 }, { _id: false });
 
 const orcamentoSchema = new mongoose.Schema({
@@ -140,6 +144,8 @@ const orcamentoSchema = new mongoose.Schema({
   obsAdicionais: String,
   orcMinimo: { type: Boolean, default: false },
   totalMinimo: { type: Number, default: 0 },
+  mostrarProposta1: { type: Boolean, default: true },
+  mostrarProposta2: { type: Boolean, default: true },
   locais: [mongoose.Schema.Types.Mixed],
   diasTrabalho: { type: Number, default: 0 },
   consumoProduto: { type: Number, default: 0 },
@@ -151,6 +157,7 @@ const orcamentoSchema = new mongoose.Schema({
   condicaoPgto2Obs2: { type: String, default: '*2ª parcela p/ 30 dias.' },
   obsGeral: { type: String, default: 'Obs: O contrato deve ser assinado até 2 dias após recebimento. Após este período não garantimos a data estabelecida préviamente para execução do serviço, podendo ser modificada sem aviso prévio.' },
   departamentoComercial: { type: String, default: 'Daniel Guimarães' },
+  enviadoParaCliente: { type: Boolean, default: false },
 }, { _id: false });
 
 const contratoSchema = new mongoose.Schema({
@@ -196,6 +203,8 @@ const contratoSchema = new mongoose.Schema({
   statusHistorico: [{ status: String, data: Number }],
   contratoArquivo: String,
   contratoArquivoNome: String,
+  textoPersonalizado: String, // HTML editado pelo operador (substitui cláusulas geradas automaticamente)
+  textoPersonalizadoAt: Number, // timestamp da última edição
 }, { _id: false });
 
 const userSchema = new mongoose.Schema({
@@ -256,6 +265,7 @@ const osSchema = new mongoose.Schema({
   dataTermino: String,
   calendarEventId: String,
   diasTrabalho: Number,
+  diasAtivos: [String], // dias de trabalho efetivos: ['YYYY-MM-DD', ...]
   consumoProduto: Number,
   qtdInjetores: Number,
   tecnicoResponsavel: String,
@@ -282,6 +292,11 @@ const osSchema = new mongoose.Schema({
   equipeOriginalNome: String, // nome da equipe original
   fotosAntesOriginal: [mongoose.Schema.Types.Mixed], // fotos originais da OS base
   fotosDepoisOriginal: [mongoose.Schema.Types.Mixed],
+  // Contrato manual (transição do sistema antigo)
+  contratoManual: { type: Boolean, default: false },
+  contratoManualNome: String,
+  contratoManualNumero: String,
+  contratoManualPdfBase64: String,
   createdAt: { type: Number, default: Date.now },
   updatedAt: { type: Number, default: Date.now },
 }, { _id: false });
@@ -315,6 +330,70 @@ const compraSchema = new mongoose.Schema({
   criadoEm: { type: Date, default: Date.now }
 });
 const Compra = mongoose.model('Compra', compraSchema, 'compras');
+
+// ── Compras de Injetores ──────────────────────────────────────────────────────
+const compraInjetorSchema = new mongoose.Schema({
+  data: { type: Date, default: Date.now },
+  quantidade: { type: Number, required: true }, // unidades
+  fornecedor: { type: String, default: '' },
+  notaFiscal: { type: String, default: '' },
+  obs: { type: String, default: '' },
+  criadoEm: { type: Date, default: Date.now }
+});
+const CompraInjetor = mongoose.model('CompraInjetor', compraInjetorSchema, 'compras_injetores');
+
+// ── Estoque por Equipe / Semana ───────────────────────────────────────────────
+function getISOWeekStr(date) {
+  const d = new Date(date);
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+function getWeekDateRange(semana) {
+  const [yearStr, wStr] = semana.split('-W');
+  const year = parseInt(yearStr), w = parseInt(wStr);
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const dow = jan4.getUTCDay() || 7;
+  const monday = new Date(jan4);
+  monday.setUTCDate(jan4.getUTCDate() - dow + 1 + (w - 1) * 7);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  return { start: monday.toISOString().split('T')[0], end: sunday.toISOString().split('T')[0] };
+}
+
+const estoqueEquipeSemanaSchema = new mongoose.Schema({
+  equipeId:   { type: String, required: true },
+  equipeNome: { type: String, default: '' },
+  semana:     { type: String, required: true }, // "2026-W20"
+  recebido:   { type: Number, default: 0 },
+  criadoEm:   { type: Date, default: Date.now },
+  updatedAt:  { type: Date, default: Date.now }
+});
+estoqueEquipeSemanaSchema.index({ equipeId: 1, semana: 1 }, { unique: true });
+const EstoqueEquipeSemana = mongoose.model('EstoqueEquipeSemana', estoqueEquipeSemanaSchema, 'estoque_equipe_semana');
+
+// ── Garantias Standalone (geradas a partir de OS) ─────────────────────────────
+const garantiaDocSchema = new mongoose.Schema({
+  osId:           { type: mongoose.Schema.Types.ObjectId },
+  cliente:        { type: String, default: '' },
+  razaoSocial:    { type: String, default: '' },
+  cnpjCliente:    { type: String, default: '' },
+  endereco:       { type: String, default: '' },
+  bairro:         { type: String, default: '' },
+  cidade:         { type: String, default: '' },
+  estado:         { type: String, default: '' },
+  cep:            { type: String, default: '' },
+  garantia:       { type: Number, default: 15 },
+  totalLiquido:   { type: Number, default: 0 },
+  dataInicio:     Date,
+  dataTermino:    Date,
+  obsGarantia:    { type: String, default: '' },
+  garantiaEnviadaEm: Number,
+  criadoEm:       { type: Date, default: Date.now }
+});
+const GarantiaDoc = mongoose.model('GarantiaDoc', garantiaDocSchema, 'garantias');
 
 // In-memory fallback (when no MongoDB)
 const memStore = { medicoes: [], orcamentos: [], contratos: [], config: null, users: [], equipes: [], ordens: [], lixeira: [] };
@@ -408,6 +487,136 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// ── Backup automático diário ───────────────────────────────────────────────────
+app.post('/api/cron/backup', async (req, res) => {
+  try {
+    const secret = req.headers['x-cron-secret'] || req.query.secret;
+    if (secret !== process.env.CRON_SECRET) {
+      return res.status(401).json({ error: 'Não autorizado' });
+    }
+    await connectDB();
+    if (!isConnected) return res.status(500).json({ error: 'Sem conexão com banco' });
+
+    // Campos de imagem/base64 excluídos do backup (estouram limite 16MB do MongoDB)
+    const EXCLUIR_CAMPOS = { fotos: 0, fotosReparo: 0, croquiBase64: 0, croquiOtimizado: 0 };
+    const IMG_KEYS = ['fotos', 'fotosReparo', 'croquiBase64', 'croquiOtimizado', 'fotosMedicao'];
+
+    // Para lixeira: strip de campos de imagem de dentro do campo `dados` (Mixed aninhado)
+    function stripImageFields(obj) {
+      if (!obj || typeof obj !== 'object') return obj;
+      if (Array.isArray(obj)) return obj.map(stripImageFields);
+      const out = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (IMG_KEYS.includes(k)) continue;
+        out[k] = stripImageFields(v);
+      }
+      return out;
+    }
+
+    const models = {
+      users:                  { model: User,               proj: {} },
+      medicoes:               { model: Medicao,            proj: { fotos: 0 } },
+      orcamentos:             { model: Orcamento,          proj: {} },
+      contratos:              { model: Contrato,           proj: {} },
+      configs:                { model: Config,             proj: {} },
+      equipes:                { model: Equipe,             proj: {} },
+      ordens_servico:         { model: OS,                 proj: EXCLUIR_CAMPOS },
+      compras:                { model: Compra,             proj: {} },
+      compras_injetores:      { model: CompraInjetor,      proj: {} },
+      estoque_equipe_semana:  { model: EstoqueEquipeSemana,proj: {} },
+      garantias:              { model: GarantiaDoc,        proj: EXCLUIR_CAMPOS },
+    };
+
+    const today = new Date().toISOString().slice(0, 10);
+    const backupDb = mongoose.connection.client.db('backups');
+    const snapshotsCol = backupDb.collection('snapshots');
+
+    const counts = {};
+
+    // Salva cada coleção num documento separado (evita limite 16MB)
+    for (const [name, { model, proj }] of Object.entries(models)) {
+      try {
+        const docs = await model.find({}, proj).lean();
+        counts[name] = docs.length;
+        await snapshotsCol.replaceOne(
+          { project: 'vedafacil', collection: name, date: today },
+          { project: 'vedafacil', collection: name, date: today, createdAt: new Date(), docs },
+          { upsert: true }
+        );
+      } catch (e) {
+        counts[name] = `erro: ${e.message}`;
+      }
+    }
+
+    // Lixeira: strip profundo via aggregation (remove fotos em locais/pontos aninhados)
+    try {
+      const lixCol = mongoose.connection.db.collection('lixeira');
+      const lixDocs = await lixCol.aggregate([
+        { $unset: [
+          'dados.fotos', 'dados.fotosReparo', 'dados.croquiBase64',
+          'dados.croquiOtimizado', 'dados.fotosMedicao',
+        ]},
+        { $addFields: {
+          'dados.locais': {
+            $cond: {
+              if: { $isArray: '$dados.locais' },
+              then: { $map: { input: '$dados.locais', as: 'l',
+                in: { $unsetField: { field: 'fotos', input: '$$l' } } } },
+              else: '$dados.locais',
+            }
+          },
+          'dados.pontos': {
+            $cond: {
+              if: { $isArray: '$dados.pontos' },
+              then: { $map: { input: '$dados.pontos', as: 'p',
+                in: { $unsetField: { field: 'croquiBase64',
+                  input: { $unsetField: { field: 'croquiOtimizado',
+                    input: { $unsetField: { field: 'fotosMedicao', input: '$$p' } } } } } } } },
+              else: '$dados.pontos',
+            }
+          },
+        }},
+      ], { allowDiskUse: true }).toArray();
+      counts['lixeira'] = lixDocs.length;
+      await snapshotsCol.replaceOne(
+        { project: 'vedafacil', collection: 'lixeira', date: today },
+        { project: 'vedafacil', collection: 'lixeira', date: today, createdAt: new Date(), docs: lixDocs },
+        { upsert: true }
+      );
+    } catch (e) {
+      // Lixeira com documentos muito grandes: salva apenas metadados
+      try {
+        const lixCol = mongoose.connection.db.collection('lixeira');
+        const lixMeta = await lixCol.find({}, { projection: {
+          _id: 1, tipo: 1, tipoLabel: 1, identificacao: 1, deletadoEm: 1, deletadoPor: 1
+        }}).toArray();
+        counts['lixeira'] = `${lixMeta.length} (só metadados — dados muito grandes)`;
+        await snapshotsCol.replaceOne(
+          { project: 'vedafacil', collection: 'lixeira', date: today },
+          { project: 'vedafacil', collection: 'lixeira', date: today, createdAt: new Date(), docs: lixMeta },
+          { upsert: true }
+        );
+      } catch (e2) {
+        counts['lixeira'] = `erro: ${e2.message}`;
+      }
+    }
+
+    // Remove backups com mais de 7 dias
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 7);
+    await snapshotsCol.deleteMany({
+      project: 'vedafacil',
+      date: { $lt: cutoff.toISOString().slice(0, 10) },
+    });
+
+    log('info', '[backup] Backup concluído', { date: today, counts });
+    return res.json({ ok: true, date: today, counts });
+  } catch (err) {
+    log('error', '[backup] Erro:', { error: err.message });
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Global error handler (catches unhandled async errors)
 app.use((err, req, res, next) => {
   log('error', `Unhandled error on ${req.method} ${req.path}`, { error: err.message, stack: err.stack });
@@ -468,8 +677,42 @@ app.get('/api/me', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Fotos R2 — endpoint de URL presignada ─────────────────────────────────────
+// GET /api/fotos/url?key=medicoes/xxx.jpg  → redireciona para URL presignada (1h)
+// Usado pelo frontend para exibir fotos armazenadas no R2
+app.get('/api/fotos/url', auth, async (req, res) => {
+  try {
+    const key = req.query.key;
+    if (!key) return res.status(400).json({ error: 'key é obrigatório' });
+    if (!isR2Configured()) return res.status(503).json({ error: 'R2 não configurado' });
+    const url = await getPhotoUrl(key, 3600);
+    return res.redirect(302, url);
+  } catch (err) {
+    console.error('[R2] Erro ao gerar URL presignada:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Proteção de tamanho de imagem ────────────────────────────────────────────
 // sanitizeImages + MAX_IMG_B64_BYTES → importados de ./lib/helpers.js
+
+// ── Helper: resolve fotos R2 para PDF ────────────────────────────────────────
+// Converte chaves R2 ("medicoes/xxx.jpg") em base64 data URI para o Puppeteer
+async function resolveLocaisForPdf(locais) {
+  if (!Array.isArray(locais)) return locais;
+  return Promise.all(locais.map(async (local) => {
+    if (!local.fotos || local.fotos.length === 0) return local;
+    const resolved = await Promise.all(local.fotos.map(async (f) => {
+      if (!f) return null;
+      if (typeof f === 'string' && isR2Key(f)) {
+        const { getPhotoAsBase64 } = await import('./lib/storage.js');
+        return getPhotoAsBase64(f);
+      }
+      return f; // já é base64 ou objeto {data:...}
+    }));
+    return { ...local, fotos: resolved.filter(Boolean) };
+  }));
+}
 
 // ── Helper: get/init config ───────────────────────────────────────────────────
 
@@ -494,7 +737,18 @@ app.post('/api/medicao', async (req, res) => {
       return res.status(401).json({ error: 'Invalid webhook secret' });
     }
     // Sanitize oversized base64 images before persisting
-    const data = sanitizeImages(req.body, 'medicao');
+    let data = sanitizeImages(req.body, 'medicao');
+
+    // ── Upload fotos para Cloudflare R2 (substitui base64 por chaves) ──────────
+    if (isR2Configured() && Array.isArray(data.locais)) {
+      try {
+        const medId = data.id || uuidv4();
+        data = { ...data, id: medId };
+        data.locais = await processLocaisPhotos(data.locais, `medicoes/${medId}`);
+      } catch (r2err) {
+        console.warn('[R2] Falha no upload de fotos, mantendo base64:', r2err.message);
+      }
+    }
 
     if (isConnected) {
       // Usa numMedicao do config, com fallback para count+1
@@ -619,14 +873,59 @@ app.patch('/api/medicoes/:id/status', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Atualizar apenas fotos da medição (sem bloquear se já tem orçamento) ──────
+app.patch('/api/medicoes/:id/fotos', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const { locais } = req.body;
+    if (!Array.isArray(locais)) return res.status(400).json({ error: 'locais required' });
+    if (isConnected) {
+      const m = await Medicao.findById(req.params.id);
+      if (!m) return res.status(404).json({ error: 'Medição não encontrada.' });
+      const locaisAtualizados = (m.locais || []).map((loc, i) => {
+        const edit = locais[i];
+        if (edit && Array.isArray(edit.fotos)) {
+          const plain = typeof loc.toObject === 'function' ? loc.toObject() : { ...loc };
+          return { ...plain, fotos: edit.fotos };
+        }
+        return loc;
+      });
+      m.locais = locaisAtualizados;
+      m.updatedAt = new Date();
+      await m.save();
+      return res.json(m);
+    }
+    // memStore fallback
+    const idx = memStore.medicoes.findIndex(x => x._id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Medição não encontrada.' });
+    const m = memStore.medicoes[idx];
+    const locaisAtualizados = (m.locais || []).map((loc, i) => {
+      const edit = locais[i];
+      if (edit && Array.isArray(edit.fotos)) return { ...loc, fotos: edit.fotos };
+      return loc;
+    });
+    memStore.medicoes[idx] = { ...m, locais: locaisAtualizados, updatedAt: new Date() };
+    return res.json(memStore.medicoes[idx]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.put('/api/medicoes/:id', auth, async (req, res) => {
   try {
     await connectDB();
-    // Verifica se já gerou orçamento
+    const data = sanitizeImages(req.body, 'medicao-put');
     if (isConnected) {
       const orc = await Orcamento.findOne({ medicaoId: req.params.id });
-      if (orc) return res.status(400).json({ error: 'Esta medição já gerou um orçamento e não pode ser alterada.' });
-      const data = sanitizeImages(req.body, 'medicao-put');
+      if (orc) {
+        // Já tem orçamento: salva como dados pendentes de revisão, status 'alterada'
+        const m = await Medicao.findByIdAndUpdate(
+          req.params.id,
+          { dadosAlterados: data, status: 'alterada', updatedAt: new Date() },
+          { new: true, runValidators: false }
+        );
+        if (!m) return res.status(404).json({ error: 'Medição não encontrada.' });
+        return res.json(m);
+      }
+      // Sem orçamento: atualiza diretamente
       const m = await Medicao.findByIdAndUpdate(
         req.params.id,
         { ...data, status: 'recebida', updatedAt: new Date() },
@@ -636,13 +935,129 @@ app.put('/api/medicoes/:id', auth, async (req, res) => {
       return res.json(m);
     }
     // memStore fallback
-    const orc = memStore.orcamentos.find(o => o.medicaoId === req.params.id);
-    if (orc) return res.status(400).json({ error: 'Esta medição já gerou um orçamento e não pode ser alterada.' });
     const idx = memStore.medicoes.findIndex(x => x._id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Medição não encontrada.' });
-    const data = sanitizeImages(req.body, 'medicao-put');
-    memStore.medicoes[idx] = { ...memStore.medicoes[idx], ...data, status: 'recebida', updatedAt: new Date() };
+    const orc = memStore.orcamentos.find(o => o.medicaoId === req.params.id);
+    if (orc) {
+      memStore.medicoes[idx] = { ...memStore.medicoes[idx], dadosAlterados: data, status: 'alterada', updatedAt: new Date() };
+    } else {
+      memStore.medicoes[idx] = { ...memStore.medicoes[idx], ...data, status: 'recebida', updatedAt: new Date() };
+    }
     res.json(memStore.medicoes[idx]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Aceitar alteração de medição reaberta
+app.post('/api/medicoes/:id/aceitar-alteracao', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) {
+      const m = await Medicao.findOne({ _id: req.params.id });
+      if (!m) return res.status(404).json({ error: 'Medição não encontrada.' });
+      if (m.status !== 'alterada' || !m.dadosAlterados) {
+        return res.status(400).json({ error: 'Esta medição não tem alterações pendentes.' });
+      }
+      // Verifica se o orçamento foi enviado para o cliente
+      const orc = await Orcamento.findOne({ medicaoId: req.params.id });
+      if (orc && orc.enviadoParaCliente) {
+        return res.status(409).json({
+          error: 'O orçamento já foi enviado ao cliente. Não é possível aceitar alterações. Gere um novo orçamento com os dados atualizados.',
+          bloqueado: true
+        });
+      }
+      const novosDados = m.dadosAlterados;
+      // Aplica os novos dados à medição e limpa dadosAlterados
+      await Medicao.findByIdAndUpdate(req.params.id, {
+        ...novosDados,
+        status: 'recebida',
+        dadosAlterados: null,
+        updatedAt: new Date()
+      });
+      // Se existir orçamento, atualiza locais e recalcula itens de quantidade
+      if (orc && novosDados.locais) {
+        const locaisNovos = novosDados.locais;
+        // Recalcula totais por tipo de serviço
+        const TIPOS = ['trinca','juntaFria','ralo','juntaDilat','ferragem','cortina'];
+        const totais = {};
+        TIPOS.forEach(t => { totais[t] = 0; });
+        locaisNovos.forEach(loc => {
+          TIPOS.forEach(t => {
+            const v = loc[t];
+            const num = Array.isArray(v) ? v.reduce((a,b) => a + parseFloat(b||0), 0) : parseFloat(v||0);
+            totais[t] = (totais[t] || 0) + num;
+          });
+        });
+        // Atualiza itens do orçamento com novas quantidades
+        const itensAtualizados = (orc.itens || []).map(item => {
+          const tipo = item.tipo;
+          if (tipo && totais[tipo] !== undefined) {
+            const qtd = totais[tipo];
+            return { ...item, quantidade: qtd, subtotal: qtd * (item.valorUnit || 0) };
+          }
+          return item;
+        });
+        const totalBruto = itensAtualizados.reduce((s, i) => s + (i.subtotal || 0), 0);
+        await Orcamento.findByIdAndUpdate(orc._id, {
+          locais: locaisNovos,
+          itens: itensAtualizados,
+          totalBruto,
+          totalLiquido: totalBruto,
+          updatedAt: Date.now()
+        });
+      }
+      const updated = await Medicao.findOne({ _id: req.params.id });
+      return res.json({ ok: true, medicao: updated, orcamentoAtualizado: !!orc });
+    }
+    // memStore
+    const idx = memStore.medicoes.findIndex(x => x._id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Medição não encontrada.' });
+    const m = memStore.medicoes[idx];
+    const orc = memStore.orcamentos.find(o => o.medicaoId === req.params.id);
+    if (orc && orc.enviadoParaCliente) {
+      return res.status(409).json({ error: 'Orçamento já enviado ao cliente. Gere um novo orçamento.', bloqueado: true });
+    }
+    const nd = m.dadosAlterados || {};
+    memStore.medicoes[idx] = { ...m, ...nd, status: 'recebida', dadosAlterados: null, updatedAt: new Date() };
+    res.json({ ok: true, medicao: memStore.medicoes[idx] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Recusar alteração de medição reaberta
+app.post('/api/medicoes/:id/recusar-alteracao', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) {
+      const m = await Medicao.findByIdAndUpdate(
+        req.params.id,
+        { dadosAlterados: null, status: 'recebida', updatedAt: new Date() },
+        { new: true }
+      );
+      if (!m) return res.status(404).json({ error: 'Medição não encontrada.' });
+      return res.json({ ok: true, medicao: m });
+    }
+    const idx = memStore.medicoes.findIndex(x => x._id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Medição não encontrada.' });
+    memStore.medicoes[idx] = { ...memStore.medicoes[idx], dadosAlterados: null, status: 'recebida', updatedAt: new Date() };
+    res.json({ ok: true, medicao: memStore.medicoes[idx] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Toggle enviadoParaCliente no orçamento
+app.post('/api/orcamentos/:id/enviado-cliente', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) {
+      const orc = await Orcamento.findOne({ _id: req.params.id });
+      if (!orc) return res.status(404).json({ error: 'Orçamento não encontrado.' });
+      const novoValor = !orc.enviadoParaCliente;
+      await Orcamento.findByIdAndUpdate(req.params.id, { enviadoParaCliente: novoValor, updatedAt: Date.now() });
+      return res.json({ ok: true, enviadoParaCliente: novoValor });
+    }
+    const idx = memStore.orcamentos.findIndex(o => o._id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Orçamento não encontrado.' });
+    const novo = !memStore.orcamentos[idx].enviadoParaCliente;
+    memStore.orcamentos[idx].enviadoParaCliente = novo;
+    res.json({ ok: true, enviadoParaCliente: novo });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -732,12 +1147,12 @@ app.post('/api/orcamentos', auth, async (req, res) => {
       cep: medicao?.cep || '',
       ac: medicao?.ac || '',
       celular: medicao?.celular || '',
-      dataOrcamento: new Date().toISOString().split('T')[0],
+      dataOrcamento: new Date().toLocaleDateString('pt-BR'),
       validade: '30',
-      avaliadoPor: medicao?.avaliadoPor || '', acompanhadoPor: '', tecnicoResponsavel: 'Thiago Ramos Ferraz', elaboradoPor: '',
+      avaliadoPor: medicao?.avaliadoPor || '', acompanhadoPor: '', tecnicoResponsavel: '', elaboradoPor: '',
       origem: '', sigla: '',
       garantia: Number(medicao?.garantia) || 15,
-      andaime: medicao?.andaime || 'nao',
+      andaime: String(medicao?.andaime || 'nao').trim().toLowerCase(),
       andaimeMetros: medicao?.andaimeMetros || 0,
       andaimeRodinhas: medicao?.andaimeRodinhas || false,
       andaimeBases: medicao?.andaimeBases || false,
@@ -805,7 +1220,7 @@ app.post('/api/orcamentos/:id/duplicar', auth, async (req, res) => {
       status: 'rascunho',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      dataOrcamento: new Date().toISOString().split('T')[0],
+      dataOrcamento: new Date().toLocaleDateString('pt-BR'),
       // Limpar vínculos com medição/contrato originais
       medicaoId: orig.medicaoId || null,
       zapsignDocId: undefined,
@@ -829,9 +1244,18 @@ app.post('/api/orcamentos/:id/duplicar', auth, async (req, res) => {
 app.put('/api/orcamentos/:id', auth, async (req, res) => {
   try {
     await connectDB();
-    const updates = { ...req.body, updatedAt: Date.now() };
+    // Strip immutable/internal fields before update to avoid MongoDB errors
+    const { _id, id, __v, ...rest } = req.body;
+    // Normalize andaime explicitly (string, lowercase, trimmed)
+    if (rest.andaime !== undefined) rest.andaime = String(rest.andaime).trim().toLowerCase();
+    const updates = { ...rest, updatedAt: Date.now() };
     if (isConnected) {
-      const o = await Orcamento.findByIdAndUpdate(req.params.id, updates, { new: true });
+      // Use $set explicitly for Mongoose 8 compatibility (avoids implicit replace)
+      const o = await Orcamento.findByIdAndUpdate(
+        req.params.id,
+        { $set: updates },
+        { new: true, strict: false }
+      );
       return res.json(o);
     }
     const idx = memStore.orcamentos.findIndex(x => x._id === req.params.id);
@@ -877,12 +1301,15 @@ app.post('/api/orcamentos/:id/approve', auth, async (req, res) => {
 
 
 export function buildOrcamentoPdfHtml(o) {
+  // Normaliza andaime: aceita 'sim', 'Sim', true, 'true', 1 → true
+  const hasAndaime = String(o.andaime || '').trim().toLowerCase() === 'sim' || o.andaime === true;
   const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
   const fmtDate = (d) => {
     if (!d) return '';
-    const date = new Date(d.includes && d.includes('-') && d.length === 10 ? d + 'T12:00:00' : d);
+    const s = String(d);
+    const date = new Date(s.length === 10 && s.includes('-') ? s + 'T12:00:00' : s);
     if (isNaN(date.getTime())) return d;
-    return date.toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'2-digit' }).replace('.','');
+    return date.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' });
   };
   const fmtNum = (n) => (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
   // Formata validade: "30" → "30 dias"; date string → data formatada
@@ -892,82 +1319,371 @@ export function buildOrcamentoPdfHtml(o) {
     return fmtDate(String(v));
   };
 
-  // ── ORÇAMENTO MÍNIMO — versão simplificada ────────────────────────────────
+  // ── ORÇAMENTO MÍNIMO — mesma estrutura do comum, locais simplificados ────────
   if (o.orcMinimo) {
     const totalMin = o.totalMinimo || o.totalLiquido || 0;
     const locaisMin = (o.locais || []);
-    const logoImg = LOGO_B64
-      ? `<img src="data:image/png;base64,${LOGO_B64}" style="max-width:260px;height:auto;display:block;margin:0 auto;" alt="Vedafácil">`
-      : `<div style="font-size:28px;font-weight:900;color:#e87722;text-align:center;">VEDAFÁCIL</div>`;
-    return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<title>Orcamento_Minimo_${o.numero||1}</title>
-<style>
-* { box-sizing:border-box; margin:0; padding:0; }
-body { font-family:Arial,sans-serif; font-size:11px; color:#222; }
-.pg { padding:12mm 16mm 16mm; max-width:210mm; margin:0 auto; }
-.footer { text-align:center; font-size:8.5px; color:#666; margin-top:20px; padding-top:8px; border-top:1px solid #ccc; }
-.download-btn { position:fixed; top:12px; right:12px; z-index:9999; background:#e87722; color:white; border:none; padding:10px 20px; font-size:14px; font-weight:700; border-radius:8px; cursor:pointer; }
-@media print { @page { margin:0; size:A4; } .download-btn { display:none !important; } body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
-</style></head><body>
-<button class="download-btn" onclick="window.print()">⬇ Salvar como PDF</button>
-<div class="pg">
-  <div style="text-align:center;margin-bottom:16px;">${logoImg}</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;border:1px solid #999;margin-bottom:18px;">
-    <div style="padding:10px 14px;border-right:1px solid #999;">
-      <strong style="font-size:13px;display:block;margin-bottom:4px;">${o.cliente||''}</strong>
-      ${o.endereco ? `<div>${o.endereco}${o.cidade?', '+o.cidade:''}</div>` : ''}
-      ${o.ac ? `<div>${o.ac}${o.celular?' — '+o.celular:''}</div>` : (o.celular ? `<div>${o.celular}</div>` : '')}
-    </div>
-    <div style="padding:10px 14px;">
-      <div style="font-size:14px;font-weight:bold;text-align:right;margin-bottom:6px;">ORÇAMENTO MÍNIMO Nº ${o.numero||1}</div>
-      <div style="display:flex;justify-content:space-between;"><span>Data:</span><strong>${fmtDate(o.dataOrcamento)}</strong></div>
-      <div style="display:flex;justify-content:space-between;"><span>Validade:</span><strong>${fmtValidade(o.validade)}</strong></div>
-    </div>
-  </div>
+    const prazoExecucaoM = o.prazoExecucao || 3;
+    const garantiaM = o.garantia || 15;
+    const parcelas = o.parcelas || 1;
+    // Proposta 1 — aplica desconto1 sobre totalMin
+    const desconto1ValM = o.descontoTipo1 === 'valor'
+      ? (Number(o.desconto1) || 0)
+      : totalMin * (Number(o.desconto1) || 0) / 100;
+    const totalProposta1Min = Math.max(0, totalMin - desconto1ValM);
+    // Proposta 2 — aplica desconto2 sobre totalMin + calcula entrada/parcelas
+    const desconto2ValM = o.descontoTipo2 === 'valor'
+      ? (Number(o.desconto2) || 0)
+      : totalMin * (Number(o.desconto2) || 0) / 100;
+    const totalProposta2Min = Math.max(0, totalMin - desconto2ValM);
+    const entradaTipo2M = o.entradaTipo2 || 'percent';
+    const entrada2PctM = o.entrada2 != null ? Number(o.entrada2) : (o.entrada != null ? Number(o.entrada) : 50);
+    const entradaVal2Min = entradaTipo2M === 'valor'
+      ? (Number(o.entrada2) || 0)
+      : totalProposta2Min * entrada2PctM / 100;
+    const saldo2Min = Math.max(0, totalProposta2Min - entradaVal2Min);
+    const valorParcela2Min = parcelas > 1 ? saldo2Min / parcelas : totalProposta2Min;
 
-  <p style="margin-bottom:16px;">Prezado(a) ${o.ac||o.cliente||''},</p>
-  <p style="margin-bottom:20px;">Apresentamos orçamento mínimo para serviços de impermeabilização nos locais abaixo relacionados:</p>
+    const condicaoPgto1ObsM = o.condicaoPgto1Obs || '*Pgto a vista, na assinatura do contrato.';
+    const condicaoPgto2Obs1M = o.condicaoPgto2Obs1 || '* 1ª parcela de entrada na assinatura do contrato.';
+    const condicaoPgto2Obs2M = o.condicaoPgto2Obs2 || '*2ª parcela p/ 30 dias.';
+    const obsGeralM = o.obsGeral || 'Obs: O contrato deve ser assinado até 2 dias após recebimento. Após este período não garantimos a data estabelecida préviamente para execução do serviço, podendo ser modificada sem aviso prévio.';
 
-  <div style="background:#fff8f0;border:1.5px solid #e87722;border-radius:4px;padding:14px;margin-bottom:20px;">
-    <div style="font-size:12px;font-weight:bold;color:#e87722;text-transform:uppercase;margin-bottom:10px;letter-spacing:0.5px;">ELIMINAR INFILTRAÇÕES EM:</div>
-    ${locaisMin.length > 0
-      ? locaisMin.map((l, i) => `<div style="padding:6px 0;border-bottom:1px solid #f5e0c8;display:flex;align-items:center;gap:8px;">
+    const seloSrcM = garantiaM <= 7 ? SELO7_B64 : SELO15_B64;
+    const seloImgM = seloSrcM
+      ? `<img src="data:image/png;base64,${seloSrcM}" style="width:82px;height:auto;display:block;" alt="${garantiaM} anos">`
+      : `<div style="width:76px;height:76px;border-radius:50%;border:3px solid #c8942a;background:linear-gradient(135deg,#f5d060,#c8942a);display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font-weight:bold;">
+          <div style="font-size:8px;text-align:center;">★ SUA OBRA TEM ★</div>
+          <div style="font-size:20px;font-weight:900;line-height:1;">${garantiaM}</div>
+          <div style="font-size:8px;letter-spacing:1px;">ANOS DE</div>
+          <div style="font-size:7px;font-style:italic;">Garantia</div>
+        </div>`;
+
+    const LOGO_HTML_M = `<div class="pg-logo-inline" style="text-align:center;margin-bottom:8px;">${LOGO_B64 ? `<img src="data:image/png;base64,${LOGO_B64}" style="max-width:280px;height:auto;display:block;margin:0 auto;" alt="Vedafácil">` : `<div style="font-size:28px;font-weight:900;color:#e87722;">VEDAFÁCIL</div>`}</div>`;
+
+    const FOOTER_M = `<div class="pg-footer-inline" style="text-align:center;font-size:8.5px;color:#666;margin-top:12px;padding-top:5px;border-top:1px solid #ccc;">
+      <strong style="font-size:9px;color:#e87722;">Eliminamos Infiltrações Sem Quebrar!</strong><br>
+      CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
+    </div>`;
+
+    const SIMBOLO_M = SIMBOLO_B64
+      ? `<img src="data:image/png;base64,${SIMBOLO_B64}" style="width:22px;height:22px;margin-right:8px;flex-shrink:0;vertical-align:middle;display:inline-block;" alt="Vedafácil">`
+      : `<div style="width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,0.8);display:inline-flex;align-items:center;justify-content:center;margin-right:8px;flex-shrink:0;background:rgba(255,255,255,0.15);vertical-align:middle;"><div style="width:6px;height:6px;background:white;border-radius:1px;transform:skewX(-15deg);"></div></div>`;
+
+    const secM = (n, t) => `<div style="background:#e87722;color:white;padding:7px 12px;margin:14px 0 10px;font-size:12px;display:flex;align-items:center;border-radius:2px;">${SIMBOLO_M}<em><strong>${n}. ${t}</strong></em></div>`;
+
+    const gvfLogoM = GVF_SEAL_LOGO_B64 ? `<img src="data:image/png;base64,${GVF_SEAL_LOGO_B64}" style="width:110px;height:auto;display:block;" alt="GVF SEAL">` : '';
+    const gvfGalaoM = GVF_GALAO_B64 ? `<img src="data:image/png;base64,${GVF_GALAO_B64}" style="width:110px;height:auto;display:block;border-radius:4px;" alt="GVF SEAL Galão">` : '';
+
+    // Seção 5 — Localização simplificada: "Eliminar infiltrações em LOCAL"
+    const locaisListM = locaisMin.length > 0
+      ? locaisMin.map((l, i) => `<div style="padding:5px 0;border-bottom:1px solid #eee;display:flex;align-items:center;gap:8px;">
           <span style="background:#e87722;color:white;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:bold;flex-shrink:0;">${i+1}</span>
-          <span style="font-weight:600;">${l.nome||l.local||`Local ${i+1}`}</span>
+          <span style="font-size:10.5px;">Eliminar infiltrações em <strong>${l.nome || l.local || `Local ${i+1}`}</strong></span>
         </div>`).join('')
-      : '<div style="color:#888;font-style:italic;">Nenhum local cadastrado</div>'
-    }
+      : '<div style="color:#888;font-style:italic;font-size:10.5px;">Nenhum local cadastrado</div>';
+
+    // Foto pages (relatório fotográfico)
+    const locaisComFotosM = locaisMin.filter(l => l.fotos && l.fotos.length > 0);
+    const photoPagesM = locaisComFotosM.map((l) =>
+      (l.fotos || []).map(f => `
+      <div class="pg pb">
+        <div style="font-size:11px;margin-bottom:10px;font-weight:bold;">${l.nome || ''}</div>
+        <div style="border:1px solid #ccc;padding:8px;">
+          <img src="${f.data || f}" style="width:100%;max-height:200mm;object-fit:contain;" alt="">
+          <div style="text-align:center;font-size:9px;color:#555;margin-top:4px;">${l.nome || ''}</div>
+        </div>
+      </div>`).join('')
+    ).join('');
+
+    return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>${o.numero||1} - ${o.cliente||'cliente'}</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #222; }
+.pg { padding: 12mm 20mm; max-width: 210mm; margin: 0 auto; }
+.pb { page-break-before: always; }
+.bt { font-size: 10.5px; line-height: 1.65; text-align: justify; }
+.bt p { margin-bottom: 8px; text-indent: 20px; }
+.feats { display:grid; grid-template-columns:1fr 1fr; gap:4px 20px; margin-top:12px; font-size:10px; font-weight:bold; font-style:italic; }
+.feats div::before { content:'✓ '; color:#e87722; }
+.hbox { display:grid; grid-template-columns:1fr 1fr; border:1px solid #999; margin-bottom:14px; }
+.hbox-l { padding:9px 12px; border-right:1px solid #999; font-size:10.5px; }
+.hbox-r { padding:9px 12px; font-size:10.5px; }
+table.val { width:100%; border-collapse:collapse; font-size:10.5px; margin:8px 0; }
+table.val th, table.val td { border:1px solid #aaa; padding:5px 8px; }
+table.val th { font-weight:bold; text-align:center; background:#e87722; color:white; }
+table.pay { width:100%; border-collapse:collapse; font-size:10.5px; margin:8px 0 2px; }
+table.pay td { border:1px solid #aaa; padding:5px 10px; }
+.obs-box { border:1px solid #bbb; padding:8px 12px; margin-top:12px; font-size:10.5px; }
+.sigs { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:24px; text-align:center; font-size:9.5px; }
+.sigs .role { color:#444; margin-bottom:24px; }
+.sigs .line { border-top:1px solid #333; padding-top:4px; font-weight:bold; font-size:10px; }
+.gtee { display:flex; gap:14px; align-items:flex-start; margin:10px 0; }
+.download-btn { position:fixed; top:12px; right:12px; z-index:9999; background:#e87722; color:white; border:none; padding:10px 20px; font-size:14px; font-weight:700; border-radius:8px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.3); }
+.download-btn:hover { background:#d06a1b; }
+.doc-tbl { display:block; width:100%; max-width:210mm; margin:0 auto; }
+.doc-tbl > thead,.doc-tbl > tfoot { display:none; }
+.doc-tbl > tbody,.doc-tbl > tbody > tr,.doc-tbl > tbody > tr > td { display:block; }
+@media print {
+  body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  @page { size:A4; margin:0; }
+  .download-btn { display:none !important; }
+  .pg-logo-inline { display:none !important; }
+  .pg-footer-inline { display:none !important; }
+  .doc-tbl { display:table; width:100%; border-collapse:collapse; table-layout:fixed; }
+  .doc-tbl > thead { display:table-header-group; }
+  .doc-tbl > tfoot { display:table-footer-group; }
+  .doc-tbl > tbody { display:table-row-group; }
+  .doc-tbl > tbody > tr { display:table-row; }
+  .doc-tbl > tbody > tr > td,.doc-tbl > thead > tr > th { display:table-cell; padding:0; font-weight:normal; }
+  .pg { padding:8mm 22mm !important; }
+}
+</style>
+</head>
+<body>
+<button class="download-btn" onclick="window.print()">⬇ Salvar como PDF</button>
+<table class="doc-tbl">
+<thead><tr><th>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:6mm 22mm;border-bottom:2px solid #e87722;background:#fff">
+    <div>${LOGO_B64 ? `<img src="data:image/png;base64,${LOGO_B64}" style="height:14mm;width:auto" alt="Vedafácil">` : '<span style="font-size:18px;font-weight:900;color:#e87722">VEDAFÁCIL</span>'}</div>
+    <div style="text-align:right;line-height:1.6">
+      <div style="font-size:13px;font-weight:800;color:#333">ORÇAMENTO MÍNIMO Nº ${o.numero||1}</div>
+      <div style="font-size:10px;color:#e87722;margin-top:1px">${o.cliente||''}</div>
+    </div>
   </div>
-
-  <div style="border:2px solid #e87722;border-radius:6px;padding:16px;text-align:center;margin-bottom:20px;">
-    <div style="font-size:11px;color:#666;margin-bottom:4px;">VALOR TOTAL DOS SERVIÇOS</div>
-    <div style="font-size:26px;font-weight:900;color:#e87722;">${fmt(totalMin)}</div>
-    ${o.prazoExecucao ? `<div style="font-size:10px;color:#888;margin-top:6px;">Prazo de execução: ${o.prazoExecucao} dias úteis</div>` : ''}
-    ${o.validade ? `<div style="font-size:10px;color:#888;margin-top:4px;">Validade da proposta: ${fmtValidade(o.validade)}</div>` : ''}
-  </div>
-
-  <div style="background:#f9f9f9;border:1px solid #ddd;border-radius:4px;padding:12px 14px;margin-bottom:20px;">
-    <div style="font-size:11px;font-weight:bold;margin-bottom:8px;color:#333;">CONDIÇÕES DE PAGAMENTO</div>
-    <div style="font-size:10.5px;margin-bottom:4px;">• ${o.condicaoPgto1Obs || 'Pgto à vista, na assinatura do contrato.'}</div>
-    <div style="font-size:10.5px;margin-bottom:4px;">• ${o.condicaoPgto2Obs1 || '1ª parcela de entrada na assinatura do contrato.'}</div>
-    ${o.condicaoPgto2Obs2 ? `<div style="font-size:10.5px;">• ${o.condicaoPgto2Obs2}</div>` : ''}
-  </div>
-
-  ${o.obsAdicionais ? `<div style="border:1px solid #ccc;padding:10px 14px;border-radius:4px;margin-bottom:16px;font-size:10.5px;"><strong>Observações:</strong> ${o.obsAdicionais}</div>` : ''}
-
-  <div style="margin-top:32px;display:grid;grid-template-columns:1fr 1fr;gap:20px;text-align:center;">
-    <div style="border-top:1px solid #333;padding-top:6px;font-size:10px;">Vedafácil</div>
-    <div style="border-top:1px solid #333;padding-top:6px;font-size:10px;">${o.cliente||'Cliente'}</div>
-  </div>
-
-  <div class="footer">
-    <strong style="color:#e87722;">Eliminamos Infiltrações Sem Quebrar!</strong><br>
+</th></tr></thead>
+<tfoot><tr><td>
+  <div style="text-align:center;font-size:8.5px;color:#666;padding:5mm 22mm;border-top:1px solid #ddd;background:#fff;line-height:1.7">
+    <strong style="color:#e87722;font-size:9px">Eliminamos Infiltrações Sem Quebrar!</strong><br>
     CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
   </div>
+</td></tr></tfoot>
+<tbody><tr><td>
+
+<!-- PAGE 1 -->
+<div class="pg">
+${LOGO_HTML_M}
+<div class="hbox">
+  <div class="hbox-l">
+    <strong style="font-size:12px;display:block;margin-bottom:3px;">${o.cliente||''}</strong>
+    ${o.endereco ? `<div>${o.endereco}${o.cidade?', '+o.cidade:''}${o.cep?'/'+o.cep.replace('-',''):''}</div>` : ''}
+    <div>${[o.ac, o.celular].filter(Boolean).join(' - ')}</div>
+  </div>
+  <div class="hbox-r">
+    <div style="font-size:13px;font-weight:bold;text-align:right;margin-bottom:6px;">ORÇAMENTO MÍNIMO Nº ${o.numero||1}</div>
+    <div style="display:flex;justify-content:space-between;"><span>Data Medição:</span><strong>${fmtDate(o.dataOrcamento)}</strong></div>
+    <div style="display:flex;justify-content:space-between;"><span>Validade da Proposta:</span><strong>${fmtValidade(o.validade||'30')}</strong></div>
+  </div>
 </div>
+
+<p style="margin-bottom:4px;">Prezado (a),&nbsp;&nbsp;&nbsp;${o.ac||o.cliente||''}</p>
+<p style="margin-bottom:14px;">Temos o prazer de submeter a vossa consideração, nosso orçamento para a eliminação de infiltrações:</p>
+
+${secM('1','MÉTODO DE IMPERMEABILIZAÇÃO REPARATIVA')}
+<div class="bt">
+  <p>O método de injeção é a tecnologia mais moderna e avançada para eliminar qualquer tipo de infiltração em trincas e rachaduras em qualquer superfície de concreto maciço. O produto é injetado no concreto, nos pontos de infiltração, com equipamentos exclusivos, que o forçam a penetrar na estrutura vedando trincas e microfissuras até atingir a origem do vazamento.</p>
+  <p>O gel hidroabsorvente <em>GVF SEAL</em> possui a consistência da água quando injetado, por isso percola exatamente o mesmo caminho da infiltração, mas em sentido contrário. Enquanto se injeta, permanece em estado líquido e quando a injeção se interrompe, em um minuto e meio, se transforma num gel flexível que produzirá a vedação do ponto tratado.</p>
+</div>
+
+${secM('2','PROPRIEDADES DO GVF SEAL')}
+<div style="display:flex;gap:14px;margin:8px 0;">
+  <div class="bt" style="flex:1;">
+    <p>O GVF Seal possui viscosidade ultra baixa que possui altíssima penetração em trincas capilares. Após a cura, o gel forma uma barreira flexível e impermeável que preenche trincas, rachaduras, buracos, nichos de concretagem, fissuras, etc.</p>
+    <p>O gel formado é inalterável ao ataque de agentes químicos ou biológicos, assim como também aos sais presentes nas estruturas. Além disso, é hidroexpansivo: Em períodos de seca, diminui seu volume, mas sem afetar a membrana impermeável.</p>
+    <p>Em contato com água, o produto reabsorve a mesma recuperando seu volume inicial. Este ciclo pode se repetir inúmeras vezes sem afetar as propriedades impermeáveis.</p>
+  </div>
+  <div style="flex-shrink:0;width:120px;display:flex;flex-direction:column;align-items:center;gap:8px;">
+    ${gvfLogoM}${gvfGalaoM}
+  </div>
+</div>
+<div class="feats">
+  <div>PRODUTO BICOMPONENTE</div><div>HIDROEXPANSIVO E HIDROABSORVENTE</div>
+  <div>POSSUI ATÉ 300% DE ELONGAÇÃO</div><div>PODE SER APLICADO COM FLUXO DE ÁGUA</div>
+  <div>TEMPO DE REAÇÃO 1,05-1,55min</div><div>PENETRA EM FISSURAS DE ATÉ 0,05mm</div>
+</div>
+
+${secM('3','GARANTIA')}
+<div class="gtee">
+  <div style="width:90px;flex-shrink:0;text-align:center;">${seloImgM}</div>
+  <div>
+    <p class="bt" style="margin-bottom:10px;">A Vedafacil - Tecnologia em Impermeabilização oferece garantia de <strong>${garantiaM} anos</strong> nos pontos tratados e especificados no ítem LOCALIZAÇÃO deste orçamento. Após o término da obra os pontos tratados serão descritos em croqui e relatório PDF com imagens do antes e depois das áreas trabalhadas.</p>
+    <div class="feats" style="grid-template-columns:1fr 1fr;">
+      <div>CERTIFICADO DE GARANTIA</div><div>RELATÓRIO DE FOTOS ANTES E DEPOIS</div>
+      <div>CROQUI DO LOCAL TRABALHADO</div>
+    </div>
+  </div>
+</div>
+<div class="obs-box"><strong>Observação:</strong> Esta proposta contempla garantia Pontual, somente nos locais orçados e tratados.</div>
+${FOOTER_M}
+</div>
+
+<!-- PAGE 2 -->
+<div class="pg pb">
+${LOGO_HTML_M}
+${secM('4','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
+<div style="font-size:10.5px;line-height:1.65;">
+  <p><strong><u>• INÍCIO</u></strong></p>
+  <p>Mapeamento dos locais a serem tratados e confecção das imagens (ANTES).</p>
+  <p>Isolamento da região a tratar utilizando faixa zebrada para área de recuo.</p>
+  <p><strong><u>• PERFURAÇÃO</u></strong></p>
+  <p>• Perfuração utilizando furadeira de impacto com broca no diâmetro de ½ polegada.</p>
+  <p>• Colocação de bicos injetores na estrutura.</p>
+  <p><strong><u>• APLICAÇÃO</u></strong></p>
+  <p>• Início do processo de injeção com bomba injetora elétrica de alta pressão.</p>
+  <p><strong><u>• ACABAMENTO</u></strong></p>
+  <p>• Acabamento dos locais tratados, utilizando argamassa cimentícia.</p>
+  <p><strong><u>• CONCLUSÃO</u></strong></p>
+  <p>• Limpeza do local trabalhado e remoção de detritos gerados no decorrer do serviço.</p>
+  <p>• Confecção do croqui e fotos da área trabalhada.</p>
+  <p>• Conferência do serviço realizado junto à contrantante, assinatura do termo de entrega de obra.</p>
+  <p style="margin-top:8px;"><u>O cliente deverá:</u></p>
+  <p>✓ Disponibilizar vaga para veículo da VEDAFACIL.</p>
+  <p>✓ Fornecer ponto de energia elétrica;</p>
+  <p>✓ Providenciar liberação da área a ser trabalhada, acesso desobstruído e livre de circulação de pessoas.</p>
+  ${hasAndaime ? `<p>✓ Autorizar entrada e providenciar local para armazenamento do andaime durante a execução.</p>` : ''}
+</div>
+${hasAndaime ? `
+<div style="background:#fff8f0;border:1.5px solid #e87722;border-radius:6px;padding:10px 14px;margin:10px 0 4px;display:flex;align-items:flex-start;gap:10px;">
+  <div style="font-size:20px;line-height:1;flex-shrink:0;">🏗️</div>
+  <div>
+    <div style="font-weight:bold;font-size:11px;color:#c45d12;margin-bottom:3px;">ANDAIME NECESSÁRIO</div>
+    <div style="font-size:10.5px;line-height:1.6;color:#333;">
+      Para a execução desta obra será necessário andaime${o.andaimeMetros>0?` de <strong>${o.andaimeMetros}m</strong> de altura`:''}${o.andaimeLargura?`, largura <strong>${o.andaimeLargura}</strong>`:''}${o.andaimeRodinhas?', <strong>com rodinhas</strong>':''}${o.andaimeBases?', <strong>com bases ajustáveis</strong>':''}.
+    </div>
+  </div>
+</div>` : ''}
+
+${secM('5','LOCALIZAÇÃO')}
+<div style="border:1px solid #e87722;border-radius:4px;padding:12px 14px;margin:8px 0;">
+  <div style="font-size:10.5px;font-weight:bold;color:#e87722;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px;">ELIMINAR INFILTRAÇÕES EM:</div>
+  ${locaisListM}
+</div>
+${FOOTER_M}
+</div>
+
+<!-- PAGE 3 -->
+<div class="pg pb">
+${LOGO_HTML_M}
+${secM('6','VALORES')}
+<table class="val">
+  <thead>
+    <tr>
+      <th style="width:6%">Item</th>
+      <th style="text-align:left">Descrição</th>
+      <th>Unid.</th>
+      <th>Qtde.</th>
+      <th style="text-align:right">Valor Unit.</th>
+      <th style="text-align:right">Valor por Item</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align:center">1</td>
+      <td style="text-align:left">Serviços de impermeabilização reparativa nos locais especificados</td>
+      <td style="text-align:center">Vb</td>
+      <td style="text-align:center">1</td>
+      <td style="text-align:right">—</td>
+      <td style="text-align:right">${fmt(totalMin)}</td>
+    </tr>
+  </tbody>
+  <tfoot>
+    <tr>
+      <td colspan="5" style="text-align:right;font-weight:bold;background:#fff3e0;padding:6px 8px;">TOTAL DOS SERVIÇOS</td>
+      <td style="text-align:right;font-weight:bold;background:#e87722;color:white;font-size:12px;padding:6px 8px;">${fmt(totalMin)}</td>
+    </tr>
+  </tfoot>
+</table>
+
+${secM('7','CONDIÇÕES DE PAGAMENTO')}
+<div style="border:2px solid #e87722;border-radius:6px;padding:12px 16px;margin:10px 0 14px;display:flex;justify-content:space-between;align-items:center;background:#fff8f0;">
+  <div style="font-size:12px;font-weight:bold;color:#555;">VALOR TOTAL DOS SERVIÇOS</div>
+  <div style="font-size:22px;font-weight:900;color:#e87722;">${fmt(totalMin)}</div>
+</div>
+
+${o.mostrarProposta1 !== false ? `
+<p style="text-align:center;font-weight:bold;font-size:11px;margin:6px 0 4px;">Proposta 1 : &nbsp;<em>(Pagamento à vista)</em></p>
+<table class="pay">
+  <tr>
+    <td style="font-style:italic;width:55%"><em>Valor dos Serviços</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;">${fmt(totalMin)}</td>
+  </tr>
+  ${desconto1ValM > 0 ? `<tr>
+    <td style="font-style:italic;color:#c0392b;"><em>Desconto${o.descontoTipo1 !== 'valor' && o.desconto1 > 0 ? ` (${Number(o.desconto1)}%)` : ''}</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;color:#c0392b;">- ${fmt(desconto1ValM)}</td>
+  </tr>` : ''}
+  <tr style="background:#f0fff4;">
+    <td style="font-style:italic;"><em><strong>Total à Vista</strong></em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;color:#27ae60;">${fmt(totalProposta1Min)}</td>
+  </tr>
+  <tr><td colspan="3" style="font-style:italic;font-size:10px;">${condicaoPgto1ObsM}</td></tr>
+</table>
+` : ''}
+
+${o.mostrarProposta2 !== false ? `
+<p style="text-align:center;font-size:10.5px;margin:10px 0 4px;font-weight:bold;">Proposta 2 : &nbsp;<em>(Pagamento Parcelado)</em></p>
+<table class="pay">
+  <tr>
+    <td style="font-style:italic;width:45%"><em>Valor dos Serviços</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;">${fmt(totalMin)}</td>
+  </tr>
+  ${desconto2ValM > 0 ? `<tr>
+    <td style="font-style:italic;color:#c0392b;"><em>Desconto${o.descontoTipo2 !== 'valor' && o.desconto2 > 0 ? ` (${Number(o.desconto2)}%)` : ''}</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;color:#c0392b;">- ${fmt(desconto2ValM)}</td>
+  </tr>` : ''}
+  <tr style="background:#f0f4ff;">
+    <td style="font-style:italic;"><em><strong>Total Parcelado</strong></em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;">${fmt(totalProposta2Min)}</td>
+  </tr>
+  ${entradaVal2Min > 0 ? `<tr>
+    <td style="font-style:italic"><em>Entrada</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;">${fmt(entradaVal2Min)}</td>
+  </tr>` : ''}
+  ${parcelas > 1 ? `<tr>
+    <td style="font-style:italic"><em>${parcelas}x parcela(s)</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;">${fmt(valorParcela2Min)}</td>
+  </tr>` : ''}
+  <tr><td colspan="3" style="font-style:italic;font-size:10px;font-weight:bold;">Observações:</td></tr>
+  <tr><td colspan="3" style="font-style:italic;font-size:10px;background:#fff8f0;">${condicaoPgto2Obs1M}</td></tr>
+  ${condicaoPgto2Obs2M ? `<tr><td colspan="3" style="font-style:italic;font-size:10px;background:#fff8f0;">${condicaoPgto2Obs2M}</td></tr>` : ''}
+</table>
+` : ''}
+
+${obsGeralM ? `<div class="obs-box" style="margin-top:10px;font-size:10px;font-style:italic;">${obsGeralM}</div>` : ''}
+
+${secM('8','INFORMAÇÕES ADICIONAIS')}
+<p style="font-size:11px;margin:8px 0;">
+  &rarr; O prazo de execução desta obra será de:
+  <span style="display:inline-block;min-width:36px;border-bottom:1px solid #333;text-align:center;font-weight:bold;margin:0 6px;">${prazoExecucaoM}</span>
+  dias úteis.
+</p>
+${hasAndaime ? `<p style="font-size:11px;margin:8px 0;">
+  &rarr; <strong>Andaime:</strong> necessário${o.andaimeMetros>0?` — ${o.andaimeMetros}m de altura`:''}${o.andaimeLargura?` — largura ${o.andaimeLargura}`:''}${o.andaimeRodinhas?' — com rodinhas':''}${o.andaimeBases?' — com bases':''}.
+</p>` : ''}
+${o.obsAdicionais ? `<div class="obs-box" style="margin-top:10px;font-size:10.5px;"><strong>Observações adicionais:</strong> ${o.obsAdicionais}</div>` : ''}
+<p style="margin:12px 0;">A <strong>VEDAFACIL</strong> agradece sua atenção e fica ao seu dispor para maiores esclarecimentos.</p>
+<p style="margin-bottom:18px;">Atenciosamente,</p>
+
+<div class="sigs">
+  <div><div class="role">Departamento<br>Comercial:</div><div class="line">${o.departamentoComercial||o.elaboradoPor||'Thiago Ferraz'}</div></div>
+  <div><div class="role">Responsável<br>Medição:</div><div class="line">${o.avaliadoPor||o.responsavelMedicao||''}</div></div>
+  <div><div class="role">Vistoria<br>acompanhada por:</div><div class="line">${o.acompanhadoPor||''}</div></div>
+  <div><div class="role">&nbsp;</div><div class="line">Engº Jociel Moreira da Silva</div><div style="font-size:8.5px;color:#555;">CREA: 201.513.600.3</div></div>
+</div>
+${FOOTER_M}
+</div>
+
+${photoPagesM}
+
+</td></tr></tbody>
+</table>
+<script>function downloadPDF(){window.print();}<\/script>
 </body></html>`;
   }
-  // ── FIM ORÇAMENTO MÍNIMO ──────────────────────────────────────���───────────
+  // ── FIM ORÇAMENTO MÍNIMO ──────────────────────────────────────────────────
 
   const descontoValor = o.descontoTipo === 'percent'
     ? (o.totalBruto * (o.desconto || 0) / 100)
@@ -982,9 +1698,28 @@ body { font-family:Arial,sans-serif; font-size:11px; color:#222; }
   const entradaVal2 = o.entradaVal2 != null ? o.entradaVal2 : (totalProposta2 * (Number(o.entrada2 ?? o.entrada ?? 50)) / 100);
   const valorParcela2 = o.valorParcela2 || (parcelas > 1 ? ((totalProposta2 - entradaVal2) / parcelas) : 0);
 
+  // Desconto calculado para exibição no PDF
+  const baseCalcPdf = o.totalBruto || totalLiquido;
+  const desconto1Val = o.descontoTipo1 === 'valor'
+    ? (Number(o.desconto1) || 0)
+    : baseCalcPdf * (Number(o.desconto1) || 0) / 100;
+  const desconto2Val = o.descontoTipo2 === 'valor'
+    ? (Number(o.desconto2) || 0)
+    : baseCalcPdf * (Number(o.desconto2) || 0) / 100;
+
   const locais = o.locais || [];
-  const locaisRows = locais.map(l => `
-    <tr>
+  // Build rows with optional ANDAR header rows (snapshot: each local stores its own andar)
+  let _lastAndar = null;
+  const locaisRows = locais.map(l => {
+    const andar = (l.andar || '').trim();
+    let andarRow = '';
+    if (andar && andar !== _lastAndar) {
+      andarRow = `<tr>
+        <td colspan="9" style="background:#fff3e0;color:#c45d12;font-weight:bold;font-size:9.5px;padding:3px 8px;text-align:left;">🏢 ${andar}</td>
+      </tr>`;
+      _lastAndar = andar;
+    }
+    return `${andarRow}<tr>
       <td class="td-local">${l.nome || ''}</td>
       <td>${l.trinca > 0 ? fmtNum(l.trinca) : ''}</td>
       <td>${l.juntaFria > 0 ? fmtNum(l.juntaFria) : ''}</td>
@@ -993,7 +1728,8 @@ body { font-family:Arial,sans-serif; font-size:11px; color:#222; }
       <td>${l.ferragem > 0 ? fmtNum(l.ferragem) : ''}</td>
       <td></td><td></td>
       <td>${l.cortina > 0 ? fmtNum(l.cortina) : ''}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   const emptyRows = Array(Math.max(0, 5 - locais.length)).fill('<tr style="height:18px;"><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
 
@@ -1043,9 +1779,9 @@ body { font-family:Arial,sans-serif; font-size:11px; color:#222; }
         <div style="font-size:9px;letter-spacing:3.5px;color:#444;margin-top:1px;font-weight:600;">TECNOLOGIA EM IMPERMEABILIZAÇÃO</div>
       </div>`;
 
-  const LOGO_HTML = `<div style="text-align:center;margin-bottom:8px;">${logoImg}</div>`;
+  const LOGO_HTML = `<div class="pg-logo-inline" style="text-align:center;margin-bottom:8px;">${logoImg}</div>`;
 
-  const FOOTER = `<div style="text-align:center;font-size:8.5px;color:#666;margin-top:12px;padding-top:5px;border-top:1px solid #ccc;">
+  const FOOTER = `<div class="pg-footer-inline" style="text-align:center;font-size:8.5px;color:#666;margin-top:12px;padding-top:5px;border-top:1px solid #ccc;">
     <strong style="font-size:9px;color:#e87722;">Eliminamos Infiltrações Sem Quebrar!</strong><br>
     CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
   </div>`;
@@ -1066,14 +1802,12 @@ const gvfLogo = GVF_SEAL_LOGO_B64
   const locaisComFotos = (o.locais || []).filter(l => l.fotos && l.fotos.length > 0);
   const photoPages = locaisComFotos.map((l) =>
     (l.fotos || []).map(f => `
-    <div style="page-break-before:always;padding:10mm 14mm 14mm;max-width:210mm;margin:0 auto;">
-      ${LOGO_HTML}
+    <div class="pg pb">
       <div style="font-size:11px;margin-bottom:10px;font-weight:bold;">${l.nome || ''}</div>
       <div style="border:1px solid #ccc;padding:8px;">
         <img src="${f.data || f}" style="width:100%;max-height:200mm;object-fit:contain;" alt="">
         <div style="text-align:center;font-size:9px;color:#555;margin-top:4px;">${l.nome || ''}</div>
       </div>
-      ${FOOTER}
     </div>`).join('')
   ).join('');
 
@@ -1081,11 +1815,11 @@ const gvfLogo = GVF_SEAL_LOGO_B64
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Orcamento_${o.numero || 1}_${(o.cliente || 'cliente').replace(/[^a-zA-Z0-9 ]/g,'').replace(/\s+/g,'_')}</title>
+<title>${o.numero || 1} - ${o.cliente || 'cliente'}</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #222; }
-.pg { padding: 10mm 14mm 14mm; max-width: 210mm; margin: 0 auto; }
+.pg { padding: 12mm 20mm; max-width: 210mm; margin: 0 auto; }
 .pb { page-break-before: always; }
 .bt { font-size: 10.5px; line-height: 1.65; text-align: justify; }
 .bt p { margin-bottom: 8px; text-indent: 20px; }
@@ -1112,12 +1846,47 @@ table.pay td { border:1px solid #aaa; padding:5px 10px; }
 .gtee { display:flex; gap:14px; align-items:flex-start; margin:10px 0; }
 .download-btn { position:fixed; top:12px; right:12px; z-index:9999; background:#e87722; color:white; border:none; padding:10px 20px; font-size:14px; font-weight:700; border-radius:8px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.3); }
 .download-btn:hover { background:#d06a1b; }
-@media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } @page { margin:0; size:A4; } .download-btn { display:none !important; } }
+/* Tela: doc-tbl transparente — seletores filho direto (>) para não vazar nas tabelas internas */
+.doc-tbl { display:block; width:100%; max-width:210mm; margin:0 auto; }
+.doc-tbl > thead,.doc-tbl > tfoot { display:none; }
+.doc-tbl > tbody,.doc-tbl > tbody > tr,.doc-tbl > tbody > tr > td { display:block; }
+@media print {
+  body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  @page { size:A4; margin:0; }
+  .download-btn { display:none !important; }
+  .pg-logo-inline { display:none !important; }
+  .pg-footer-inline { display:none !important; }
+  /* Tabela com thead/tfoot repetindo em cada página */
+  .doc-tbl { display:table; width:100%; border-collapse:collapse; table-layout:fixed; }
+  .doc-tbl > thead { display:table-header-group; }
+  .doc-tbl > tfoot { display:table-footer-group; }
+  .doc-tbl > tbody { display:table-row-group; }
+  .doc-tbl > tbody > tr { display:table-row; }
+  .doc-tbl > tbody > tr > td,.doc-tbl > thead > tr > th { display:table-cell; padding:0; font-weight:normal; }
+  .pg { padding:8mm 22mm !important; }
+}
 </style>
 </head>
 <body>
 
-<button class="download-btn" onclick="downloadPDF()">⬇ Salvar como PDF</button>
+<button class="download-btn" onclick="window.print()">⬇ Salvar como PDF</button>
+<table class="doc-tbl">
+<thead><tr><th>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:6mm 22mm;border-bottom:2px solid #e87722;background:#fff">
+    <div>${LOGO_B64 ? `<img src="data:image/png;base64,${LOGO_B64}" style="height:14mm;width:auto" alt="Vedafácil">` : '<span style="font-size:18px;font-weight:900;color:#e87722">VEDAFÁCIL</span>'}</div>
+    <div style="text-align:right;line-height:1.6">
+      <div style="font-size:13px;font-weight:800;color:#333">ORÇAMENTO Nº ${o.numero || 1}</div>
+      <div style="font-size:10px;color:#e87722;margin-top:1px">${o.cliente || ''}</div>
+    </div>
+  </div>
+</th></tr></thead>
+<tfoot><tr><td>
+  <div style="text-align:center;font-size:8.5px;color:#666;padding:5mm 22mm;border-top:1px solid #ddd;background:#fff;line-height:1.7">
+    <strong style="color:#e87722;font-size:9px">Eliminamos Infiltrações Sem Quebrar!</strong><br>
+    CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
+  </div>
+</td></tr></tfoot>
+<tbody><tr><td>
 
 <!-- PAGE 1 -->
 <div class="pg">
@@ -1161,12 +1930,6 @@ ${sec('2','PROPRIEDADES DO GVF SEAL')}
   <div>POSSUI ATÉ 300% DE ELONGAÇÃO</div><div>PODE SER APLICADO COM FLUXO DE ÁGUA</div>
   <div>TEMPO DE REAÇÃO 1,05-1,55min</div><div>PENETRA EM FISSURAS DE ATÉ 0,05mm</div>
 </div>
-${FOOTER}
-</div>
-
-<!-- PAGE 2 -->
-<div class="pg pb">
-${LOGO_HTML}
 
 ${sec('3','GARANTIA')}
 <div class="gtee">
@@ -1208,10 +1971,10 @@ ${sec('4','DESCRIÇÃO DA OBRA (PASSO A PASSO)')}
   <p>✓ Disponibilizar vaga para veículo da VEDAFACIL.</p>
   <p>✓ Fornecer ponto de energia elétrica;</p>
   <p>✓ Providenciar liberação da área a ser trabalhada, acesso desobstruído e livre de circulação de pessoas.</p>
-  ${(o.andaime === 'sim' || o.andaime === true) ? `<p>✓ Autorizar entrada e providenciar local para armazenamento do andaime durante a execução.</p>` : ''}
+  ${(hasAndaime) ? `<p>✓ Autorizar entrada e providenciar local para armazenamento do andaime durante a execução.</p>` : ''}
 </div>
 
-${(o.andaime === 'sim' || o.andaime === true) ? `
+${(hasAndaime) ? `
 <div style="background:#fff8f0;border:1.5px solid #e87722;border-radius:6px;padding:10px 14px;margin:10px 0 4px;display:flex;align-items:flex-start;gap:10px;">
   <div style="font-size:20px;line-height:1;flex-shrink:0;">🏗️</div>
   <div>
@@ -1283,19 +2046,38 @@ ${sec('7','CONDIÇÕES DE PAGAMENTO')}
   <div style="font-size:22px;font-weight:900;color:#e87722;">${fmt(o.totalBruto || totalProposta1)}</div>
 </div>
 
+${o.mostrarProposta1 !== false ? `
 <p style="text-align:center;font-weight:bold;font-size:11px;margin:6px 0 4px;">Proposta 1 : &nbsp;<em>(Pagamento à vista)</em></p>
 <table class="pay">
   <tr>
-    <td style="font-style:italic;width:55%"><em>Total à Vista</em></td>
-    <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;">${fmt(totalProposta1)}</td>
+    <td style="font-style:italic;width:55%"><em>Valor dos Serviços</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;">${fmt(baseCalcPdf)}</td>
+  </tr>
+  ${desconto1Val > 0 ? `<tr>
+    <td style="font-style:italic;color:#c0392b;"><em>Desconto${o.descontoTipo1 !== 'valor' && Number(o.desconto1) > 0 ? ` (${Number(o.desconto1)}%)` : ''}</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;color:#c0392b;">- ${fmt(desconto1Val)}</td>
+  </tr>` : ''}
+  <tr style="background:#f0fff4;">
+    <td style="font-style:italic;"><em><strong>Total à Vista</strong></em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;color:#27ae60;">${fmt(totalProposta1)}</td>
   </tr>
   <tr><td colspan="3" style="font-style:italic;font-size:10px;">${condicaoPgto1Obs}</td></tr>
 </table>
+` : ''}
 
+${o.mostrarProposta2 !== false ? `
 <p style="text-align:center;font-size:10.5px;margin:10px 0 4px;font-weight:bold;">Proposta 2 : &nbsp;<em>(Pagamento Parcelado)</em></p>
 <table class="pay">
   <tr>
-    <td style="font-style:italic;width:45%"><em>Total Parcelado</em></td>
+    <td style="font-style:italic;width:45%"><em>Valor dos Serviços</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;">${fmt(baseCalcPdf)}</td>
+  </tr>
+  ${desconto2Val > 0 ? `<tr>
+    <td style="font-style:italic;color:#c0392b;"><em>Desconto${o.descontoTipo2 !== 'valor' && Number(o.desconto2) > 0 ? ` (${Number(o.desconto2)}%)` : ''}</em></td>
+    <td colspan="2" style="text-align:right;font-weight:bold;color:#c0392b;">- ${fmt(desconto2Val)}</td>
+  </tr>` : ''}
+  <tr>
+    <td style="font-style:italic;"><em><strong>Total Parcelado</strong></em></td>
     <td colspan="2" style="text-align:right;font-weight:bold;font-size:12px;">${fmt(totalProposta2)}</td>
   </tr>
   ${entradaVal2 > 0 ? `<tr>
@@ -1310,6 +2092,7 @@ ${sec('7','CONDIÇÕES DE PAGAMENTO')}
   <tr><td colspan="3" style="font-style:italic;font-size:10px;background:#fff8f0;">${condicaoPgto2Obs1}</td></tr>
   ${condicaoPgto2Obs2 ? `<tr><td colspan="3" style="font-style:italic;font-size:10px;background:#fff8f0;">${condicaoPgto2Obs2}</td></tr>` : ''}
 </table>
+` : ''}
 
 ${obsGeral ? `<div class="obs-box" style="margin-top:10px;font-size:10px;font-style:italic;">${obsGeral}</div>` : ''}
 
@@ -1319,7 +2102,7 @@ ${sec('8','INFORMAÇÕES ADICIONAIS')}
   <span style="display:inline-block;min-width:36px;border-bottom:1px solid #333;text-align:center;font-weight:bold;margin:0 6px;">${prazoExecucao}</span>
   dias úteis.
 </p>
-${(o.andaime === 'sim' || o.andaime === true) ? `<p style="font-size:11px;margin:8px 0;">
+${(hasAndaime) ? `<p style="font-size:11px;margin:8px 0;">
   &rarr; <strong>Andaime:</strong> necessário${o.andaimeMetros > 0 ? ` — ${o.andaimeMetros}m de altura` : ''}${o.andaimeLargura ? ` — largura ${o.andaimeLargura}` : ''}${o.andaimeRodinhas ? ' — com rodinhas' : ''}${o.andaimeBases ? ' — com bases' : ''}.
 </p>` : ''}
 <p style="margin:12px 0;">A <strong>VEDAFACIL</strong> agradece sua atenção e fica ao seu dispor para maiores esclarecimentos.</p>
@@ -1336,11 +2119,9 @@ ${FOOTER}
 
 ${photoPages}
 
-<script>
-function downloadPDF() {
-  window.print();
-}
-<\/script>
+</td></tr></tbody>
+</table>
+<script>function downloadPDF(){window.print();}<\/script>
 </body></html>`;
 }app.get('/api/orcamentos/:id/pdf', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1] || req.query.token;
@@ -1369,6 +2150,12 @@ function downloadPDF() {
       }
     }
 
+    // Resolve fotos R2 → base64 para o Puppeteer renderizar inline
+    if (o.locais) {
+      const locaisResolved = await resolveLocaisForPdf(o.locais);
+      o = { ...o.toObject ? o.toObject() : o, locais: locaisResolved };
+    }
+
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.send(buildOrcamentoPdfHtml(o));
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1380,7 +2167,8 @@ function downloadPDF() {
 
 function buildContratoPdfHtml(c) {
   const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-  const fmtDate = (d) => { if (!d) return '___'; const date = new Date(d.includes('-') && d.length === 10 ? d + 'T12:00:00' : d); return isNaN(date.getTime()) ? d : date.toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' }); };
+  const fmtDate = (d) => { if (!d) return '___'; const s = String(d); const date = new Date(s.length === 10 && s.includes('-') ? s + 'T12:00:00' : s); return isNaN(date.getTime()) ? s : date.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' }); };
+  const fmtDateShort = fmtDate;
 
   const razaoSocial = c.razaoSocial || c.cliente || '___';
   const cnpjCliente = c.cnpjCliente || '___';
@@ -1396,6 +2184,8 @@ function buildContratoPdfHtml(c) {
   const totalBruto = c.totalBruto || c.totalLiquido || 0;
   const totalLiquido = c.totalLiquido || 0;
   const descontoValor = c.descontoTipo === 'percent' ? (totalBruto * (c.desconto || 0) / 100) : (c.desconto || 0);
+  // Valor contratual: usa totalBruto se proposta 2 (parcelado), caso contrário totalLiquido (à vista)
+  const valorContratual = c.propostaEscolhida === 2 ? (totalBruto || totalLiquido) : totalLiquido;
   const issPercent = c.issPercent || 3;
   const prazo = c.prazoExecucao || 3;
   const foro = c.foro || 'Rio de Janeiro';
@@ -1403,35 +2193,35 @@ function buildContratoPdfHtml(c) {
   const dataInicio = c.dataInicio ? fmtDate(c.dataInicio) : '';
   const dataTermino = c.dataTermino ? fmtDate(c.dataTermino) : '';
   const nOrc = c.numero ? String(c.numero).padStart(4, '0') : '___';
-  const valorExt = valorExtenso(totalLiquido);
+  const valorExt = valorExtenso(valorContratual);
 
   const itensFiltrados = (c.itens || []).filter(i => i.quantidade > 0);
   const itemRows = itensFiltrados.map((i, n) => `<tr><td>${n+1}</td><td>${i.descricao}</td><td style="text-align:center">${i.unidade || '-'}</td><td style="text-align:center">${i.quantidade}</td><td style="text-align:right">${fmt(i.valorUnit)}</td><td style="text-align:right">${fmt(i.subtotal)}</td></tr>`).join('');
 
   const parcelasContrato = c.parcelasContrato && c.parcelasContrato.length > 0 ? c.parcelasContrato : [];
-  const parcelaRows = parcelasContrato.map((p, i) => `<tr><td style="text-align:center">${p.numero || i+1}</td><td style="text-align:center">${p.data || '___'}</td><td style="text-align:right">${fmt(p.valor || 0)}</td></tr>`).join('');
+  const parcelaRows = parcelasContrato.map((p, i) => `<tr><td style="text-align:center">${p.numero || i+1}</td><td style="text-align:center">${fmtDateShort(p.data)}</td><td style="text-align:right">${fmt(p.valor || 0)}</td></tr>`).join('');
 
   const cronograma = c.cronograma || [];
-  const cronogramaRows = cronograma.map((cr, i) => `<tr><td style="text-align:center;width:30px">${i+1}</td><td>${cr.local || '___'}</td><td style="text-align:center">${cr.dataInicio || '___'}</td><td style="text-align:center">${cr.dataFim || '___'}</td></tr>`).join('');
+  const cronogramaRows = cronograma.map((cr, i) => `<tr><td style="text-align:center;width:30px">${i+1}</td><td>${cr.local || '___'}</td><td style="text-align:center">${fmtDateShort(cr.dataInicio)}</td><td style="text-align:center">${fmtDateShort(cr.dataFim)}</td></tr>`).join('');
 
   const locais = c.locais || [];
   const locaisStr = locais.map((l, i) => `${i+1}- ${l.nome || '___'}`).join(', ');
 
-  return `<!DOCTYPE html>
+  // ── Helper: constrói o shell HTML do contrato ─────────────────────────────
+  const contratoShell = (bodyContent) => `<!DOCTYPE html>
 <html lang="pt-BR">
 <head><meta charset="UTF-8">
 <title>Contrato_Vedafacil_${nOrc}_${(razaoSocial||'cliente').replace(/[^a-zA-Z0-9 ]/g,'').replace(/\s+/g,'_')}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;font-size:10.5px;color:#222;line-height:1.6}
-.pg{padding:12mm 16mm;max-width:210mm;margin:0 auto}
-.pb{page-break-before:always}
-h2.clause-title{background:#e87722;color:white;padding:5px 10px;margin:14px 0 8px;font-size:11px;font-weight:bold;border-radius:2px}
+/* Conteúdo */
+.pg{padding:12mm 22mm;max-width:210mm;margin:0 auto}
+h2.clause-title{background:#e87722;color:white;padding:6px 14px;margin:16px 0 9px;font-size:11px;font-weight:bold;border-radius:2px}
 .clause{margin:6px 0;text-align:justify;font-size:10.5px}
 .clause p{margin-bottom:6px;text-indent:20px}
 .clause p:first-child{text-indent:0}
 .clause .sub{margin-left:20px;margin-top:4px}
-.clause strong.org{color:#e87722}
 table.pt{width:100%;border-collapse:collapse;margin:8px 0;font-size:10px}
 table.pt th{background:#e87722;color:white;padding:5px 6px;text-align:center;font-weight:bold}
 table.pt td{border:1px solid #aaa;padding:4px 6px}
@@ -1442,23 +2232,79 @@ table.pay td{border:1px solid #aaa;padding:5px 10px}
 .crono{width:100%;border-collapse:collapse;margin:8px 0;font-size:10px}
 .crono th{background:#e87722;color:white;padding:5px 6px;text-align:center}
 .crono td{border:1px solid #aaa;padding:4px 6px}
-.sig{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:40px;text-align:center;font-size:10px}
-.sig .line{border-top:1px solid #333;padding-top:5px;font-weight:bold}
-.sig .role{color:#555;margin-bottom:20px;font-size:9.5px}
-.foot{text-align:center;font-size:8.5px;color:#666;margin-top:12px;padding-top:5px;border-top:1px solid #ccc}
+/* Assinatura — espaço generoso para rubrica manuscrita */
+.sig{display:grid;grid-template-columns:1fr 1fr;gap:0 50px;margin:40px 0 24px;text-align:center;font-size:10px}
+.sig .role{color:#333;font-weight:bold;font-size:10px;margin-bottom:26mm;text-transform:uppercase;letter-spacing:.4px}
+.sig .line{border-top:1.5px solid #222;padding-top:6px;font-size:10px;line-height:1.5}
+.foot{text-align:center;font-size:8.5px;color:#666;margin-top:16px;padding-top:6px;border-top:1px solid #ccc}
 .download-btn{position:fixed;top:12px;right:12px;z-index:9999;background:#e87722;color:white;border:none;padding:10px 20px;font-size:14px;font-weight:700;border-radius:8px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)}
 .download-btn:hover{background:#d06a1b}
-@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:0;size:A4}.download-btn{display:none!important}}
+/* Tela: tabela-documento age como bloco simples — filho direto (>) para não vazar nas tabelas internas */
+.doc-tbl{display:block;width:100%;max-width:210mm;margin:0 auto}
+.doc-tbl > thead,.doc-tbl > tfoot{display:none}
+.doc-tbl > tbody,.doc-tbl > tbody > tr,.doc-tbl > tbody > tr > td{display:block}
+/* Impressão: thead/tfoot repetem em TODAS as páginas nativamente */
+@media print{
+  body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  @page{size:A4;margin:0}
+  .download-btn{display:none!important}
+  .contrato-capa{display:none!important}
+  .foot{display:none!important}
+  .doc-tbl{display:table;width:100%;border-collapse:collapse;table-layout:fixed}
+  .doc-tbl > thead{display:table-header-group}
+  .doc-tbl > tfoot{display:table-footer-group}
+  .doc-tbl > tbody{display:table-row-group}
+  .doc-tbl > tbody > tr{display:table-row}
+  .doc-tbl > tbody > tr > td,.doc-tbl > thead > tr > th{display:table-cell;padding:0;font-weight:normal}
+  .pg{padding:10mm 22mm!important;max-width:none!important;margin:0!important}
+}
 </style>
 </head><body>
 <button class="download-btn" onclick="window.print()">⬇ Salvar como PDF</button>
-
-<div class="pg" style="text-align:center;padding-top:6mm">
-<h1 style="color:#e87722;font-size:16px;margin-bottom:4px">INSTRUMENTO PARTICULAR DE CONTRATO DE PRESTAÇÃO DE SERVIÇOS</h1>
-<div style="font-size:10px;color:#666;margin-bottom:14px">Correspondente ao Orçamento Nº ${nOrc}</div>
+<!-- Tela: cabeçalho decorativo da capa -->
+<div class="contrato-capa pg" style="text-align:center;padding-top:8mm;padding-bottom:4mm">
+  <h1 style="color:#e87722;font-size:16px;margin-bottom:4px">INSTRUMENTO PARTICULAR DE CONTRATO DE PRESTAÇÃO DE SERVIÇOS</h1>
+  <div style="font-size:10px;color:#666">Correspondente ao Orçamento Nº ${nOrc}</div>
 </div>
+<!-- Tabela-documento: thead/tfoot repetem em cada página impressa -->
+<table class="doc-tbl">
+  <thead>
+    <tr>
+      <th>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6mm 22mm;border-bottom:2px solid #e87722;background:#fff">
+          <div>${LOGO_B64 ? `<img src="data:image/png;base64,${LOGO_B64}" style="height:14mm;width:auto" alt="Vedafácil">` : '<span style="font-size:18px;font-weight:900;color:#e87722">VEDAFÁCIL</span>'}</div>
+          <div style="text-align:right;line-height:1.6">
+            <div style="font-size:11px;font-weight:700;color:#333;text-transform:uppercase;letter-spacing:.3px">Contrato de Prestação de Serviços</div>
+            <div style="font-size:10px;color:#e87722;margin-top:1px">Nº ${nOrc} — ${razaoSocial}</div>
+          </div>
+        </div>
+      </th>
+    </tr>
+  </thead>
+  <tfoot>
+    <tr>
+      <td>
+        <div style="text-align:center;font-size:8.5px;color:#666;padding:5mm 22mm;border-top:1px solid #ddd;background:#fff;line-height:1.7">
+          <strong style="color:#e87722;font-size:9px">Eliminamos Infiltrações Sem Quebrar!</strong><br>
+          CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
+        </div>
+      </td>
+    </tr>
+  </tfoot>
+  <tbody>
+    <tr>
+      <td>${bodyContent}</td>
+    </tr>
+  </tbody>
+</table>
+</body></html>`;
 
-<div class="pg pb">
+  // ── Se há texto personalizado, usa ele em vez do template ─────────────────
+  if (c.textoPersonalizado) {
+    return contratoShell(c.textoPersonalizado);
+  }
+
+  return contratoShell(`<div class="pg">
 <p style="text-align:justify;font-size:10.5px;margin-bottom:10px">Contrato de Prestação de serviços para fornecimento das tarefas de hidrojateamento, calafetação e selado de infiltrações utilizando o sistema de injeção que entre si celebram por um lado:</p>
 
 <p style="font-size:10.5px;text-align:justify;margin-bottom:8px"><strong>CONTRATADA:</strong> ${contratada} sita à Rua Professora Margarida Fialho Thompson Leite, 670, Residencial Cristo Redentor na cidade de Barra Mansa estado RJ, CEP 27323-755, inscrita no CNPJ sob número 23.606.470/0001-07, representado por Thiago Ramos Ferraz, inscrito no CPF sob n° 104.589.167-30 doravante denominada <strong style="color:#e87722">CONTRATADA</strong>.</p>
@@ -1486,7 +2332,7 @@ table.pay td{border:1px solid #aaa;padding:5px 10px}
 
 <h2 class="clause-title">Cláusula 4ª - Valor dos Serviços</h2>
 <div class="clause">
-<p>4.1- A CONTRATANTE aceita pagar pelo serviço contratado um valor total de: <strong>${fmt(totalLiquido)}</strong></p>
+<p>4.1- A CONTRATANTE aceita pagar pelo serviço contratado um valor total de: <strong>${fmt(valorContratual)}</strong></p>
 <p>(${valorExt})</p>
 ${descontoValor > 0 ? `<p>4.2 - Do valor total do contrato, ${issPercent}% refere-se ao pagamento do ISSQN (Imposto sobre serviço de qualquer natureza) que será de responsabilidade da CONTRATANTE e deverá ser recolhido no município da prestação do serviço. Outrossim, a CONTRATADA emitirá fatura com o valor líquido, com o desconto do valor do ISS.</p>` : ''}
 <p>4.${descontoValor > 0 ? '3' : '2'} - Sem prejuízo, em conformidade com o disposto pelo regime do SIMPLES, não correspondem as retenções de 1,5% (um e meio) referente ao Imposto de Renda sobre o valor total da fatura de serviço nem a retenção de 4,65% (quatro e sessenta e cinco) referente ao Pis, Cofins e Csll sobre o valor total da fatura.</p>
@@ -1501,9 +2347,9 @@ ${descontoValor > 0 ? `<p>4.5 - O valor contratado objeto deste Instrumento Part
 ${parcelaRows ? `<table class="pay">
 <tr><td style="width:50%;font-style:italic"><em>Nº de Parcela</em></td><td style="width:25%;text-align:center"><em>Data</em></td><td style="width:25%;text-align:right"><em>Valor</em></td></tr>
 ${parcelaRows}
-<tr><td style="font-style:italic;font-weight:bold"><strong>TOTAL</strong></td><td></td><td style="text-align:right;font-weight:bold;font-size:12px"><strong>${fmt(totalLiquido)}</strong></td></tr>
+<tr><td style="font-style:italic;font-weight:bold"><strong>TOTAL</strong></td><td></td><td style="text-align:right;font-weight:bold;font-size:12px"><strong>${fmt(valorContratual)}</strong></td></tr>
 </table>` : `<table class="pay">
-<tr><td style="font-style:italic;width:55%"><em>Total Orçamento</em></td><td style="text-align:right;font-weight:bold;font-size:12px">${fmt(totalLiquido)}</td></tr>
+<tr><td style="font-style:italic;width:55%"><em>Total Orçamento</em></td><td style="text-align:right;font-weight:bold;font-size:12px">${fmt(valorContratual)}</td></tr>
 </table>`}
 
 <p>5.2 - A CONTRATANTE compromete-se neste ato ao pagamento dos boletos bancários, nas datas estipuladas no ponto 5.1, incidindo multa de 2% (dois por cento) sobre o valor da parcela e juros de mora de 1% (um por cento) ao mês, no caso de inadimplência.</p>
@@ -1591,21 +2437,91 @@ ${cronograma.length > 0 ? `
 <p>11.7 - Por estarem justos e contratados, assinam o presente em duas vias de igual teor e forma, para os efeitos legais e de direito.</p>
 </div>
 
-<p style="text-align:center;margin-top:20px">${cidade || foro}, ${dataAssinatura}</p>
+<p style="text-align:center;margin-top:30px;font-size:10.5px">${cidade || foro}, ${dataAssinatura}</p>
 
 <div class="sig">
   <div>
     <div class="role">CONTRATANTE</div>
-    <div class="line">${razaoSocial}<br>${sindico}${cpfResp && cpfResp !== '___' ? '<br>CPF: ' + cpfResp : ''}</div>
+    <div class="line">
+      ${razaoSocial}<br>
+      ${sindico}${cpfResp && cpfResp !== '___' ? '<br><span style="font-size:9.5px;color:#555">CPF: ' + cpfResp + '</span>' : ''}
+    </div>
   </div>
   <div>
     <div class="role">CONTRATADA</div>
-    <div class="line">VEDAFACIL TECNOLOGIA EM IMPERMEABILIZAÇÃO<br>Thiago Ramos Ferraz<br>CPF: 104.589.167-30</div>
+    <div class="line">
+      VEDAFACIL TECNOLOGIA EM IMPERMEABILIZAÇÃO<br>
+      Thiago Ramos Ferraz<br>
+      <span style="font-size:9.5px;color:#555">CPF: 104.589.167-30</span>
+    </div>
+  </div>
+</div>
+
+<div class="sig" style="margin-top:32px;">
+  <div>
+    <div class="role">Testemunha 1</div>
+    <div class="line">&nbsp;</div>
+    <div style="font-size:9px;color:#555;margin-top:6px;text-align:left;">Nome: ___________________________________</div>
+    <div style="font-size:9px;color:#555;margin-top:4px;text-align:left;">CPF: ____________________________________</div>
+  </div>
+  <div>
+    <div class="role">Testemunha 2</div>
+    <div class="line">&nbsp;</div>
+    <div style="font-size:9px;color:#555;margin-top:6px;text-align:left;">Nome: ___________________________________</div>
+    <div style="font-size:9px;color:#555;margin-top:4px;text-align:left;">CPF: ____________________________________</div>
   </div>
 </div>
 
 <div class="foot"><strong style="color:#e87722">Eliminamos Infiltrações Sem Quebrar!</strong><br>CNPJ: 23.606.470/0001-07 · Tel.: (21) 99984-1127 / (24) 2106-1015</div>
-</div></body></html>`;
+</div>`);
+}
+
+// Retorna o HTML editável do corpo do contrato (para o editor rich text)
+app.get('/api/contratos/:id/texto-html', auth, async (req, res) => {
+  try {
+    await connectDB();
+    let c;
+    if (isConnected) c = await Contrato.findOne({ _id: req.params.id }).lean();
+    else c = memStore.contratos.find(x => x._id === req.params.id);
+    if (!c) return res.status(404).json({ error: 'Not found' });
+    if (c.textoPersonalizado) {
+      return res.json({ html: c.textoPersonalizado, customizado: true, editadoEm: c.textoPersonalizadoAt });
+    }
+    // Gera o HTML padrão e extrai só o body content
+    const fullHtml = buildContratoPdfHtml(c);
+    // Extrai o conteúdo dentro de <div class="pg">...</div> (wrapper principal do corpo, após a capa)
+    const OPEN_TAG = '<div class="pg">';
+    const pgStart = fullHtml.indexOf(OPEN_TAG);
+    const outerClose = fullHtml.lastIndexOf('</div>');
+    let bodyHtml;
+    if (pgStart !== -1 && outerClose > pgStart) {
+      const innerContent = fullHtml.substring(pgStart + OPEN_TAG.length, outerClose);
+      bodyHtml = `<div class="pg-content">${innerContent}</div>`;
+    } else {
+      bodyHtml = '<p>Conteúdo não disponível</p>';
+    }
+    return res.json({ html: bodyHtml, customizado: false });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Extrai body content + estilos de um HTML completo (para uso como anexo)
+function extractHtmlForAppend(fullHtml) {
+  // Remove botão de download e scripts
+  const cleaned = fullHtml
+    .replace(/<button[^>]*class="download-btn"[^>]*>[\s\S]*?<\/button>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '');
+  // Coleta estilos do <head> que não existem no contrato
+  const headMatch = cleaned.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  const extraStyles = [];
+  if (headMatch) {
+    const re = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+    let m;
+    while ((m = re.exec(headMatch[1])) !== null) extraStyles.push(m[1]);
+  }
+  // Extrai conteúdo do <body>
+  const bodyMatch = cleaned.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  const body = bodyMatch ? bodyMatch[1].trim() : '';
+  return { extraStyles, body };
 }
 
 app.get('/api/contratos/:id/pdf', async (req, res) => {
@@ -1617,13 +2533,50 @@ app.get('/api/contratos/:id/pdf', async (req, res) => {
 
   try {
     await connectDB();
-    let c;
-    if (isConnected) c = await Contrato.findOne({ _id: req.params.id });
-    else c = memStore.contratos.find(x => x._id === req.params.id);
+    let c, orc = null;
+    if (isConnected) {
+      c = await Contrato.findOne({ _id: req.params.id });
+      if (c?.orcamentoId) orc = await Orcamento.findById(c.orcamentoId);
+    } else {
+      c = memStore.contratos.find(x => x._id === req.params.id);
+      if (c?.orcamentoId) orc = memStore.orcamentos.find(x => x._id === c.orcamentoId);
+    }
     if (!c) return res.status(404).json({ error: 'Not found' });
 
+    let html = buildContratoPdfHtml(c);
+
+    // Anexa orçamento ao final do contrato (se existir)
+    if (orc) {
+      const orcObj = orc.toObject ? orc.toObject() : { ...orc };
+      // Busca fotos da medição se necessário
+      if (orcObj.medicaoId && (!orcObj.locais || orcObj.locais.every(l => !l.fotos?.length))) {
+        let med = isConnected
+          ? await Medicao.findById(orcObj.medicaoId)
+          : memStore.medicoes?.find(x => x._id === orcObj.medicaoId);
+        if (med?.locais) {
+          orcObj.locais = orcObj.locais.map((l, i) => ({ ...l, fotos: med.locais[i]?.fotos || [] }));
+        }
+      }
+      const orcHtml = buildOrcamentoPdfHtml(orcObj);
+      const { extraStyles, body } = extractHtmlForAppend(orcHtml);
+
+      // Injeta estilos extras antes de </style> (primeiro bloco) e corpo antes de </body>
+      if (extraStyles.length) {
+        html = html.replace('</style>', `/* ── Estilos do orçamento anexo ── */\n${extraStyles.join('\n')}\n</style>`);
+      }
+      const nOrcNum = orc.numero ? String(orc.numero).padStart(4, '0') : '';
+      const separador = `
+<div style="page-break-before:always;margin:0;padding:0;"></div>
+<div style="font-family:Arial,sans-serif;font-size:11px;text-align:center;padding:8mm 22mm 4mm;background:#fff3e0;border-bottom:2px solid #e87722;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+  <span style="font-size:13px;font-weight:bold;color:#e87722;">ANEXO CONTRATUAL</span><br>
+  <span style="color:#555;font-size:10px;">Orçamento Nº ${nOrcNum} — parte integrante deste contrato</span>
+</div>
+${body}`;
+      html = html.replace('</body>', `${separador}\n</body>`);
+    }
+
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.send(buildContratoPdfHtml(c));
+    return res.send(html);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1642,7 +2595,7 @@ function buildGarantiaPdfHtml(c, osPontos = []) {
       dt = new Date(s.length === 10 && s.includes('-') ? s + 'T12:00:00' : s);
     }
     if (isNaN(dt.getTime()) || dt.getFullYear() < 2000) return '';
-    return dt.toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' });
+    return dt.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' });
   };
 
   const formatCnpj = (v) => {
@@ -1666,7 +2619,7 @@ function buildGarantiaPdfHtml(c, osPontos = []) {
   const cidadeUF = [c.cidade, c.estado || c.uf].filter(Boolean).join('   ');
   const cnpjCliente = formatCnpj(c.cnpjCliente);
   const foro = c.foro || 'Rio de Janeiro';
-  const dataEmissao = fmtDate(c.dataTermino) || fmtDate(c.dataAssinatura) || new Date().toLocaleDateString('pt-BR', { day:'2-digit', month:'long', year:'numeric' });
+  const dataEmissao = fmtDate(c.dataTermino) || fmtDate(c.dataAssinatura) || new Date().toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' });
 
   // locais tratados
   const locais = c.locais || [];
@@ -1714,11 +2667,45 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#222;line-hei
 .sig-name{font-weight:700;font-size:11px;margin-top:2px;}
 .sig-company{font-size:10px;color:#333;margin-top:1px;}
 .download-btn{position:fixed;top:12px;right:12px;z-index:9999;background:#e87722;color:white;border:none;padding:10px 20px;font-size:14px;font-weight:700;border-radius:8px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
-@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}@page{margin:0;size:A4}.download-btn{display:none!important}}
+/* Tela: doc-tbl transparente — filho direto (>) para não vazar nas tabelas internas */
+.doc-tbl{display:block;width:100%;max-width:210mm;margin:0 auto}
+.doc-tbl > thead,.doc-tbl > tfoot{display:none}
+.doc-tbl > tbody,.doc-tbl > tbody > tr,.doc-tbl > tbody > tr > td{display:block}
+@media print{
+  body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  @page{size:A4;margin:0}
+  .download-btn{display:none!important}
+  .logo-bar{display:none!important}
+  .doc-tbl{display:table;width:100%;border-collapse:collapse;table-layout:fixed}
+  .doc-tbl > thead{display:table-header-group}
+  .doc-tbl > tfoot{display:table-footer-group}
+  .doc-tbl > tbody{display:table-row-group}
+  .doc-tbl > tbody > tr{display:table-row}
+  .doc-tbl > tbody > tr > td,.doc-tbl > thead > tr > th{display:table-cell;padding:0;font-weight:normal}
+  .pg{padding:8mm 20mm!important;max-width:none!important;margin:0!important}
+}
 </style>
 </head>
 <body>
 <button class="download-btn" onclick="window.print()">⬇ Salvar como PDF</button>
+<table class="doc-tbl">
+<thead><tr><th>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:6mm 22mm;border-bottom:2px solid #e87722;background:#fff">
+    <div>${LOGO_B64 ? `<img src="data:image/png;base64,${LOGO_B64}" style="height:14mm;width:auto" alt="Vedafácil">` : '<span style="font-size:18px;font-weight:900;color:#e87722">VEDAFÁCIL</span>'}</div>
+    <div style="text-align:right;line-height:1.6">
+      <div style="font-size:12px;font-weight:700;color:#333">Certificado de Garantia</div>
+      <div style="font-size:10px;color:#e87722;margin-top:1px">Contrato Nº ${nContrato} — ${cliente}</div>
+    </div>
+  </div>
+</th></tr></thead>
+<tfoot><tr><td>
+  <div style="text-align:center;font-size:8.5px;color:#666;padding:5mm 22mm;border-top:1px solid #ddd;background:#fff;line-height:1.7">
+    <strong style="color:#e87722;font-size:9px">Eliminamos Infiltrações Sem Quebrar!</strong><br>
+    CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
+  </div>
+</td></tr></tfoot>
+<tbody><tr><td>
+
 <div class="pg">
 
   <!-- Logo + linhas decorativas -->
@@ -1776,9 +2763,11 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#222;line-hei
 </div>
 
 ${(() => {
-  // Relatório fotográfico — antes e depois
+  // ── Relatório fotográfico + Croquis ───────────────────────────────────────
   const FOOTER_RF = `<div style="text-align:center;font-size:8.5px;color:#666;margin-top:16px;padding-top:8px;border-top:1px solid #ccc;"><strong style="color:#e87722;">Eliminamos Infiltrações Sem Quebrar!</strong><br>CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015</div>`;
   const logoGar = LOGO_B64 ? `<div style="text-align:center;margin-bottom:8px;"><img src="data:image/png;base64,${LOGO_B64}" style="height:40px;width:auto;" alt="Vedafácil"></div>` : '';
+
+  // 1ª parte: Relatório fotográfico (ANTES e DEPOIS)
   const fotoPages = [];
   osPontos.forEach(p => {
     const antesFotos = p.fotosAntes || [];
@@ -1810,9 +2799,30 @@ ${(() => {
 </div>`);
     });
   });
-  return fotoPages.join('');
+
+  // 2ª parte: Croquis das áreas trabalhadas
+  const croquiPages = [];
+  osPontos.forEach(p => {
+    const imagem = p.croquiOtimizado || p.croquiBase64;
+    if (!imagem) return;
+    if (typeof imagem === 'string' && (imagem.includes('IMAGEM_MUITO_GRANDE') || imagem.length < 50)) return;
+    const src = imagem.startsWith('data:') ? imagem : `data:image/png;base64,${imagem}`;
+    const isIA = !!p.croquiOtimizado;
+    croquiPages.push(`<div style="page-break-before:always;padding:10mm 14mm 14mm;max-width:210mm;margin:0 auto;">
+  ${logoGar}
+  <div style="font-size:11px;font-weight:bold;margin-bottom:4px;">📐 CROQUI — ${p.nome || 'Local'}${isIA ? ' <span style="background:#f3e8ff;color:#7c3aed;font-size:9px;padding:1px 5px;border-radius:8px;">🤖 IA</span>' : ''}</div>
+  <div style="border:1px solid #ccc;padding:6px;text-align:center;background:#fff;">
+    <img src="${src}" style="max-width:100%;max-height:190mm;object-fit:contain;background:#fff;" alt="">
+  </div>
+  ${FOOTER_RF}
+</div>`);
+  });
+
+  return fotoPages.join('') + croquiPages.join('');
 })()}
 
+</td></tr></tbody>
+</table>
 <script>function downloadPDF(){window.print()}</script>
 </body>
 </html>`;
@@ -1858,10 +2868,25 @@ app.get('/api/contratos/:id/garantia', async (req, res) => {
         if (!os && c.orcamentoId) os = memStore.ordensServico?.find(o => o.orcamentoId === c.orcamentoId && o.tipo !== 'reparo');
       }
       if (os && os.pontos) {
-        osPontos = os.pontos.filter(p => (p.fotosAntes?.length || 0) + (p.fotosDepois?.length || 0) > 0);
+        osPontos = os.pontos; // inclui todos os pontos — fotos e croquis filtrados dentro de buildGarantiaPdfHtml
       }
     } catch (photoErr) {
       console.error('Garantia: erro ao buscar fotos da OS:', photoErr.message);
+    }
+
+    // Resolve fotos R2 → base64 para o Puppeteer renderizar inline
+    if (osPontos.length > 0) {
+      osPontos = await Promise.all(osPontos.map(async (p) => {
+        const fotosMed = Array.isArray(p.fotosMedicao) ? await resolveLocaisForPdf([{ fotos: p.fotosMedicao }]) : [{ fotos: [] }];
+        const fotosAnt = Array.isArray(p.fotosAntes) ? await resolveLocaisForPdf([{ fotos: p.fotosAntes }]) : [{ fotos: [] }];
+        const fotosDep = Array.isArray(p.fotosDepois) ? await resolveLocaisForPdf([{ fotos: p.fotosDepois }]) : [{ fotos: [] }];
+        return {
+          ...p,
+          fotosMedicao: fotosMed[0]?.fotos || p.fotosMedicao,
+          fotosAntes: fotosAnt[0]?.fotos || p.fotosAntes,
+          fotosDepois: fotosDep[0]?.fotos || p.fotosDepois,
+        };
+      }));
     }
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1885,6 +2910,9 @@ function buildArtPdfHtml(c) {
   const endereco = c.endereco || '___';
   const cidade = c.cidade || '___';
   const cep = c.cep || '___';
+  const emailCliente = c.emailCliente || '___';
+  const sindico = c.sindico || c.ac || '___';
+  const celular = c.celular || '___';
   const dataInicio = fmtDate(c.dataInicio);
   const dataTermino = fmtDate(c.dataTermino);
 
@@ -1966,6 +2994,9 @@ table.qty td{border:1px solid #ccc;padding:5px 8px;text-align:center}
   <table class="info">
     ${row('Contratante / Condomínio', cliente)}
     ${row('CNPJ do Contratante', cnpj)}
+    ${row('Síndico / Responsável', sindico)}
+    ${row('Celular do Responsável', celular)}
+    ${row('E-mail do Signatário', emailCliente)}
     ${row('Endereço da Obra', endereco)}
     ${row('Cidade / UF', cidade + ' / RJ')}
     ${row('CEP', cep)}
@@ -2913,15 +3944,37 @@ app.get('/api/dashboard/stats', auth, async (req, res) => {
       const osRepPrev  = osAll.filter(x => inPrevPeriod(x.createdAt) && x.tipo === 'reparo');
 
       // Consumo de produto — todas OS (separado obras x reparos)
-      const todasOS = await OS.find({})
-        .select('consumoProduto totalConsumoReal consumosDiarios createdAt status tipo').lean();
+      // Obras: só precisam de consumoProduto (já calculado na criação)
+      // Reparos: busca pontos para recalcular quando consumoProduto === 0 (dados legados)
+      const CONSUMO_POR_TIPO_DASH = { trinca: 1.5, juntaDilat: 2.0, juntaFria: 1.0, ralo: 1.0, cortina: 2.0 };
+      function calcConsumoFromPontos(pontos) {
+        return (pontos || []).reduce((total, p) => {
+          const subs = p.subPontos || [];
+          if (subs.length > 0) {
+            return total + subs.reduce((s, sp) => s + (sp.valor || 0) * (CONSUMO_POR_TIPO_DASH[sp.tipo] || 0), 0);
+          }
+          return total + (Number(p.trinca)||0)*1.5 + (Number(p.juntaDilat)||0)*2.0 +
+                         (Number(p.juntaFria)||0)*1.0 + (Number(p.ralo)||0)*1.0 + (Number(p.cortina)||0)*2.0;
+        }, 0);
+      }
 
-      const osAtivasNorm = todasOS.filter(o => (o.tipo || 'normal') === 'normal');
-      const osAtivasRep  = todasOS.filter(o => o.tipo === 'reparo');
+      const [osNormAll, osRepAll] = await Promise.all([
+        OS.find({ $or: [{ tipo: 'normal' }, { tipo: { $exists: false } }] })
+          .select('consumoProduto totalConsumoReal consumosDiarios tipo').lean(),
+        OS.find({ tipo: 'reparo' })
+          .select('consumoProduto totalConsumoReal consumosDiarios pontos tipo').lean(),
+      ]);
+
+      const todasOS = [...osNormAll, ...osRepAll];
+      const osAtivasNorm = osNormAll;
+      const osAtivasRep  = osRepAll;
 
       const estimadoObras  = osAtivasNorm.reduce((s, o) => s + (o.consumoProduto || 0), 0);
       const realObras      = osAtivasNorm.reduce((s, o) => s + (o.totalConsumoReal || 0), 0);
-      const estimadoRep    = osAtivasRep.reduce((s, o) => s + (o.consumoProduto || 0), 0);
+      const estimadoRep    = osAtivasRep.reduce((s, o) => {
+        const est = o.consumoProduto > 0 ? o.consumoProduto : calcConsumoFromPontos(o.pontos);
+        return s + est;
+      }, 0);
       const realRep        = osAtivasRep.reduce((s, o) => s + (o.totalConsumoReal || 0), 0);
       const estimado       = estimadoObras + estimadoRep;
       const real           = realObras + realRep;
@@ -2948,6 +4001,36 @@ app.get('/api/dashboard/stats', auth, async (req, res) => {
       const nDias = Math.max(1, Math.round((endTs - startTs) / (24 * 3600 * 1000)) + 1);
       const estimDia = parseFloat((estimado / nDias).toFixed(1));
       Object.keys(porDia).forEach(d => { porDia[d].estimado = estimDia; });
+
+      // ── Atividade Recente: mistura de medições, OS e reparos criados no período
+      const atividadeRecente = [
+        ...med.map(m => ({
+          tipo: 'medicao',
+          titulo: `Medição - ${m.cliente || m.nomeCondominio || 'Sem nome'}`,
+          subtitulo: m.endereco || '',
+          status: m.status || 'recebida',
+          data: m.createdAt,
+          id: m._id,
+        })),
+        ...osNorm.map(o => ({
+          tipo: 'os',
+          titulo: `OS #${o.numero || ''} - ${o.cliente || o.nomeCliente || 'Sem nome'}`,
+          subtitulo: o.equipeNome || '',
+          status: o.status,
+          data: o.createdAt,
+          id: o._id,
+        })),
+        ...osRep.map(o => ({
+          tipo: 'reparo',
+          titulo: `Reparo #${o.numero || ''} - ${o.cliente || o.nomeCliente || 'Sem nome'}`,
+          subtitulo: o.equipeNome || '',
+          status: o.status,
+          data: o.createdAt,
+          id: o._id,
+        })),
+      ]
+        .sort((a, b) => b.data - a.data)
+        .slice(0, 20);
 
       return res.json({
         periodo: { start, end, startTs, endTs },
@@ -3001,6 +4084,7 @@ app.get('/api/dashboard/stats', auth, async (req, res) => {
           reparos:      osRepPrev.length,
           consumoReal:  parseFloat(osNormPrev.reduce((s, o) => s + (o.totalConsumoReal || 0), 0).toFixed(1)),
         },
+        atividadeRecente,
       });
     }
 
@@ -3288,7 +4372,7 @@ function buildRelatorioGarantiaOS(os, contrato) {
 </div>`;
   }).join('');
 
-  const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+  const dataEmissao = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -3394,19 +4478,42 @@ app.get('/api/ordens-servico/:id/garantia', async (req, res) => {
   try {
     await connectDB();
     let os;
-    if (isConnected) os = await OS.findById(req.params.id);
-    else os = memStore.ordens.find(x => x._id === req.params.id);
+    if (isConnected) os = await OS.findById(req.params.id).lean();
+    else os = memStore.ordens?.find(x => x._id === req.params.id);
     if (!os) return res.status(404).json({ error: 'Not found' });
 
-    // Try to load contrato for garantia years
+    // Try to load linked contrato for extra fields
     let contrato = null;
-    if (os.contratoId) {
-      if (isConnected) contrato = await Contrato.findOne({ _id: os.contratoId });
-      else contrato = memStore.contratos.find(x => x._id === os.contratoId);
-    }
+    try {
+      if (os.contratoId && isConnected) contrato = await Contrato.findById(os.contratoId).lean();
+      else if (os.contratoId) contrato = memStore.contratos?.find(x => String(x._id) === String(os.contratoId));
+    } catch {}
+
+    // Build contrato-like object for buildGarantiaPdfHtml (same model as aba Garantias)
+    const cLike = {
+      numero:        contrato?.numero || os.numOS || os.numero,
+      garantia:      Number(contrato?.garantia || os.garantia) || 15,
+      razaoSocial:   contrato?.razaoSocial || os.cliente || '',
+      cliente:       os.cliente || '',
+      endereco:      contrato?.endereco || os.endereco || '',
+      bairro:        contrato?.bairro  || os.bairro  || '',
+      cidade:        contrato?.cidade  || os.cidade  || '',
+      estado:        contrato?.estado  || os.estado  || '',
+      cep:           contrato?.cep     || os.cep     || '',
+      cnpjCliente:   contrato?.cnpjCliente || '',
+      foro:          contrato?.foro    || 'Barra Mansa',
+      dataTermino:   contrato?.dataTermino || os.dataTermino,
+      dataAssinatura: contrato?.dataAssinatura,
+      locais:        contrato?.locais  || [],
+      totalLiquido:  contrato?.totalLiquido || os.valorTotal || 0,
+      obsGarantia:   contrato?.obsGarantia || ''
+    };
+
+    // Todos os pontos — fotos e croquis são filtrados dentro de buildGarantiaPdfHtml
+    const osPontos = os.pontos || [];
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.send(buildRelatorioGarantiaOS(os, contrato));
+    return res.send(buildGarantiaPdfHtml(cLike, osPontos));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -3596,14 +4703,15 @@ app.patch('/api/ordens-servico/:id/equipe', auth, async (req, res) => {
 // ── PDF Relatório da OS ───────────────────────────────────────────────────────
 
 function buildOSRelatorioPdfHtml(os, contrato) {
+  const fmtDate = (d) => { if (!d) return ''; const s = String(d); const dt = new Date(s.length === 10 && s.includes('-') ? s + 'T12:00:00' : s); return isNaN(dt.getTime()) ? d : dt.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' }); };
   const nOS = os.numero ? String(os.numero).padStart(4, '0') : '___';
   const cliente = os.cliente || '___';
   const endereco = os.endereco || '';
   const cidade = os.cidade || '';
   const garantia = contrato?.garantia || 15;
   const dataEmissao = os.concluidaEm
-    ? new Date(os.concluidaEm).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
-    : new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+    ? new Date(os.concluidaEm).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
   const logoImg = LOGO_B64
     ? `<img src="data:image/png;base64,${LOGO_B64}" style="max-width:240px;height:auto;display:block;margin:0 auto;" alt="Vedafácil">`
@@ -3723,8 +4831,8 @@ table.locais tr:nth-child(even) td{background:#fafafa}
     <div class="info-box">
       <div class="lbl">Execução</div>
       <div>Equipe: <strong>${os.equipeNome || '—'}</strong></div>
-      ${os.dataInicio ? `<div>Início: ${os.dataInicio}</div>` : ''}
-      ${os.dataTermino ? `<div>Término: ${os.dataTermino}</div>` : ''}
+      ${os.dataInicio ? `<div>Início: ${fmtDate(os.dataInicio)}</div>` : ''}
+      ${os.dataTermino ? `<div>Término: ${fmtDate(os.dataTermino)}</div>` : ''}
       ${os.diasTrabalho ? `<div>Dias: ${os.diasTrabalho}</div>` : ''}
     </div>
   </div>
@@ -3800,45 +4908,108 @@ app.get('/api/aplicador/equipes', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Diagnóstico de croquis (temporário) ──────────────────────────────────────
+app.get('/api/croquis/diagnostico', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.json({ error: 'DB not connected' });
+    const totalOS = await OS.countDocuments();
+    const comPontos = await OS.countDocuments({ pontos: { $exists: true, $not: { $size: 0 } } });
+    const comCroquiBase64 = await OS.countDocuments({ 'pontos.croquiBase64': { $exists: true, $nin: [null, ''] } });
+    const comCroquiOtimizado = await OS.countDocuments({ 'pontos.croquiOtimizado': { $exists: true, $nin: [null, ''] } });
+    // Pega um sample de OS com pontos para ver as chaves disponíveis
+    const sample = await OS.findOne({ pontos: { $exists: true, $not: { $size: 0 } } }, { 'pontos': 1, numero: 1 }).lean();
+    const samplePontoKeys = sample ? Object.keys((sample.pontos||[])[0] || {}) : [];
+    const sampleCroquiBase64 = sample ? (sample.pontos||[]).map(p => ({
+      nome: p.nome,
+      hasCroquiBase64: !!(p.croquiBase64),
+      croquiBase64Type: typeof p.croquiBase64,
+      croquiBase64Len: p.croquiBase64 ? String(p.croquiBase64).length : 0,
+      hasCroquiOtimizado: !!(p.croquiOtimizado),
+    })) : [];
+    res.json({ totalOS, comPontos, comCroquiBase64, comCroquiOtimizado, sampleOsNumero: sample?.numero, samplePontoKeys, samplePontos: sampleCroquiBase64 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Listar todos os croquis (para a página de croquis no painel) ──────────────
 app.get('/api/croquis', auth, async (req, res) => {
   try {
     await connectDB();
     let result = [];
-    const osList = isConnected
-      ? await OS.find({ 'pontos.croquiBase64': { $exists: true } })
-          .select('_id numero cliente endereco bairro cidade status tipo pontos equipeId equipeNome dataInicio createdAt')
-          .lean()
-      : memStore.ordens;
 
-    for (const os of osList) {
-      const pts = (os.pontos || []);
-      pts.forEach((p, idx) => {
-        const imagem = p.croquiOtimizado || p.croquiBase64;
-        if (!imagem) return;
-        // Rejeita imagens inválidas (truncadas pelo sanitizeImages por excesso de tamanho)
-        if (typeof imagem === 'string' && imagem.includes('IMAGEM_MUITO_GRANDE')) return;
-        result.push({
-          osId:       os._id,
-          osNumero:   os.numero,
-          osCliente:  os.cliente,
-          osEndereco: os.endereco,
-          osBairro:   os.bairro   || '',
-          osCidade:   os.cidade   || '',
-          osStatus:   os.status,
-          osTipo:     os.tipo || 'normal',
-          osEquipe:   os.equipeNome || '',
-          osData:     os.dataInicio || os.createdAt || 0,
-          pontoIdx:   idx,
-          pontoNome:  p.nome || `Local ${idx + 1}`,
-          imagem,
-          otimizado:  !!p.croquiOtimizado,
-          updatedAt:  p.updatedAt || 0,
+    if (isConnected) {
+      // Busca OS que tenham pelo menos um ponto com croqui salvo
+      // Usa projeção por dot-notation para NÃO carregar fotos (que são base64 enormes)
+      const totalOS = await OS.countDocuments();
+      const comCroqui = await OS.countDocuments({ 'pontos.croquiBase64': { $exists: true, $nin: [null, ''] } });
+      const comCroquiOtimizado = await OS.countDocuments({ 'pontos.croquiOtimizado': { $exists: true, $nin: [null, ''] } });
+      log('info', `Croquis: ${totalOS} OS total, ${comCroqui} com croquiBase64, ${comCroquiOtimizado} com croquiOtimizado`);
+
+      const osList = await OS.find(
+        { $or: [
+          { 'pontos.croquiBase64': { $exists: true, $nin: [null, ''] } },
+          { 'pontos.croquiOtimizado': { $exists: true, $nin: [null, ''] } },
+        ] },
+        {
+          numero: 1, cliente: 1, endereco: 1, bairro: 1, cidade: 1,
+          status: 1, tipo: 1, equipeNome: 1, dataInicio: 1, createdAt: 1,
+          'pontos.nome': 1,
+          'pontos.croquiBase64': 1,
+          'pontos.croquiOtimizado': 1,
+          'pontos.updatedAt': 1,
+        }
+      ).lean();
+
+      log('info', `Croquis: ${osList.length} OS retornadas pelo find`);
+
+      for (const os of osList) {
+        (os.pontos || []).forEach((p, idx) => {
+          const imagem = p.croquiOtimizado || p.croquiBase64;
+          if (!imagem) return;
+          if (typeof imagem === 'string' && (imagem.includes('IMAGEM_MUITO_GRANDE') || imagem.length < 50)) return;
+          result.push({
+            osId:       os._id,
+            osNumero:   os.numero,
+            osCliente:  os.cliente,
+            osEndereco: os.endereco,
+            osBairro:   os.bairro   || '',
+            osCidade:   os.cidade   || '',
+            osStatus:   os.status,
+            osTipo:     os.tipo || 'normal',
+            osEquipe:   os.equipeNome || '',
+            osData:     os.dataInicio || os.createdAt || 0,
+            pontoIdx:   idx,
+            pontoNome:  p.nome || `Local ${idx + 1}`,
+            imagem,
+            otimizado:  !!p.croquiOtimizado,
+            updatedAt:  p.updatedAt || 0,
+          });
         });
-      });
+      }
+
+      log('info', `Croquis: ${result.length} croquis encontrados`);
+    } else {
+      // memStore fallback — also check for croquiOtimizado
+      for (const os of memStore.ordens) {
+        (os.pontos || []).forEach((p, idx) => {
+          const imagem = p.croquiOtimizado || p.croquiBase64;
+          if (!imagem) return;
+          result.push({
+            osId: os._id, osNumero: os.numero, osCliente: os.cliente,
+            osEndereco: os.endereco, osBairro: os.bairro || '', osCidade: os.cidade || '',
+            osStatus: os.status, osTipo: os.tipo || 'normal', osEquipe: os.equipeNome || '',
+            osData: os.dataInicio || os.createdAt || 0, pontoIdx: idx,
+            pontoNome: p.nome || `Local ${idx + 1}`, imagem,
+            otimizado: !!p.croquiOtimizado, updatedAt: p.updatedAt || 0,
+          });
+        });
+      }
     }
+
     // ordenar do mais recente para o mais antigo
-    result.sort((a, b) => b.updatedAt - a.updatedAt);
+    result.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    // Cache-Control: no-store para evitar que o browser sirva resposta antiga
+    res.set('Cache-Control', 'no-store');
     res.json(result);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -4000,11 +5171,21 @@ app.patch('/api/aplicador/os/:id/pontos/:idx', async (req, res) => {
       p.statusLocal = 'em_andamento';
       p.status = 'em_andamento';
     } else if (action === 'save_croqui') {
-      const { croquiBase64 } = req.body;
+      const { croquiBase64, otimizado } = req.body;
       if (!croquiBase64) return res.status(400).json({ error: 'croquiBase64 required' });
       const safeCroqui = sanitizeImages({ croquiBase64 }, `ponto[${idx}].croquiBase64`);
+      if (safeCroqui.croquiBase64 && safeCroqui.croquiBase64.includes('IMAGEM_MUITO_GRANDE')) {
+        log('warn', `Croqui rejeitado por tamanho excessivo — OS ${req.params.id} ponto ${idx}`);
+        return res.status(400).json({ error: 'Imagem muito grande. Tente limpar parte do desenho ou use qualidade menor.' });
+      }
       p.croquiBase64 = safeCroqui.croquiBase64;
-      p.croquiStatus = 'manual';
+      p.croquiStatus = otimizado ? 'ia' : 'manual';
+      if (otimizado) {
+        p.croquiOtimizado = safeCroqui.croquiBase64;
+      } else {
+        p.croquiOtimizado = null; // limpa versão IA antiga ao salvar manualmente
+      }
+      log('info', `save_croqui: OS ${req.params.id} ponto ${idx} salvo (${Math.round((safeCroqui.croquiBase64?.length||0)*0.75/1024)}KB, otimizado=${!!otimizado})`);
     } else {
       return res.status(400).json({ error: 'action invalida' });
     }
@@ -4047,7 +5228,11 @@ app.get('/api/lixeira', auth, adminOnly, async (req, res) => {
   try {
     await connectDB();
     if (isConnected) {
-      const itens = await Lixeira.find().sort({ deletadoEm: -1 }).lean();
+      // Exclui o campo `dados` (base64 pesado) da listagem — só carrega ao restaurar
+      const itens = await Lixeira.find({}, { dados: 0 })
+        .sort({ deletadoEm: -1 })
+        .allowDiskUse(true)
+        .lean();
       return res.json(itens);
     }
     res.json([...memStore.lixeira].sort((a, b) => b.deletadoEm - a.deletadoEm));
@@ -4217,11 +5402,15 @@ app.get('/api/equipes/ranking', auth, async (req, res) => {
       const eqId = String(eq._id || eq.id);
       // OS que a equipe está executando (obras normais — exclui reparos para evitar dupla penalização)
       const osEquipe = osList.filter(o => String(o.equipeId) === eqId && o.tipo !== 'reparo');
-      // Reparos causados pela equipe (onde ela foi a executora do serviço original)
+      // Reparos causados pela equipe (obras anteriores desta equipe que geraram reparo)
       const reparosCausados = osList.filter(o => o.tipo === 'reparo' && String(o.equipeOriginalId) === eqId).length;
-      // Reparos em execução pela equipe (ela está consertando — não penaliza)
-      const reparosEmExecucao = osList.filter(o => o.tipo === 'reparo' && String(o.equipeId) === eqId).length;
+      // Reparos executados pela equipe (ela conserta — serviço extra prestado)
+      const reparosProprios = osList.filter(o => o.tipo === 'reparo' && String(o.equipeId) === eqId).length;
+
       let subFeitos = 0, metragem = 0, consumoEstim = 0, consumoReal = 0;
+      let scoreProduto = 0, scoreTempo = 0;
+      let diasPlanejados = 0, diasAtivosTotal = 0, osComProduto = 0, osComTempo = 0;
+
       osEquipe.forEach(os => {
         const pts = ensureSubPontos(os.pontos || []);
         pts.forEach(p => {
@@ -4230,16 +5419,60 @@ app.get('/api/equipes/ranking', auth, async (req, res) => {
         });
         consumoEstim += os.consumoProduto || 0;
         consumoReal  += os.totalConsumoReal || 0;
+
+        // ── Eficiência de produto (só OS com estimativa) ──
+        if ((os.consumoProduto || 0) > 0) {
+          osComProduto++;
+          const ratio = (os.totalConsumoReal || 0) / os.consumoProduto;
+          if      (ratio <= 0.80) scoreProduto += 15;   // usou ≤80% — ótimo
+          else if (ratio <= 0.90) scoreProduto += 10;   // usou 80-90%
+          else if (ratio <= 1.00) scoreProduto += 5;    // usou 90-100% — no alvo
+          else if (ratio <= 1.10) scoreProduto += 0;    // até 10% acima — tolerado
+          else if (ratio <= 1.30) scoreProduto -= 5;    // 10-30% acima — atenção
+          else                    scoreProduto -= 10;   // >30% acima — desperdício
+        }
+
+        // ── Eficiência de tempo (só OS concluídas com dados) ──
+        const planejados = os.diasTrabalho || 0;
+        const agendados  = (os.diasAtivos  || []).length;
+        if (os.status === 'concluida' && planejados > 0 && agendados > 0) {
+          osComTempo++;
+          diasPlanejados  += planejados;
+          diasAtivosTotal += agendados;
+          const ratio = agendados / planejados;
+          if      (ratio <= 0.80) scoreTempo += 10;   // terminou ≥20% antes do prazo
+          else if (ratio <= 0.90) scoreTempo += 5;    // terminou 10-20% antes
+          else if (ratio <= 1.10) scoreTempo += 2;    // dentro da margem ±10%
+          else if (ratio <= 1.50) scoreTempo -= 3;    // 10-50% além do prazo
+          else                    scoreTempo -= 8;    // >50% além do prazo
+        }
       });
-      // Obras concluídas vs total
+
       const obrasExecutadas = osEquipe.filter(o => o.status === 'concluida').length;
-      // Reparos próprios (equipe executa reparo de outra equipe = serviço extra prestado)
-      const reparosProprios = reparosEmExecucao;
-      // Score melhorado: +10 por obra concluída, +2 por sub-ponto, +1 por metro, -5 por reparo CAUSADO, +3 por reparo próprio executado, ±variação consumo
-      const varConsumo = consumoEstim > 0 ? Math.abs((consumoReal - consumoEstim) / consumoEstim) : 0;
-      const bonusConsumo = varConsumo < 0.1 ? 5 : varConsumo < 0.2 ? 2 : 0;
-      const score = (obrasExecutadas * 10) + (subFeitos * 2) + Math.round(metragem) + (reparosCausados * -5) + (reparosProprios * 3) + bonusConsumo;
-      return { equipeId: eqId, equipeNome: eq.nome, cor: eq.cor, totalOS: osEquipe.length, obrasExecutadas, subFeitos, metragem: Math.round(metragem * 10) / 10, reparosCausados, reparosEmExecucao, reparosProprios, consumoEstim, consumoReal, score };
+
+      // ── Cálculo do score ──────────────────────────────────────────────────
+      // Base: obras concluídas + sub-itens + metragem
+      const scoreBase    = (obrasExecutadas * 10) + subFeitos + Math.round(metragem * 0.5);
+      // Produto: eficiência de uso do GVF Seal (pode ser + ou -)
+      const sProduto     = Math.round(scoreProduto);
+      // Tempo: eficiência de execução (pode ser + ou -)
+      const sTempo       = Math.round(scoreTempo);
+      // Reparos: causados = penalidade; executados = bônus
+      const sReparos     = (reparosCausados * -8) + (reparosProprios * 3);
+
+      const score = scoreBase + sProduto + sTempo + sReparos;
+
+      return {
+        equipeId: eqId, equipeNome: eq.nome, cor: eq.cor,
+        totalOS: osEquipe.length, obrasExecutadas, subFeitos,
+        metragem: Math.round(metragem * 10) / 10,
+        reparosCausados, reparosProprios,
+        consumoEstim: parseFloat(consumoEstim.toFixed(1)),
+        consumoReal:  parseFloat(consumoReal.toFixed(1)),
+        diasPlanejados, diasAtivosTotal, osComProduto, osComTempo,
+        scoreBreakdown: { base: scoreBase, produto: sProduto, tempo: sTempo, reparos: sReparos },
+        score,
+      };
     });
 
     ranking.sort((a, b) => b.score - a.score);
@@ -4307,6 +5540,25 @@ app.post('/api/reparos/from-os', auth, async (req, res) => {
       pontosReparo = pontosOriginal.map((p, i) => resetPonto(p, i));
     }
 
+    // Estimar consumo de GVF Seal a partir dos subPontos selecionados do reparo
+    // (os campos p.trinca/juntaFria etc. podem estar zerados no ponto da OS;
+    //  os valores reais ficam em subPontos[].valor + subPontos[].tipo)
+    const CONSUMO_POR_TIPO = { trinca: 1.5, juntaDilat: 2.0, juntaFria: 1.0, ralo: 1.0, cortina: 2.0 };
+    const consumoEstimadoReparo = pontosReparo.reduce((total, p) => {
+      const subs = p.subPontos || [];
+      if (subs.length > 0) {
+        // Calcula pelo subPontos filtrados (reflete os itens selecionados para o reparo)
+        return total + subs.reduce((s, sp) => s + (sp.valor || 0) * (CONSUMO_POR_TIPO[sp.tipo] || 0), 0);
+      }
+      // Fallback: usa campos diretos do ponto (compatibilidade com dados antigos)
+      const trinca     = Number(p.trinca)    || 0;
+      const juntaFria  = Number(p.juntaFria) || 0;
+      const juntaDilat = Number(p.juntaDilat)|| 0;
+      const ralo       = Number(p.ralo)      || 0;
+      const cortina    = Number(p.cortina)   || 0;
+      return total + trinca * 1.5 + juntaDilat * 2.0 + juntaFria * 1.0 + ralo * 1.0 + cortina * 2.0;
+    }, 0);
+
     const count = isConnected ? await OS.countDocuments() : memStore.ordens.length;
     const novaOS = {
       _id: uuidv4(),
@@ -4329,7 +5581,7 @@ app.post('/api/reparos/from-os', auth, async (req, res) => {
       obs: obs || '',
       fotosReparo: Array.isArray(fotosReparo) ? fotosReparo.map(f => ({ data: f })) : [],
       progresso: 0,
-      consumoProduto: 0,
+      consumoProduto: parseFloat(consumoEstimadoReparo.toFixed(1)),
       totalConsumoReal: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -4366,42 +5618,134 @@ app.delete('/api/ordens-servico/:id', auth, adminOnly, async (req, res) => {
 
 app.post('/api/croqui/otimizar', async (req, res) => {
   try {
-    const { imagem } = req.body;
+    const { imagem, canvasW, canvasH } = req.body;
     if (!imagem) return res.status(400).json({ error: 'imagem required' });
+    // Proporções reais do canvas do cliente (para o viewBox do SVG)
+    const vW = canvasW || 1000;
+    const vH = canvasH || 1000;
 
     const GEMINI_KEY = (process.env.GEMINI_API_KEY || '').trim();
     if (!GEMINI_KEY) {
-      return res.json({ imagemOtimizada: imagem, fonte: 'original', aviso: 'Configure GEMINI_API_KEY para usar a otimização de croqui' });
+      return res.json({ fallback: true, aviso: 'Configure GEMINI_API_KEY para usar a otimização de croqui' });
     }
 
-    // Use Gemini 2.0 Flash image generation via REST
-    const prompt = 'Transforme este croqui de planta baixa em um desenho técnico limpo e apresentável de impermeabilização. Mantenha proporções, labels e referências. Fundo branco, linhas pretas, estilo planta baixa técnica arquitetônica.';
+    const imgBase64 = imagem.replace(/^data:image\/\w+;base64,/, '');
+    const mimeType  = imagem.startsWith('data:image/jpeg') ? 'image/jpeg' : 'image/png';
 
-    const body = {
-      contents: [{
-        parts: [
-          { text: prompt },
-          { inline_data: { mime_type: 'image/png', data: imagem.replace(/^data:image\/\w+;base64,/, '') } }
-        ]
-      }],
-      generationConfig: { responseModalities: ['IMAGE', 'TEXT'] }
+    // Helper: extrai e normaliza SVG de texto retornado pelo Gemini
+    const extractSvg = (rawText) => {
+      const cleaned = rawText
+        .replace(/```[\w]*\n?/g, '').replace(/```/g, '')  // remove fences markdown
+        .trim();
+      const m = cleaned.match(/<svg[\s\S]*?<\/svg>/i);
+      if (!m) return null;
+      let svg = m[0];
+      // Garante namespace xmlns obrigatório para renderizar como <img>
+      if (!svg.includes('xmlns=')) {
+        svg = svg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+      }
+      return svg;
     };
 
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${GEMINI_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+    // ── Estratégia primária: SVG vetorial via texto ───────────────────────────
+    // gemini-2.0-flash e gemini-1.5-flash suportam visão + saída de texto.
+    // Pedimos um SVG limpo: linhas retas, círculos perfeitos, retângulos com 90°.
+    const svgPrompt = `You are an expert technical drawing vectorizer specializing in waterproofing and construction floor plans.
+Your task: convert this hand-drawn sketch into a CLEAN, PRECISE, PROFESSIONAL SVG technical drawing.
+
+CRITICAL OUTPUT RULES:
+- Output ONLY the raw SVG. Zero markdown, zero explanation, zero fences.
+- First line of response must be: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vW} ${vH}">
+- Last line must be: </svg>
+- The SVG canvas is ${vW}×${vH} pixels — use this exact coordinate space.
+
+DRAWING IMPROVEMENT RULES (apply aggressively):
+1. LINES: Any line that looks approximately straight → make it PERFECTLY straight using <line x1 y1 x2 y2>. Snap endpoints to grid (multiples of 5px).
+2. RECTANGLES: Any roughly rectangular shape → perfect <rect> with exact 90° corners.
+3. CIRCLES/DRAINS (ralos): Any roughly circular shape → perfect <circle> with exact radius. Drains should be a circle with a smaller concentric circle inside (stroke only).
+4. PARALLEL WALLS: If two lines appear parallel → make them exactly parallel, same length.
+5. PERPENDICULAR: Walls meeting at ~90° → snap to exactly 90°.
+6. SYMMETRY: If something looks symmetric → make it perfectly symmetric.
+7. ALIGNMENT: Elements that appear to be on the same horizontal/vertical line → snap them to the same coordinate.
+8. TEXT: Preserve ALL text labels exactly as written. Use <text font-family="Arial" font-size="18" text-anchor="middle">.
+9. SYMBOLS:
+   - Drain (ralo): <circle> + smaller concentric <circle>
+   - Crack (trinca): <line stroke-dasharray="4,3">
+   - Cold joint (junta fria): <line stroke-dasharray="8,4">
+   - Expansion joint (junta dilatação): <line stroke-width="4">
+
+STYLE:
+- Background: <rect width="${vW}" height="${vH}" fill="white"/>
+- Default: stroke="black" stroke-width="2" fill="none"
+- Wall lines: stroke-width="2.5"
+- All coordinates within 0–${vW} (x) and 0–${vH} (y), preserving original proportions exactly
+
+The result must look like a professional CAD drawing, NOT hand-drawn.`;
+
+    const svgReqBody = {
+      contents: [{ parts: [
+        { text: svgPrompt },
+        { inline_data: { mime_type: mimeType, data: imgBase64 } }
+      ]}]
+    };
+
+    const SVG_MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash-latest'];
+    let svgErr = null;
+    for (const model of SVG_MODELS) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
+        const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(svgReqBody) });
+        const data = await resp.json();
+        if (!resp.ok) { svgErr = `[${model}] ${data.error?.message || `HTTP ${resp.status}`}`; continue; }
+        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const svg = extractSvg(rawText);
+        if (!svg) { svgErr = `[${model}] resposta sem SVG válido (raw: ${rawText.slice(0,120)})`; continue; }
+        log('info', `Croqui vetorizado via ${model} (SVG)`);
+        return res.json({ svg, fonte: 'gemini-svg', modelo: model });
+      } catch (e) { svgErr = `[${model}] ${e.message}`; }
+    }
+
+    // ── Estratégia secundária: image-generation (se disponível) ──────────────
+    const imgPrompt = `Redraw this hand-drawn floor plan as a clean technical drawing.
+- Straighten all lines meant to be straight
+- Perfect circles for drains/round elements
+- Perfect 90° rectangles for rooms
+- Keep all labels exactly as written
+- White background, crisp black lines, no shading
+- Same layout and proportions`;
+
+    const makeImgBody = (modalities) => ({
+      contents: [{ parts: [
+        { text: imgPrompt },
+        { inline_data: { mime_type: mimeType, data: imgBase64 } }
+      ]}],
+      generationConfig: { responseModalities: modalities }
     });
 
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error?.message || 'Gemini error');
+    const IMG_ATTEMPTS = [
+      { apiVer: 'v1beta',  model: 'gemini-2.0-flash-exp-image-generation' },
+      { apiVer: 'v1alpha', model: 'gemini-2.0-flash-exp-image-generation' },
+      { apiVer: 'v1beta',  model: 'gemini-2.0-flash-exp' },
+      { apiVer: 'v1alpha', model: 'gemini-2.0-flash-exp' },
+    ];
+    let imgErr = null;
+    for (const { apiVer, model } of IMG_ATTEMPTS) {
+      try {
+        const url  = `https://generativelanguage.googleapis.com/${apiVer}/models/${model}:generateContent?key=${GEMINI_KEY}`;
+        const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(makeImgBody(['IMAGE','TEXT'])) });
+        const data = await resp.json();
+        if (!resp.ok) { imgErr = `[${apiVer}/${model}] ${data.error?.message || `HTTP ${resp.status}`}`; continue; }
+        const parts   = data.candidates?.[0]?.content?.parts || [];
+        const imgPart = parts.find(p => p.inlineData?.mimeType?.startsWith('image/'));
+        if (!imgPart) { imgErr = `[${apiVer}/${model}] resposta sem imagem`; continue; }
+        log('info', `Croqui otimizado via ${apiVer}/${model} (imagem)`);
+        return res.json({ imagemOtimizada: imgPart.inlineData.data, fonte: 'gemini', modelo: model });
+      } catch (e) { imgErr = `[${model}] ${e.message}`; }
+    }
 
-    // Extract image from response
-    const parts = data.candidates?.[0]?.content?.parts || [];
-    const imgPart = parts.find(p => p.inlineData?.mimeType?.startsWith('image/'));
-    if (!imgPart) throw new Error('Gemini não retornou imagem');
-
-    return res.json({ imagemOtimizada: imgPart.inlineData.data, fonte: 'gemini' });
+    // ── Fallback local (informar ao cliente) ─────────────────────────────────
+    log('warn', `SVG: ${svgErr} | IMG: ${imgErr}. Usando fallback local.`);
+    return res.json({ fallback: true, aviso: svgErr || imgErr || 'Gemini indisponível' });
   } catch (err) {
     console.error('Croqui otimizar error:', err.message);
     res.status(500).json({ error: err.message });
@@ -4499,6 +5843,276 @@ app.get('/api/produtos/dashboard', auth, async (req, res) => {
       compras,
       alertaBaixoEstoque: saldoAtual < 100
     });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Garantias Standalone (from OS) ───────────────────────────────────────────
+
+// IMPORTANTE: /api/garantias/from-os DEVE ficar ANTES de /api/garantias/:id
+app.get('/api/garantias', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const contratos  = isConnected ? await Contrato.find().sort({ numero: -1 }).lean() : (memStore.contratos || []);
+    const garantias  = isConnected ? await GarantiaDoc.find().sort({ criadoEm: -1 }).lean() : [];
+    const result = [
+      ...contratos.map(c => ({ ...c, id: String(c._id), source: 'contrato' })),
+      ...garantias.map(g => ({ ...g, id: String(g._id), source: 'garantia' }))
+    ].sort((a, b) => new Date(b.criadoEm || b.dataInicio || 0) - new Date(a.criadoEm || a.dataInicio || 0));
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/garantias/from-os', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const { osIds } = req.body;
+    if (!Array.isArray(osIds) || osIds.length === 0) return res.status(400).json({ error: 'osIds required' });
+    const created = [];
+    for (const osId of osIds) {
+      if (!isConnected) continue;
+      const os = await OS.findById(osId).lean();
+      if (!os) continue;
+      // Evitar duplicatas
+      const exists = await GarantiaDoc.findOne({ osId: os._id }).lean();
+      if (exists) { created.push({ ...exists, id: String(exists._id), source: 'garantia' }); continue; }
+      const g = new GarantiaDoc({
+        osId:         os._id,
+        cliente:      os.cliente || '',
+        razaoSocial:  os.cliente || '',
+        endereco:     os.endereco || '',
+        bairro:       os.bairro  || '',
+        cidade:       os.cidade  || '',
+        cep:          os.cep     || '',
+        garantia:     Number(os.garantia) || 15,
+        totalLiquido: os.valorTotal || 0,
+        dataInicio:   os.dataInicio,
+        dataTermino:  os.dataTermino
+      });
+      await g.save();
+      created.push({ ...g.toObject(), id: String(g._id), source: 'garantia' });
+    }
+    res.json(created);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/garantias/:id', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const { _id, id, __v, source, osId, ...rest } = req.body;
+    const g = await GarantiaDoc.findByIdAndUpdate(req.params.id, { $set: rest }, { new: true, strict: false });
+    if (!g) return res.status(404).json({ error: 'Not found' });
+    res.json({ ...g.toObject(), id: String(g._id), source: 'garantia' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/garantias/:id', auth, async (req, res) => {
+  try {
+    await connectDB();
+    await GarantiaDoc.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/garantias/:id/marcar-enviada', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const ts = Date.now();
+    const g = await GarantiaDoc.findByIdAndUpdate(req.params.id, { garantiaEnviadaEm: ts }, { new: true });
+    if (!g) return res.status(404).json({ error: 'Not found' });
+    res.json({ ...g.toObject(), id: String(g._id), source: 'garantia' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/garantias/:id/pdf', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1] || req.query.token;
+  if (!token) return res.status(401).json({ error: 'Token required' });
+  try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); } catch { return res.status(401).json({ error: 'Invalid token' }); }
+  try {
+    await connectDB();
+    const g = isConnected ? await GarantiaDoc.findById(req.params.id).lean() : null;
+    if (!g) return res.status(404).json({ error: 'Not found' });
+
+    let osPontos = [];
+    if (g.osId) {
+      try {
+        const os = await OS.findById(g.osId).lean();
+        if (os && os.pontos) {
+          osPontos = os.pontos; // inclui todos os pontos — fotos e croquis filtrados dentro de buildGarantiaPdfHtml
+        }
+      } catch {}
+    }
+
+    const cLike = { ...g, locais: g.locais || [] };
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(buildGarantiaPdfHtml(cLike, osPontos));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Injetores / Estoque ───────────────────────────────────────────────────────
+app.get('/api/produtos/injetores/compras', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const compras = await CompraInjetor.find().sort({ data: -1 }).lean();
+    res.json(compras);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/produtos/injetores/compras', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const { data, quantidade, fornecedor, notaFiscal, obs } = req.body;
+    if (!quantidade || isNaN(parseInt(quantidade))) return res.status(400).json({ error: 'Informe a quantidade' });
+    const compra = new CompraInjetor({
+      data: data ? new Date(data) : new Date(),
+      quantidade: parseInt(quantidade),
+      fornecedor: fornecedor || '',
+      notaFiscal: notaFiscal || '',
+      obs: obs || ''
+    });
+    await compra.save();
+    res.json(compra);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/produtos/injetores/compras/:id', auth, async (req, res) => {
+  try {
+    await connectDB();
+    await CompraInjetor.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/produtos/injetores/dashboard', auth, async (req, res) => {
+  try {
+    await connectDB();
+    // 1) Total comprado
+    const compras = await CompraInjetor.find().sort({ data: 1 }).lean();
+    const totalComprado = compras.reduce((s, c) => s + (c.quantidade || 0), 0);
+
+    // 2) Consumo de todas as OSes (fechamentosDia[].injetores)
+    const todasOS = await OS.find({}, { equipeNome: 1, tipo: 1, numOS: 1, cliente: 1, status: 1, fechamentosDia: 1 }).lean();
+
+    let totalGasto = 0;
+    const porEquipe = {};
+    let gastoObras = 0;
+    let gastoReparos = 0;
+    const osConsumo = [];
+
+    todasOS.forEach(os => {
+      const fechamentos = os.fechamentosDia || [];
+      const totalOS = fechamentos.reduce((s, f) => s + (f.injetores || 0), 0);
+      if (totalOS === 0) return;
+
+      totalGasto += totalOS;
+
+      const equipe = os.equipeNome || 'Sem equipe';
+      porEquipe[equipe] = (porEquipe[equipe] || 0) + totalOS;
+
+      if (os.tipo === 'reparo') gastoReparos += totalOS;
+      else gastoObras += totalOS;
+
+      osConsumo.push({
+        id: os._id,
+        numOS: os.numOS || '',
+        cliente: os.cliente || '',
+        tipo: os.tipo || 'normal',
+        equipeNome: os.equipeNome || '',
+        status: os.status || '',
+        unidades: totalOS
+      });
+    });
+
+    const topOS = osConsumo.sort((a, b) => b.unidades - a.unidades).slice(0, 10);
+    const gastoPorEquipe = Object.entries(porEquipe)
+      .map(([equipeNome, unidades]) => ({ equipeNome, unidades }))
+      .sort((a, b) => b.unidades - a.unidades);
+
+    const saldoAtual = totalComprado - totalGasto;
+
+    res.json({
+      totalComprado,
+      totalGasto,
+      saldoAtual,
+      gastoObras,
+      gastoReparos,
+      gastoPorEquipe,
+      topOS,
+      compras,
+      alertaBaixoEstoque: saldoAtual < 150
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Estoque por Equipe / Semana (painel — auth) ───────────────────────────────
+app.get('/api/estoque-equipes', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const semana = req.query.semana || getISOWeekStr(new Date());
+    const { start, end } = getWeekDateRange(semana);
+    const equipes = await Equipe.find().lean();
+    const estoques = await EstoqueEquipeSemana.find({ semana }).lean();
+    // calc consumido from fechamentosDia across all OSes for that week per equipe
+    const todasOS = await OS.find({}, 'equipeId fechamentosDia').lean();
+    const consumidoPorEquipe = {};
+    for (const os of todasOS) {
+      for (const f of (os.fechamentosDia || [])) {
+        if (os.equipeId && f.data >= start && f.data <= end) {
+          consumidoPorEquipe[os.equipeId] = (consumidoPorEquipe[os.equipeId] || 0) + (f.litros || 0);
+        }
+      }
+    }
+    const result = equipes.map(eq => {
+      const est = estoques.find(e => e.equipeId === eq._id) || {};
+      const recebido = est.recebido || 0;
+      const consumido = Math.round((consumidoPorEquipe[eq._id] || 0) * 10) / 10;
+      return {
+        equipeId: eq._id,
+        equipeNome: eq.nome,
+        semana,
+        recebido,
+        consumido,
+        restante: Math.max(0, Math.round((recebido - consumido) * 10) / 10)
+      };
+    });
+    res.json({ semana, semanaRange: { start, end }, equipes: result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/estoque-equipes/:equipeId', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const { semana, recebido } = req.body;
+    if (!semana || recebido == null) return res.status(400).json({ error: 'semana e recebido obrigatórios' });
+    const equipe = await Equipe.findById(req.params.equipeId).lean();
+    if (!equipe) return res.status(404).json({ error: 'Equipe não encontrada' });
+    await EstoqueEquipeSemana.findOneAndUpdate(
+      { equipeId: req.params.equipeId, semana },
+      { equipeId: req.params.equipeId, equipeNome: equipe.nome, semana, recebido: parseFloat(recebido), updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Lançar estoque recebido (aplicador — sem auth JWT) ────────────────────────
+app.post('/api/aplicador/estoque-recebido', async (req, res) => {
+  try {
+    await connectDB();
+    const { equipeId, litros, semana } = req.body;
+    if (!equipeId || !litros || isNaN(parseFloat(litros))) {
+      return res.status(400).json({ error: 'equipeId e litros obrigatórios' });
+    }
+    const semanaStr = semana || getISOWeekStr(new Date());
+    const equipe = await Equipe.findById(equipeId).lean();
+    const equipeNome = equipe ? equipe.nome : '';
+    const current = await EstoqueEquipeSemana.findOne({ equipeId, semana: semanaStr }).lean();
+    const novoRecebido = Math.round(((current?.recebido || 0) + parseFloat(litros)) * 10) / 10;
+    await EstoqueEquipeSemana.findOneAndUpdate(
+      { equipeId, semana: semanaStr },
+      { equipeId, equipeNome, semana: semanaStr, recebido: novoRecebido, updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, recebido: novoRecebido, semana: semanaStr });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

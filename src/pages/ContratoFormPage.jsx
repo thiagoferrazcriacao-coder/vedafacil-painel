@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../api/client.js'
 
 const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
@@ -11,6 +11,11 @@ function Field({ label, children }) {
       {children}
     </div>
   )
+}
+
+// Helper to apply read-only styles to an input className
+function roClass(base, isView) {
+  return base + (isView ? ' bg-gray-50 cursor-default pointer-events-none select-text' : '')
 }
 
 // Adiciona N dias a uma string 'YYYY-MM-DD'
@@ -54,12 +59,14 @@ function generateParcelas(n, valor, firstDate) {
 export default function ContratoFormPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const [c, setC] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
   const [uploadingArquivo, setUploadingArquivo] = useState(false)
+  const [viewMode, setViewMode] = useState(() => new URLSearchParams(location.search).get('view') === '1')
 
   useEffect(() => {
     api.getContrato(id)
@@ -216,10 +223,27 @@ export default function ContratoFormPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-5xl mx-auto pb-24">
+      {/* View mode banner */}
+      {viewMode && (
+        <div className="mb-4 flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+          <span className="text-indigo-500 text-lg">🔍</span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-indigo-800">Modo de Visualização</p>
+            <p className="text-xs text-indigo-600">Você está analisando este contrato. Para fazer alterações, clique em "Editar Contrato".</p>
+          </div>
+          <button
+            onClick={() => setViewMode(false)}
+            className="flex items-center gap-2 bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-indigo-700 transition-colors"
+          >
+            ✏️ Editar Contrato
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <button onClick={() => navigate('/contratos')} className="btn-secondary">
-          Voltar
+          ← Voltar
         </button>
         <div className="flex-1">
           <h1 className="text-xl font-bold text-gray-800">
@@ -227,12 +251,13 @@ export default function ContratoFormPage() {
           </h1>
           <div className="flex items-center gap-2 mt-0.5">
             <span className={`badge ${statusColor}`}>{statusLabel}</span>
-            {saved && <span className="text-green-600 text-xs">Salvo</span>}
+            {viewMode && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">visualização</span>}
+            {!viewMode && saved && <span className="text-green-600 text-xs">✓ Salvo</span>}
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {/* Status buttons */}
-          {[
+          {/* Status buttons — hidden in view mode */}
+          {!viewMode && [
             { key: 'rascunho', label: '📝 Rascunho', active: 'bg-gray-600 text-white border-gray-600', inactive: 'border border-gray-300 text-gray-600 bg-white hover:bg-gray-50' },
             { key: 'pendente_assinatura', label: '⏳ Pend. Assinatura', active: 'bg-orange-600 text-white border-orange-600', inactive: 'border border-orange-300 text-orange-600 bg-white hover:bg-orange-50' },
             { key: 'assinado', label: '✅ Assinado', active: 'bg-green-600 text-white border-green-600', inactive: 'border border-green-300 text-green-600 bg-white hover:bg-green-50' },
@@ -245,10 +270,20 @@ export default function ContratoFormPage() {
               {btn.label}
             </button>
           ))}
-          <div className="w-px bg-gray-200 mx-1 self-stretch" />
-          <button onClick={handleSave} disabled={saving} className="btn-secondary">
-            {saving ? 'Salvando...' : 'Salvar'}
-          </button>
+          {!viewMode && <div className="w-px bg-gray-200 mx-1 self-stretch" />}
+          {!viewMode && (
+            <button onClick={handleSave} disabled={saving} className="btn-secondary">
+              {saving ? 'Salvando...' : 'Salvar'}
+            </button>
+          )}
+          {viewMode && (
+            <button
+              onClick={() => setViewMode(false)}
+              className="flex items-center gap-1.5 bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-indigo-700 transition-colors"
+            >
+              ✏️ Editar
+            </button>
+          )}
           <button
             onClick={() => window.open(api.getContratoPdfUrl(id), '_blank')}
             className="btn-secondary"
@@ -266,6 +301,12 @@ export default function ContratoFormPage() {
             className="btn-secondary"
           >
             ART
+          </button>
+          <button
+            onClick={() => navigate(`/ordens-servico?contratoId=${id}`)}
+            className="bg-blue-50 text-blue-700 border border-blue-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-100 transition-colors"
+          >
+            📋 OS
           </button>
           <button
             onClick={() => navigate(`/ordens-servico?contratoId=${id}&tipo=reparo`)}
@@ -288,48 +329,48 @@ export default function ContratoFormPage() {
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <Field label="Razão Social">
-            <input className="input" value={c.razaoSocial || ''} onChange={update('razaoSocial')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.razaoSocial || ''} onChange={update('razaoSocial')} />
           </Field>
           <Field label="Nome do Condomínio">
-            <input className="input" value={c.cliente || ''} onChange={update('cliente')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.cliente || ''} onChange={update('cliente')} />
           </Field>
           <Field label="Síndico / Responsável">
-            <input className="input" value={c.sindico || ''} onChange={update('sindico')} placeholder={c.ac || ''} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.sindico || ''} onChange={update('sindico')} placeholder={c.ac || ''} />
           </Field>
           <Field label="AC (Responsável)">
-            <input className="input" value={c.ac || ''} onChange={update('ac')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.ac || ''} onChange={update('ac')} />
           </Field>
           <Field label="Celular">
-            <input className="input" value={c.celular || ''} onChange={update('celular')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.celular || ''} onChange={update('celular')} />
           </Field>
           <Field label="E-mail do Signatário">
-            <input className="input" type="email" value={c.emailCliente || ''} onChange={update('emailCliente')} placeholder="email@cliente.com.br" />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} type="email" value={c.emailCliente || ''} onChange={update('emailCliente')} placeholder="email@cliente.com.br" />
           </Field>
           <Field label="CNPJ do Cliente">
-            <input className="input" value={c.cnpjCliente || ''} onChange={update('cnpjCliente')} placeholder="00.000.000/0001-00" />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.cnpjCliente || ''} onChange={update('cnpjCliente')} placeholder="00.000.000/0001-00" />
           </Field>
           <Field label="CPF do Responsável">
-            <input className="input" value={c.cpfResponsavel || ''} onChange={update('cpfResponsavel')} placeholder="000.000.000-00" />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.cpfResponsavel || ''} onChange={update('cpfResponsavel')} placeholder="000.000.000-00" />
           </Field>
           <Field label="RG do Responsável">
-            <input className="input" value={c.rgResponsavel || ''} onChange={update('rgResponsavel')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.rgResponsavel || ''} onChange={update('rgResponsavel')} />
           </Field>
           <Field label="Inscrição Estadual">
-            <input className="input" value={c.ie || ''} onChange={update('ie')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.ie || ''} onChange={update('ie')} />
           </Field>
           <div className="md:col-span-2">
             <Field label="Endereço">
-              <input className="input" value={c.endereco || ''} onChange={update('endereco')} />
+              <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.endereco || ''} onChange={update('endereco')} />
             </Field>
           </div>
           <Field label="Bairro">
-            <input className="input" value={c.bairro || ''} onChange={update('bairro')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.bairro || ''} onChange={update('bairro')} />
           </Field>
           <Field label="Cidade">
-            <input className="input" value={c.cidade || ''} onChange={update('cidade')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.cidade || ''} onChange={update('cidade')} />
           </Field>
           <Field label="CEP">
-            <input className="input" value={c.cep || ''} onChange={update('cep')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.cep || ''} onChange={update('cep')} />
           </Field>
         </div>
       </section>
@@ -342,10 +383,10 @@ export default function ContratoFormPage() {
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Field label="Data de Assinatura">
-            <input className="input" type="date" value={c.dataAssinatura || ''} onChange={update('dataAssinatura')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} type="date" value={c.dataAssinatura || ''} onChange={update('dataAssinatura')} />
           </Field>
           <Field label="Data de Início">
-            <input className="input" type="date" value={c.dataInicio || ''} onChange={e => {
+            <input className={roClass('input', viewMode)} readOnly={viewMode} type="date" value={c.dataInicio || ''} onChange={e => {
               const inicio = e.target.value
               const prazo = Number(c.prazoExecucao) || 0
               const termino = prazo > 0 ? addBusinessDays(inicio, prazo) : (c.dataTermino || '')
@@ -354,7 +395,7 @@ export default function ContratoFormPage() {
             }} />
           </Field>
           <Field label="Prazo de Execução (dias úteis)">
-            <input className="input" type="number" min="1" value={c.prazoExecucao || 3} onChange={e => {
+            <input className={roClass('input', viewMode)} readOnly={viewMode} type="number" min="1" value={c.prazoExecucao || 3} onChange={e => {
               const prazo = Number(e.target.value)
               const termino = prazo > 0 && c.dataInicio ? addBusinessDays(c.dataInicio, prazo) : (c.dataTermino || '')
               setC(prev => ({ ...prev, prazoExecucao: prazo, dataTermino: termino }))
@@ -362,24 +403,25 @@ export default function ContratoFormPage() {
             }} />
           </Field>
           <Field label="Data de Término (calculada automaticamente)">
-            <input className="input" type="date" value={c.dataTermino || ''} onChange={update('dataTermino')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} type="date" value={c.dataTermino || ''} onChange={update('dataTermino')} />
           </Field>
           <Field label="Foro">
-            <input className="input" value={c.foro || 'Rio de Janeiro'} onChange={update('foro')} />
+            <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.foro || 'Rio de Janeiro'} onChange={update('foro')} />
           </Field>
         </div>
         <div className="mt-3">
           <label className="label">Garantia (aparece no PDF)</label>
           <div className="flex gap-4 mt-1">
             {[5, 7, 10, 15].map(anos => (
-              <label key={anos} className="flex items-center gap-2 cursor-pointer">
+              <label key={anos} className={`flex items-center gap-2 ${viewMode ? 'cursor-default' : 'cursor-pointer'}`}>
                 <input
                   type="radio"
                   name="garantia"
                   value={anos}
                   checked={Number(c.garantia || 15) === anos}
-                  onChange={() => updateNested('garantia', anos)}
+                  onChange={() => { if (!viewMode) updateNested('garantia', anos) }}
                   className="accent-primary"
+                  readOnly={viewMode}
                 />
                 <span className="text-sm font-medium">{anos} anos</span>
               </label>
@@ -396,7 +438,7 @@ export default function ContratoFormPage() {
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
           <Field label="Total Bruto (R$)">
-            <input className="input" type="number" min="0" step="0.01"
+            <input className={roClass('input', viewMode)} readOnly={viewMode} type="number" min="0" step="0.01"
               value={c.totalBruto || 0}
               onChange={e => {
                 const totalBruto = Number(e.target.value)
@@ -409,7 +451,8 @@ export default function ContratoFormPage() {
           <div>
             <label className="label">Tipo de Desconto</label>
             <select
-              className="input"
+              className={roClass('input', viewMode)}
+              disabled={viewMode}
               value={c.descontoTipo || 'percent'}
               onChange={e => {
                 const tipo = e.target.value
@@ -423,7 +466,7 @@ export default function ContratoFormPage() {
             </select>
           </div>
           <Field label={`Desconto (${c.descontoTipo === 'percent' ? '%' : 'R$'})`}>
-            <input className="input" type="number" min="0" step="0.01"
+            <input className={roClass('input', viewMode)} readOnly={viewMode} type="number" min="0" step="0.01"
               value={c.desconto || 0}
               onChange={e => {
                 const desc = Number(e.target.value)
@@ -434,13 +477,13 @@ export default function ContratoFormPage() {
             />
           </Field>
           <Field label="Nº de Parcelas (Proposta 2)">
-            <input className="input" type="number" min="1" max="24" step="1"
+            <input className={roClass('input', viewMode)} readOnly={viewMode} type="number" min="1" max="24" step="1"
               value={c.parcelas || 1}
               onChange={e => updateNested('parcelas', Number(e.target.value))}
             />
           </Field>
           <Field label="ISS (%)">
-            <input className="input" type="number" min="0" step="0.1"
+            <input className={roClass('input', viewMode)} readOnly={viewMode} type="number" min="0" step="0.1"
               value={c.issPercent || 3}
               onChange={update('issPercent')}
             />
@@ -476,7 +519,7 @@ export default function ContratoFormPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           {/* Proposta 1 — À Vista */}
           <label
-            className={`cursor-pointer border-2 rounded-xl p-4 flex items-start gap-3 transition-all ${
+            className={`${viewMode ? 'cursor-default' : 'cursor-pointer'} border-2 rounded-xl p-4 flex items-start gap-3 transition-all ${
               c.propostaEscolhida === 1
                 ? 'border-primary bg-blue-50 shadow-md'
                 : 'border-gray-200 hover:border-primary/40'
@@ -486,7 +529,7 @@ export default function ContratoFormPage() {
               type="radio"
               name="proposta"
               checked={c.propostaEscolhida === 1}
-              onChange={() => handleSelectProposta(1)}
+              onChange={() => { if (!viewMode) handleSelectProposta(1) }}
               className="mt-1 accent-primary"
             />
             <div className="flex-1 min-w-0">
@@ -508,7 +551,7 @@ export default function ContratoFormPage() {
 
           {/* Proposta 2 — Parcelado */}
           <label
-            className={`cursor-pointer border-2 rounded-xl p-4 flex items-start gap-3 transition-all ${
+            className={`${viewMode ? 'cursor-default' : 'cursor-pointer'} border-2 rounded-xl p-4 flex items-start gap-3 transition-all ${
               c.propostaEscolhida === 2
                 ? 'border-primary bg-blue-50 shadow-md'
                 : 'border-gray-200 hover:border-primary/40'
@@ -518,7 +561,7 @@ export default function ContratoFormPage() {
               type="radio"
               name="proposta"
               checked={c.propostaEscolhida === 2}
-              onChange={() => handleSelectProposta(2)}
+              onChange={() => { if (!viewMode) handleSelectProposta(2) }}
               className="mt-1 accent-primary"
             />
             <div className="flex-1 min-w-0">
@@ -595,9 +638,11 @@ export default function ContratoFormPage() {
             <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">6</span>
             Cronograma de Obras
           </h2>
-          <button onClick={addCronograma} className="btn-secondary text-sm py-1 px-3">
-            + Local
-          </button>
+          {!viewMode && (
+            <button onClick={addCronograma} className="btn-secondary text-sm py-1 px-3">
+              + Local
+            </button>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -621,20 +666,20 @@ export default function ContratoFormPage() {
                 <tr key={i} className="border-b border-gray-100">
                   <td className="text-center py-2 px-2 text-gray-500">{i + 1}</td>
                   <td className="py-2 pr-3">
-                    <input className="input py-1" value={cr.local || ''}
+                    <input className={roClass('input py-1', viewMode)} readOnly={viewMode} value={cr.local || ''}
                       onChange={e => updateCronograma(i, 'local', e.target.value)}
                       placeholder="Nome do local" />
                   </td>
                   <td className="py-2 px-2">
-                    <input className="input py-1" type="date" value={cr.dataInicio || ''}
+                    <input className={roClass('input py-1', viewMode)} readOnly={viewMode} type="date" value={cr.dataInicio || ''}
                       onChange={e => updateCronograma(i, 'dataInicio', e.target.value)} />
                   </td>
                   <td className="py-2 px-2">
-                    <input className="input py-1" type="date" value={cr.dataFim || ''}
+                    <input className={roClass('input py-1', viewMode)} readOnly={viewMode} type="date" value={cr.dataFim || ''}
                       onChange={e => updateCronograma(i, 'dataFim', e.target.value)} />
                   </td>
                   <td className="py-2 px-2">
-                    <button onClick={() => removeCronograma(i)} className="text-red-400 hover:text-red-600 text-lg leading-none">&times;</button>
+                    {!viewMode && <button onClick={() => removeCronograma(i)} className="text-red-400 hover:text-red-600 text-lg leading-none">&times;</button>}
                   </td>
                 </tr>
               ))}
@@ -650,9 +695,11 @@ export default function ContratoFormPage() {
             <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">7</span>
             Parcelas do Contrato
           </h2>
-          <button onClick={addParcela} className="btn-secondary text-sm py-1 px-3">
-            + Parcela
-          </button>
+          {!viewMode && (
+            <button onClick={addParcela} className="btn-secondary text-sm py-1 px-3">
+              + Parcela
+            </button>
+          )}
         </div>
 
         {/* Dica de auto-propagação */}
@@ -688,16 +735,16 @@ export default function ContratoFormPage() {
                         {i === 0 && <span className="ml-1 text-xs text-blue-400">★</span>}
                       </td>
                       <td className="py-2 px-2">
-                        <input className="input py-1 w-full" type="date" value={p.data || ''}
+                        <input className={roClass('input py-1 w-full', viewMode)} readOnly={viewMode} type="date" value={p.data || ''}
                           onChange={e => updateParcela(i, 'data', e.target.value)} />
                       </td>
                       <td className="py-2 px-2">
-                        <input className="input py-1 text-right w-full" type="number" min="0" step="0.01"
+                        <input className={roClass('input py-1 text-right w-full', viewMode)} readOnly={viewMode} type="number" min="0" step="0.01"
                           value={p.valor || 0}
                           onChange={e => updateParcela(i, 'valor', e.target.value)} />
                       </td>
                       <td className="py-2 px-2">
-                        <button onClick={() => removeParcela(i)} className="text-red-400 hover:text-red-600 text-lg leading-none">&times;</button>
+                        {!viewMode && <button onClick={() => removeParcela(i)} className="text-red-400 hover:text-red-600 text-lg leading-none">&times;</button>}
                       </td>
                     </tr>
                   ))}
@@ -737,8 +784,10 @@ export default function ContratoFormPage() {
             <span className="text-sm text-gray-600">📄 {c.contratoArquivoNome || 'contrato-assinado'}</span>
             <a href={c.contratoArquivo} download={c.contratoArquivoNome || 'contrato.pdf'}
                className="text-xs text-primary hover:underline">Baixar</a>
-            <button onClick={() => handleRemoverArquivo()} className="text-xs text-red-500 hover:underline">Remover</button>
+            {!viewMode && <button onClick={() => handleRemoverArquivo()} className="text-xs text-red-500 hover:underline">Remover</button>}
           </div>
+        ) : viewMode ? (
+          <p className="text-sm text-gray-400 italic">Nenhum arquivo anexado.</p>
         ) : (
           <div>
             <label className="cursor-pointer">
@@ -761,9 +810,15 @@ export default function ContratoFormPage() {
             {fmt(c.propostaEscolhida === 2 ? c.totalBruto : c.totalLiquido)}
           </span>
         </div>
-        <button onClick={handleSave} disabled={saving} className="btn-secondary">
-          {saving ? 'Salvando...' : 'Salvar'}
-        </button>
+        {viewMode ? (
+          <button onClick={() => setViewMode(false)} className="flex items-center gap-1.5 bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-indigo-700 transition-colors">
+            ✏️ Editar Contrato
+          </button>
+        ) : (
+          <button onClick={handleSave} disabled={saving} className="btn-secondary">
+            {saving ? 'Salvando...' : 'Salvar'}
+          </button>
+        )}
         <button onClick={() => window.open(api.getContratoPdfUrl(id), '_blank')} className="btn-secondary">
           Gerar PDF
         </button>
@@ -772,6 +827,12 @@ export default function ContratoFormPage() {
         </button>
         <button onClick={() => window.open(api.getArtPdfUrl(id), '_blank')} className="btn-secondary">
           ART
+        </button>
+        <button
+          onClick={() => navigate(`/ordens-servico?contratoId=${id}`)}
+          className="bg-blue-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-blue-700 transition-colors"
+        >
+          📋 OS
         </button>
       </div>
     </div>

@@ -17,7 +17,7 @@ function NovoReparoModal({ onClose, onCreated, preloadOS }) {
   const [osList, setOsList] = useState([])
   const [loadingOS, setLoadingOS] = useState(false)
   const [osSelecionada, setOSSelecionada] = useState(preloadOS || null)
-  const [pontosIdx, setPontosIdx] = useState([])       // [] = todos; array de índices selecionados
+  const [pontosIdx, setPontosIdx] = useState([])       // deve ter pelo menos 1 selecionado quando há pontos
   const [itensSelecionados, setItensSelecionados] = useState({}) // { pontoIdx: number[] } — índices dos sub-pontos selecionados por local
   const [pontosExpandidos, setPontosExpandidos] = useState(new Set()) // pontos com sub-itens abertos
   const [equipes, setEquipes] = useState([])
@@ -76,6 +76,11 @@ function NovoReparoModal({ onClose, onCreated, preloadOS }) {
             .filter(i => itensSelecionados[i]?.length > 0)
             .map(i => ({ pontoIdx: i, subPontosIdx: itensSelecionados[i] }))
         : []
+      if (pontos.length > 0 && pontosIdx.length === 0) {
+        setError('Selecione ao menos um local para o reparo')
+        setSaving(false)
+        return
+      }
       const payload = {
         osOriginalId: osSelecionada.id || osSelecionada._id,
         pontosIdx: pontosIdx.length > 0 ? pontosIdx : undefined,
@@ -153,10 +158,11 @@ function NovoReparoModal({ onClose, onCreated, preloadOS }) {
 
               {osSelecionada && pontos.length > 0 && (
                 <div className="mt-2">
-                  <p className="text-sm font-medium text-gray-700 mb-2">
-                    Locais e itens do reparo:
-                    <span className="text-gray-400 font-normal ml-1">(desmarcado = todos incluídos)</span>
-                  </p>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
+                    <p className="text-xs font-semibold text-amber-800">⚠️ Selecione obrigatoriamente os locais com problema</p>
+                    <p className="text-xs text-amber-700 mt-0.5">Apenas os locais marcados aparecerão para a equipe no aplicador</p>
+                  </div>
+                  <p className="text-sm font-medium text-gray-700 mb-2">Locais e itens do reparo:</p>
                   <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
                     {pontos.map((p, i) => {
                       const checked = pontosIdx.includes(i)
@@ -242,7 +248,7 @@ function NovoReparoModal({ onClose, onCreated, preloadOS }) {
                   {pontosIdx.length > 0 ? (
                     <p className="text-xs text-primary font-medium mt-1.5">✓ {pontosIdx.length} local(is) selecionado(s)</p>
                   ) : (
-                    <p className="text-xs text-gray-400 mt-1.5">Nenhum selecionado — todos os locais serão incluídos</p>
+                    <p className="text-xs text-red-500 font-medium mt-1.5">⚠ Selecione ao menos um local para continuar</p>
                   )}
                 </div>
               )}
@@ -250,7 +256,7 @@ function NovoReparoModal({ onClose, onCreated, preloadOS }) {
               <div className="flex justify-end gap-3 pt-2">
                 <button onClick={onClose} className="btn-secondary">Cancelar</button>
                 <button
-                  onClick={() => { if (!osSelecionada) return; setStep(2) }}
+                  onClick={() => { if (!osSelecionada) return; if (pontos.length > 0 && pontosIdx.length === 0) { setError('Selecione ao menos um local para o reparo'); return; } setError(''); setStep(2) }}
                   disabled={!osSelecionada}
                   className="btn-primary disabled:opacity-50">
                   Próximo →

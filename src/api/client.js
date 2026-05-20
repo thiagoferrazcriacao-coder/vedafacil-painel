@@ -46,6 +46,7 @@ export const api = {
   getMedicao: (id) => request('GET', `/medicoes/${id}`),
   updateMedicaoStatus: (id, status) => request('PATCH', `/medicoes/${id}/status`, { status }),
   updateMedicao: (id, data) => request('PUT', `/medicoes/${id}`, data),
+  updateMedicaoFotos: (id, locais) => request('PATCH', `/medicoes/${id}/fotos`, { locais }),
   createMedicaoManual: (data) => request('POST', '/medicoes/manual', data),
 
   // Orcamentos
@@ -58,6 +59,9 @@ export const api = {
   deleteMedicao: (id) => request('DELETE', `/medicoes/${id}`),
   deleteContrato: (id) => request('DELETE', `/contratos/${id}`),
   approveOrcamento: (id) => request('POST', `/orcamentos/${id}/approve`),
+  toggleEnviadoCliente: (id) => request('POST', `/orcamentos/${id}/enviado-cliente`),
+  aceitarAlteracaoMedicao: (id) => request('POST', `/medicoes/${id}/aceitar-alteracao`),
+  recusarAlteracaoMedicao: (id) => request('POST', `/medicoes/${id}/recusar-alteracao`),
   getOrcamentoPdfUrl: (id) => `${BASE}/orcamentos/${id}/pdf?token=${encodeURIComponent(getToken() || '')}`,
 
   // Contratos
@@ -65,6 +69,7 @@ export const api = {
   getContrato: (id) => request('GET', `/contratos/${id}`),
   createContrato: (data) => request('POST', '/contratos', data),
   updateContrato: (id, data) => request('PUT', `/contratos/${id}`, data),
+  getContratoTextoHtml: (id) => request('GET', `/contratos/${id}/texto-html`),
   updateContratoStatus: (id, status) => request('PATCH', `/contratos/${id}/status`, { status }),
   sendToZapSign: (id, email, nomeSigner) => request('POST', `/zapsign-send`, { contratoId: id, email, nomeSigner }),
   otimizarCroqui: (imagem) => request('POST', '/croqui/otimizar', { imagem }),
@@ -72,6 +77,14 @@ export const api = {
   getGarantiaPdfUrl: (id) => `${BASE}/contratos/${id}/garantia?token=${encodeURIComponent(getToken() || '')}`,
   getArtPdfUrl: (id) => `${BASE}/contratos/${id}/art?token=${encodeURIComponent(getToken() || '')}`,
   marcarGarantiaEnviada: (id) => request('POST', `/contratos/${id}/garantia/marcar-enviada`),
+
+  // Garantias standalone (geradas a partir de OS)
+  getGarantias: () => request('GET', '/garantias'),
+  createGarantiasFromOS: (osIds) => request('POST', '/garantias/from-os', { osIds }),
+  updateGarantia: (id, data) => request('PUT', `/garantias/${id}`, data),
+  deleteGarantia: (id) => request('DELETE', `/garantias/${id}`),
+  marcarGarantiaEnviadaNew: (id) => request('POST', `/garantias/${id}/marcar-enviada`),
+  getGarantiaNewPdfUrl: (id) => `${BASE}/garantias/${id}/pdf?token=${encodeURIComponent(getToken() || '')}`,
 
   // Equipes
   getEquipes: () => request('GET', '/equipes'),
@@ -118,11 +131,21 @@ export const api = {
   updatePrecos: (data) => request('PUT', '/config/precos', data),
   getProximoOrcamento: () => request('GET', '/config/proximo-orcamento'),
 
-  // Produtos
+  // Produtos — GVF Seal
   getProdutosDashboard: () => request('GET', '/produtos/dashboard'),
   getCompras: () => request('GET', '/produtos/compras'),
   addCompra: (data) => request('POST', '/produtos/compras', data),
   deleteCompra: (id) => request('DELETE', `/produtos/compras/${id}`),
+
+  // Produtos — Injetores
+  getInjetoresDashboard: () => request('GET', '/produtos/injetores/dashboard'),
+  getComprasInjetores: () => request('GET', '/produtos/injetores/compras'),
+  addCompraInjetor: (data) => request('POST', '/produtos/injetores/compras', data),
+  deleteCompraInjetor: (id) => request('DELETE', `/produtos/injetores/compras/${id}`),
+
+  // Estoque por Equipe / Semana
+  getEstoqueEquipes: (semana) => request('GET', `/estoque-equipes${semana ? '?semana=' + encodeURIComponent(semana) : ''}`),
+  setEstoqueEquipe: (equipeId, semana, recebido) => request('PUT', `/estoque-equipes/${equipeId}`, { semana, recebido }),
 
   // Usuários
   getUsuarios: () => request('GET', '/usuarios'),

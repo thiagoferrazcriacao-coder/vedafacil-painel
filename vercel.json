@@ -31,6 +31,8 @@
     { "source": "/api/dashboard", "destination": "/api/index.js" },
     { "source": "/api/croqui/:path*", "destination": "/api/index.js" },
     { "source": "/api/croqui", "destination": "/api/index.js" },
+    { "source": "/api/croquis/:path*", "destination": "/api/index.js" },
+    { "source": "/api/croquis", "destination": "/api/index.js" },
     { "source": "/api/lixeira/:path*", "destination": "/api/index.js" },
     { "source": "/api/lixeira", "destination": "/api/index.js" },
     { "source": "/api/reparos/:path*", "destination": "/api/index.js" },
@@ -38,7 +40,15 @@
     { "source": "/api/debug-zapsign", "destination": "/api/index.js" },
     { "source": "/api/produtos/:path*", "destination": "/api/index.js" },
     { "source": "/api/produtos", "destination": "/api/index.js" },
+    { "source": "/api/estoque-equipes/:path*", "destination": "/api/index.js" },
+    { "source": "/api/estoque-equipes", "destination": "/api/index.js" },
     { "source": "/api/me", "destination": "/api/index.js" },
+    { "source": "/api/fotos/:path*", "destination": "/api/index.js" },
+    { "source": "/api/fotos", "destination": "/api/index.js" },
+    { "source": "/api/cron/:path*", "destination": "/api/index.js" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/backup", "schedule": "0 6 * * *" }
   ]
 }

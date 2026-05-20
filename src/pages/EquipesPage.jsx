@@ -246,9 +246,22 @@ function DesempenhoPanel({ equipe, periodo }) {
 }
 
 /* ────────────────────────── RankingPanel ─────────────────────────────────── */
+function ScoreItem({ label, value, color }) {
+  const isPos = value > 0, isNeg = value < 0
+  return (
+    <div className="flex items-center justify-between py-1 border-b border-gray-100 last:border-0">
+      <span className="text-xs text-gray-500">{label}</span>
+      <span className={`text-xs font-bold tabular-nums ${isPos ? 'text-green-600' : isNeg ? 'text-red-500' : 'text-gray-400'}`}>
+        {isPos ? '+' : ''}{value} pts
+      </span>
+    </div>
+  )
+}
+
 function RankingPanel({ periodo }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [expandido, setExpandido] = useState(null)
 
   useEffect(() => {
     setLoading(true)
@@ -268,54 +281,133 @@ function RankingPanel({ periodo }) {
 
   return (
     <div className="space-y-3">
-      {data.ranking.map((eq, i) => (
-        <div key={eq.equipeId} className={`bg-white rounded-xl border p-4 ${i === 0 ? 'border-yellow-300 shadow-md' : ''}`}>
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">{medalhas[i] || `#${i + 1}`}</span>
-              <div>
-                <div className="font-bold text-gray-800 flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: eq.cor || '#1a5c9a' }} />
-                  {eq.equipeNome}
+      {/* Legenda */}
+      <div className="bg-gray-50 rounded-xl p-3 border border-gray-200 text-xs text-gray-500 flex flex-wrap gap-x-4 gap-y-1">
+        <span>🏗️ <b>Base:</b> obras+subItens+metragem</span>
+        <span>🧴 <b>Produto:</b> eficiência GVF Seal (±15/OS)</span>
+        <span>⏱️ <b>Tempo:</b> prazo de execução (±10/OS)</span>
+        <span>🔧 <b>Reparos:</b> causados −8/un · executados +3/un</span>
+      </div>
+
+      {data.ranking.map((eq, i) => {
+        const bd = eq.scoreBreakdown || {}
+        const isOpen = expandido === eq.equipeId
+        const efProduto = eq.consumoEstim > 0 ? ((eq.consumoReal - eq.consumoEstim) / eq.consumoEstim * 100) : null
+        const efTempo   = eq.diasPlanejados > 0 ? (eq.diasAtivosTotal / eq.diasPlanejados * 100 - 100) : null
+
+        return (
+          <div key={eq.equipeId} className={`bg-white rounded-xl border shadow-sm ${i === 0 ? 'border-yellow-300 shadow-md' : 'border-gray-200'}`}>
+            {/* Header */}
+            <div className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl w-8 text-center">{medalhas[i] || `#${i+1}`}</span>
+                <div>
+                  <div className="font-bold text-gray-800 flex items-center gap-2 text-sm">
+                    <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: eq.cor || '#1a5c9a' }} />
+                    {eq.equipeNome}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <span className="text-[10px] text-gray-400">{eq.obrasExecutadas} obras concluídas · {eq.totalOS} OS total</span>
+                    {eq.reparosCausados > 0 && (
+                      <span className="text-[10px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded-full">⚠ {eq.reparosCausados} reparo{eq.reparosCausados > 1 ? 's' : ''} causado{eq.reparosCausados > 1 ? 's' : ''}</span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-            <ScoreBadge score={eq.score} />
-          </div>
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
-            <div>
-              <div className="text-sm font-bold text-green-700">{eq.obrasExecutadas ?? eq.totalOS}</div>
-              <div className="text-[10px] text-gray-500">Obras Exec.</div>
-            </div>
-            <div>
-              <div className="text-sm font-bold text-blue-700">{eq.totalOS}</div>
-              <div className="text-[10px] text-gray-500">OS Total</div>
-            </div>
-            <div>
-              <div className="text-sm font-bold text-green-700">{eq.subFeitos}</div>
-              <div className="text-[10px] text-gray-500">Sub-itens</div>
-            </div>
-            <div>
-              <div className="text-sm font-bold text-purple-700">{fmtNum(eq.metragem)} m</div>
-              <div className="text-[10px] text-gray-500">Metragem</div>
-            </div>
-            <div>
-              <div className={`text-sm font-bold ${eq.reparosCausados > 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                {eq.reparosCausados || 0}
-                {eq.reparosProprios > 0 && <span className="text-[9px] text-amber-600 ml-0.5">+{eq.reparosProprios}✔</span>}
+              <div className="flex items-center gap-2">
+                <ScoreBadge score={eq.score} />
+                <button onClick={() => setExpandido(isOpen ? null : eq.equipeId)}
+                  className="text-gray-400 hover:text-gray-600 text-xs px-2 py-1 rounded border border-gray-200 hover:border-gray-400 transition-colors">
+                  {isOpen ? '▲' : '▼'}
+                </button>
               </div>
-              <div className="text-[10px] text-gray-500">Reparos</div>
-              {eq.reparosProprios > 0 && <div className="text-[9px] text-amber-600 font-semibold">PRÓPRIOS</div>}
             </div>
-            <div>
-              <div className="text-sm font-bold text-gray-600">
-                {eq.consumoEstim > 0 ? `${fmtNum(eq.consumoReal)}/${fmtNum(eq.consumoEstim)} L` : '—'}
+
+            {/* Stats row */}
+            <div className="grid grid-cols-4 sm:grid-cols-8 gap-0 border-t border-gray-100 text-center divide-x divide-gray-100">
+              {[
+                { v: eq.obrasExecutadas, l: 'Obras', c: 'text-green-700' },
+                { v: eq.subFeitos, l: 'Sub-itens', c: 'text-blue-700' },
+                { v: `${fmtNum(eq.metragem)}m`, l: 'Metragem', c: 'text-purple-700' },
+                { v: eq.reparosCausados > 0 ? `-${eq.reparosCausados}` : '0', l: 'Causados', c: eq.reparosCausados > 0 ? 'text-red-600' : 'text-gray-400' },
+                { v: eq.reparosProprios > 0 ? `+${eq.reparosProprios}` : '0', l: 'Executados', c: eq.reparosProprios > 0 ? 'text-amber-600' : 'text-gray-400' },
+                { v: eq.consumoEstim > 0 ? `${fmtNum(eq.consumoReal)}L` : '—', l: 'GVF real', c: 'text-orange-600' },
+                { v: eq.consumoEstim > 0 ? `${fmtNum(eq.consumoEstim)}L` : '—', l: 'GVF est.', c: 'text-blue-600' },
+                { v: efProduto !== null ? `${efProduto > 0 ? '+' : ''}${fmtNum(efProduto)}%` : '—', l: 'Var.Prod.', c: efProduto !== null ? (efProduto > 5 ? 'text-red-600' : efProduto < -5 ? 'text-green-600' : 'text-gray-600') : 'text-gray-400' },
+              ].map(({ v, l, c }) => (
+                <div key={l} className="py-2 px-1">
+                  <div className={`text-sm font-bold ${c}`}>{v}</div>
+                  <div className="text-[9px] text-gray-400 leading-tight mt-0.5">{l}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Score breakdown (expandível) */}
+            {isOpen && (
+              <div className="border-t border-gray-100 p-4">
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {/* Score breakdown */}
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-xs font-semibold text-gray-600 mb-2">📊 Detalhamento do Score</div>
+                    <ScoreItem label="🏗️ Base (obras + sub-itens + metragem)" value={bd.base ?? 0} />
+                    <ScoreItem label="🧴 Eficiência de produto (GVF Seal)" value={bd.produto ?? 0} />
+                    <ScoreItem label="⏱️ Eficiência de tempo (prazo)" value={bd.tempo ?? 0} />
+                    <ScoreItem label="🔧 Reparos (causados/executados)" value={bd.reparos ?? 0} />
+                    <div className="flex items-center justify-between pt-2 mt-1 border-t border-gray-300">
+                      <span className="text-xs font-bold text-gray-700">Total</span>
+                      <span className={`text-sm font-bold ${eq.score >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                        {eq.score >= 0 ? '+' : ''}{eq.score} pts
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Eficiência detalhada */}
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-xs font-semibold text-gray-600 mb-2">📈 Indicadores</div>
+                    {eq.consumoEstim > 0 && (
+                      <div className="mb-2">
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-gray-500">GVF: {fmtNum(eq.consumoReal)}L real / {fmtNum(eq.consumoEstim)}L estimado</span>
+                          <span className={`font-semibold ${efProduto > 5 ? 'text-red-600' : efProduto < -5 ? 'text-green-600' : 'text-gray-500'}`}>
+                            {efProduto > 0 ? '+' : ''}{fmtNum(efProduto)}%
+                          </span>
+                        </div>
+                        <div className="relative h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div className="absolute inset-y-0 left-0 bg-blue-300 rounded-full" style={{ width: '100%' }} />
+                          <div className={`absolute inset-y-0 left-0 rounded-full ${eq.consumoReal > eq.consumoEstim ? 'bg-red-400' : 'bg-green-400'}`}
+                            style={{ width: `${Math.min(100, (eq.consumoReal / eq.consumoEstim) * 100)}%` }} />
+                        </div>
+                        <div className="text-[9px] text-gray-400 mt-0.5">{eq.osComProduto || 0} OS com estimativa de produto</div>
+                      </div>
+                    )}
+                    {eq.diasPlanejados > 0 && (
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-gray-500">Prazo: {eq.diasAtivosTotal}d agendado / {eq.diasPlanejados}d planejado</span>
+                          <span className={`font-semibold ${efTempo > 10 ? 'text-red-600' : efTempo < -10 ? 'text-green-600' : 'text-gray-500'}`}>
+                            {efTempo > 0 ? '+' : ''}{fmtNum(efTempo)}%
+                          </span>
+                        </div>
+                        <div className="relative h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div className="absolute inset-y-0 left-0 bg-blue-300 rounded-full" style={{ width: '100%' }} />
+                          <div className={`absolute inset-y-0 left-0 rounded-full ${eq.diasAtivosTotal > eq.diasPlanejados ? 'bg-red-400' : 'bg-green-400'}`}
+                            style={{ width: `${Math.min(100, (eq.diasAtivosTotal / eq.diasPlanejados) * 100)}%` }} />
+                        </div>
+                        <div className="text-[9px] text-gray-400 mt-0.5">{eq.osComTempo || 0} OS concluídas com dados de prazo</div>
+                      </div>
+                    )}
+                    {(!eq.consumoEstim || eq.consumoEstim === 0) && eq.diasPlanejados === 0 && (
+                      <div className="text-xs text-gray-400 text-center py-2">
+                        Sem dados suficientes de produto ou prazo no período
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="text-[10px] text-gray-500">GVF real/est.</div>
-            </div>
+            )}
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

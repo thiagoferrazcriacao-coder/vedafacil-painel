@@ -5,6 +5,17 @@ import { useAuth } from '../App.jsx'
 
 const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
 
+// Converte YYYY-MM-DD → DD/MM/AAAA para exibição no input de texto
+function isoToDisplayDate(iso) {
+  if (!iso) return ''
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(iso)) return iso          // já em DD/MM/AAAA
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [y, m, d] = iso.split('-')
+    return `${d}/${m}/${y}`
+  }
+  return iso
+}
+
 const DEFAULT_ITENS = [
   { tipo: 'trinca', descricao: 'Trincas', quantidade: 0, unidade: 'm', valorUnit: 950, subtotal: 0 },
   { tipo: 'juntaFria', descricao: 'Juntas Frias', quantidade: 0, unidade: 'm', valorUnit: 950, subtotal: 0 },
@@ -47,17 +58,22 @@ function recalculate(orc) {
   }))
   const totalBruto = itens.reduce((s, i) => s + i.subtotal, 0)
 
+  // Se Orçamento Mínimo ativo com valor preenchido, usar totalMinimo como base
+  const baseCalculo = (orc.orcMinimo && Number(orc.totalMinimo) > 0)
+    ? Number(orc.totalMinimo)
+    : totalBruto
+
   // Proposta 1 — À Vista (desconto1 / descontoTipo1)
   const desconto1Val = orc.descontoTipo1 === 'valor'
     ? (Number(orc.desconto1) || 0)
-    : totalBruto * (Number(orc.desconto1) || 0) / 100
-  const totalProposta1 = Math.max(0, totalBruto - desconto1Val)
+    : baseCalculo * (Number(orc.desconto1) || 0) / 100
+  const totalProposta1 = Math.max(0, baseCalculo - desconto1Val)
 
   // Proposta 2 — Parcelado (desconto2 / descontoTipo2)
   const desconto2Val = orc.descontoTipo2 === 'valor'
     ? (Number(orc.desconto2) || 0)
-    : totalBruto * (Number(orc.desconto2) || 0) / 100
-  const totalProposta2 = Math.max(0, totalBruto - desconto2Val)
+    : baseCalculo * (Number(orc.desconto2) || 0) / 100
+  const totalProposta2 = Math.max(0, baseCalculo - desconto2Val)
   const entradaTipo2 = orc.entradaTipo2 || 'percent'
   const entrada2Pct = orc.entrada2 != null ? Number(orc.entrada2) : (orc.entrada != null ? Number(orc.entrada) : 50)
   const entradaVal2 = entradaTipo2 === 'valor'
@@ -115,7 +131,29 @@ export default function OrcamentoFormPage() {
 
         if (!isNew) {
           const data = await api.getOrcamento(id)
-          setOrc(recalculate(data))
+          // Se tem medicaoId vinculada, busca garantia e andaime direto da medição
+          let medicaoOverride = {}
+          if (data.medicaoId) {
+            try {
+              const med = await api.getMedicao(data.medicaoId)
+              // Merge andar from medição into locais when the orçamento's locais don't have it
+              const locaisComAndar = (data.locais || []).map((l, i) => {
+                const andarMed = (med.locais?.[i]?.andar || '').trim()
+                if (!l.andar && andarMed) return { ...l, andar: andarMed }
+                return l
+              })
+              medicaoOverride = {
+                garantia: Number(med.garantia) || data.garantia || 15,
+                andaime: String(med.andaime || data.andaime || 'nao').trim().toLowerCase(),
+                andaimeMetros: med.andaimeMetros ?? data.andaimeMetros ?? 0,
+                andaimeRodinhas: med.andaimeRodinhas ?? data.andaimeRodinhas ?? false,
+                andaimeBases: med.andaimeBases ?? data.andaimeBases ?? false,
+                andaimeLargura: med.andaimeLargura || data.andaimeLargura || '1m',
+                locais: locaisComAndar,
+              }
+            } catch (_) { /* silently ignore — usa os dados do orçamento */ }
+          }
+          setOrc(recalculate({ ...data, ...medicaoOverride }))
         } else {
           // Fetch next sequential number before creating
           let proximoNumero = 1
@@ -151,7 +189,12 @@ export default function OrcamentoFormPage() {
 
   const updateItem = (i, field, value) => {
     const newItens = [...orc.itens]
-    newItens[i] = { ...newItens[i], [field]: field === 'descricao' ? value : Number(value) }
+    newItens[i] = {
+      ...newItens[i],
+      [field]: field === 'descricao' ? value
+        : field === 'quantidade' ? (parseInt(value, 10) || 0)
+        : Number(value)
+    }
     update({ itens: newItens })
   }
 
@@ -287,7 +330,7 @@ export default function OrcamentoFormPage() {
             <input className="input" type="number" value={orc.numero || ''} onChange={e => update({ numero: Number(e.target.value) })} />
           </Field>
           <Field label="Data do Orçamento">
-            <input className="input" type="text" value={orc.dataOrcamento || ''} onChange={updateField('dataOrcamento')} placeholder="dd/mm/aaaa" />
+            <input className="input" type="text" value={isoToDisplayDate(orc.dataOrcamento) || ''} onChange={updateField('dataOrcamento')} placeholder="dd/mm/aaaa" />
           </Field>
           <Field label="Validade (dias)">
             <input className="input" type="number" min="1" value={orc.validade || 30} onChange={e => update({ validade: String(Number(e.target.value)) })} />
@@ -301,7 +344,7 @@ export default function OrcamentoFormPage() {
           <div>
             <label className="label">Avaliado Por</label>
             <div className="flex flex-wrap gap-2 mt-1">
-              {['Thiago', 'Alan', 'Fernando', 'Daniel'].map(nome => {
+              {['Fernando', 'Edson'].map(nome => {
                 const selecionados = (orc.avaliadoPor || '').split(',').map(s => s.trim()).filter(Boolean)
                 const ativo = selecionados.includes(nome)
                 return (
@@ -322,7 +365,12 @@ export default function OrcamentoFormPage() {
             <input className="input" value={orc.acompanhadoPor || ''} onChange={updateField('acompanhadoPor')} />
           </Field>
           <Field label="Técnico Responsável">
-            <input className="input" value={orc.tecnicoResponsavel || ''} onChange={updateField('tecnicoResponsavel')} />
+            <select className="input" value={orc.tecnicoResponsavel || ''} onChange={updateField('tecnicoResponsavel')}>
+              <option value="">Selecione...</option>
+              <option value="Thiago">Thiago</option>
+              <option value="Fernando">Fernando</option>
+              <option value="Alan">Alan</option>
+            </select>
           </Field>
         </div>
       </section>
@@ -390,7 +438,7 @@ export default function OrcamentoFormPage() {
                       className="input py-1 text-center"
                       type="number"
                       min="0"
-                      step="0.01"
+                      step="1"
                       value={item.quantidade}
                       onChange={e => updateItem(i, 'quantidade', e.target.value)}
                     />
@@ -547,21 +595,70 @@ export default function OrcamentoFormPage() {
                 </label>
               ))}
             </div>
+            {(orc.andaime === 'sim') && (
+              <div className="mt-2 p-3 bg-orange-50 rounded-lg border border-orange-200 text-xs space-y-2">
+                <div className="font-semibold text-orange-800 mb-1">🏗️ Detalhes do Andaime (aparecem no PDF):</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="label text-xs">Altura (metros)</label>
+                    <input type="number" min="0" step="0.5" className="input py-1 text-sm"
+                      value={orc.andaimeMetros || ''} placeholder="ex: 5"
+                      onChange={e => update({ andaimeMetros: parseFloat(e.target.value) || 0 })} />
+                  </div>
+                  <div>
+                    <label className="label text-xs">Largura</label>
+                    <input type="text" className="input py-1 text-sm"
+                      value={orc.andaimeLargura || ''} placeholder="ex: 1.5m"
+                      onChange={e => update({ andaimeLargura: e.target.value })} />
+                  </div>
+                </div>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" className="accent-primary"
+                      checked={!!orc.andaimeRodinhas}
+                      onChange={e => update({ andaimeRodinhas: e.target.checked })} />
+                    <span>Com rodinhas</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" className="accent-primary"
+                      checked={!!orc.andaimeBases}
+                      onChange={e => update({ andaimeBases: e.target.checked })} />
+                    <span>Bases ajustáveis</span>
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Total bruto */}
         <div className="flex items-center gap-2 mb-5 p-3 bg-orange-50 rounded-lg border border-orange-200">
-          <span className="text-sm text-gray-600">Total Bruto dos Serviços:</span>
-          <span className="font-bold text-primary text-lg">{fmt(orc.totalBruto)}</span>
+          <span className="text-sm text-gray-600">
+            {orc.orcMinimo && orc.totalMinimo > 0 ? 'Base de Cálculo (Orç. Mínimo):' : 'Total Bruto dos Serviços:'}
+          </span>
+          <span className="font-bold text-primary text-lg">
+            {fmt(orc.orcMinimo && orc.totalMinimo > 0 ? orc.totalMinimo : orc.totalBruto)}
+          </span>
+          {orc.orcMinimo && orc.totalMinimo > 0 && (
+            <span className="text-xs text-gray-400 ml-1">(calculado: {fmt(orc.totalBruto)})</span>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
           {/* Proposta 1 — À Vista */}
-          <div className="bg-green-50 border-2 border-green-300 rounded-xl p-4">
+          <div className={`border-2 rounded-xl p-4 transition-opacity ${orc.mostrarProposta1 === false ? 'bg-gray-50 border-gray-200 opacity-60' : 'bg-green-50 border-green-300'}`}>
             <div className="font-bold text-green-800 text-sm mb-3 flex items-center gap-2">
               <span className="w-5 h-5 rounded-full bg-green-600 text-white text-xs flex items-center justify-center">1</span>
               PROPOSTA 1 — Pagamento à Vista
+              <label className="ml-auto flex items-center gap-1.5 cursor-pointer font-normal text-xs text-gray-600">
+                <input
+                  type="checkbox"
+                  className="accent-green-600 w-4 h-4"
+                  checked={orc.mostrarProposta1 !== false}
+                  onChange={e => update({ mostrarProposta1: e.target.checked })}
+                />
+                Incluir no PDF
+              </label>
             </div>
             <div className="grid grid-cols-2 gap-2 mb-3">
               <div>
@@ -573,7 +670,7 @@ export default function OrcamentoFormPage() {
               </div>
               <div>
                 <label className="label text-xs">{orc.descontoTipo1 === 'valor' ? 'Desconto (R$)' : 'Desconto (%)'}</label>
-                <input className="input py-1 text-sm" type="number" min="0" step="0.01" value={orc.desconto1 || 0} onChange={e => update({ desconto1: e.target.value })} />
+                <input className="input py-1 text-sm" type="number" min="0" step={orc.descontoTipo1 === 'valor' ? '0.01' : '1'} value={orc.desconto1 || 0} onChange={e => update({ desconto1: e.target.value })} />
               </div>
             </div>
             <div className="bg-white rounded-lg p-3 text-center border border-green-200">
@@ -588,10 +685,19 @@ export default function OrcamentoFormPage() {
           </div>
 
           {/* Proposta 2 — Parcelado */}
-          <div className="bg-blue-50 border-2 border-blue-300 rounded-xl p-4">
+          <div className={`border-2 rounded-xl p-4 transition-opacity ${orc.mostrarProposta2 === false ? 'bg-gray-50 border-gray-200 opacity-60' : 'bg-blue-50 border-blue-300'}`}>
             <div className="font-bold text-blue-800 text-sm mb-3 flex items-center gap-2">
               <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center">2</span>
               PROPOSTA 2 — Pagamento Parcelado
+              <label className="ml-auto flex items-center gap-1.5 cursor-pointer font-normal text-xs text-gray-600">
+                <input
+                  type="checkbox"
+                  className="accent-blue-600 w-4 h-4"
+                  checked={orc.mostrarProposta2 !== false}
+                  onChange={e => update({ mostrarProposta2: e.target.checked })}
+                />
+                Incluir no PDF
+              </label>
             </div>
             <div className="grid grid-cols-2 gap-2 mb-3">
               <div>
@@ -603,7 +709,7 @@ export default function OrcamentoFormPage() {
               </div>
               <div>
                 <label className="label text-xs">{orc.descontoTipo2 === 'valor' ? 'Desconto (R$)' : 'Desconto (%)'}</label>
-                <input className="input py-1 text-sm" type="number" min="0" step="0.01" value={orc.desconto2 || 0} onChange={e => update({ desconto2: e.target.value })} />
+                <input className="input py-1 text-sm" type="number" min="0" step={orc.descontoTipo2 === 'valor' ? '0.01' : '1'} value={orc.desconto2 || 0} onChange={e => update({ desconto2: e.target.value })} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 mb-3">
@@ -665,6 +771,7 @@ export default function OrcamentoFormPage() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b-2 border-primary bg-orange-50">
+                  <th className="text-left py-2 pr-2 font-semibold text-gray-600 w-28">Andar</th>
                   <th className="text-left py-2 pr-3 font-semibold text-gray-600">Local</th>
                   <th className="text-right py-2 px-1 font-semibold text-gray-600">Trincas (m)</th>
                   <th className="text-right py-2 px-1 font-semibold text-gray-600">J. Fria (m)</th>
@@ -676,24 +783,62 @@ export default function OrcamentoFormPage() {
                 </tr>
               </thead>
               <tbody>
-                {orc.locais.map((local, i) => {
+                {(() => {
+                  let lastAndar = ''
+                  return orc.locais.map((local, i) => {
                   const total = (Number(local.trinca)||0) + (Number(local.juntaFria)||0) + (Number(local.ralo)||0) + (Number(local.juntaDilat)||0) + (Number(local.ferragem)||0) + (Number(local.cortina)||0)
+                  const andar = (local.andar || '').trim()
+                  const showAndarHeader = andar && andar !== lastAndar
+                  if (showAndarHeader) lastAndar = andar
                   return (
-                    <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-1.5 pr-3 font-medium text-gray-800">{local.nome || local.local || `Local ${i + 1}`}</td>
-                      <td className="py-1.5 px-1 text-right">{Number(local.trinca) > 0 ? local.trinca : '—'}</td>
-                      <td className="py-1.5 px-1 text-right">{Number(local.juntaFria) > 0 ? local.juntaFria : '—'}</td>
-                      <td className="py-1.5 px-1 text-right">{Number(local.ralo) > 0 ? local.ralo : '—'}</td>
-                      <td className="py-1.5 px-1 text-right">{Number(local.juntaDilat) > 0 ? local.juntaDilat : '—'}</td>
-                      <td className="py-1.5 px-1 text-right">{Number(local.ferragem) > 0 ? local.ferragem : '—'}</td>
-                      <td className="py-1.5 px-1 text-right">{Number(local.cortina) > 0 ? local.cortina : '—'}</td>
-                      <td className="py-1.5 pl-2 text-right font-semibold text-primary">{total > 0 ? total : '—'}</td>
-                    </tr>
+                    <React.Fragment key={i}>
+                      {showAndarHeader && (
+                        <tr>
+                          <td colSpan={9} className="py-1 px-2 text-xs font-bold text-orange-700 bg-orange-50 text-left">
+                            🏢 {andar}
+                          </td>
+                        </tr>
+                      )}
+                      <tr className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="py-1 pr-2">
+                          <input
+                            type="text"
+                            className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-xs focus:border-primary focus:outline-none"
+                            value={local.andar || ''}
+                            placeholder="ex: Subsolo 1"
+                            onChange={e => {
+                              const newLocais = orc.locais.map((l, j) => j === i ? { ...l, andar: e.target.value } : l)
+                              update({ locais: newLocais })
+                            }}
+                          />
+                        </td>
+                        <td className="py-1.5 pr-3">
+                          <input
+                            type="text"
+                            className="w-full border border-gray-200 rounded px-1.5 py-0.5 text-xs font-medium text-gray-800 focus:border-primary focus:outline-none"
+                            value={local.nome || local.local || ''}
+                            placeholder={`Local ${i + 1}`}
+                            onChange={e => {
+                              const newLocais = orc.locais.map((l, j) => j === i ? { ...l, nome: e.target.value, local: e.target.value } : l)
+                              update({ locais: newLocais })
+                            }}
+                          />
+                        </td>
+                        <td className="py-1.5 px-1 text-right">{Number(local.trinca) > 0 ? local.trinca : '—'}</td>
+                        <td className="py-1.5 px-1 text-right">{Number(local.juntaFria) > 0 ? local.juntaFria : '—'}</td>
+                        <td className="py-1.5 px-1 text-right">{Number(local.ralo) > 0 ? local.ralo : '—'}</td>
+                        <td className="py-1.5 px-1 text-right">{Number(local.juntaDilat) > 0 ? local.juntaDilat : '—'}</td>
+                        <td className="py-1.5 px-1 text-right">{Number(local.ferragem) > 0 ? local.ferragem : '—'}</td>
+                        <td className="py-1.5 px-1 text-right">{Number(local.cortina) > 0 ? local.cortina : '—'}</td>
+                        <td className="py-1.5 pl-2 text-right font-semibold text-primary">{total > 0 ? total : '—'}</td>
+                      </tr>
+                    </React.Fragment>
                   )
-                })}
+                  })
+                })()}
                 {/* Totals row */}
                 <tr className="bg-orange-50 font-bold border-t-2 border-primary">
-                  <td className="py-2 pr-3 text-xs font-bold text-gray-700">TOTAL</td>
+                  <td colSpan={2} className="py-2 pr-3 text-xs font-bold text-gray-700">TOTAL</td>
                   {['trinca','juntaFria','ralo','juntaDilat','ferragem','cortina'].map(k => (
                     <td key={k} className="py-2 px-1 text-right text-primary">
                       {orc.locais.reduce((s,l) => s + (Number(l[k])||0), 0) > 0

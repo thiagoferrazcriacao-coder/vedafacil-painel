@@ -21,8 +21,9 @@ export default function OrcamentosPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [checked, setChecked] = useState(new Set())
   const [deleting, setDeleting] = useState(false)
-  const [duplicating, setDuplicating] = useState(null) // id sendo duplicado
-  const [aprovando, setAprovando] = useState(null) // id sendo aprovado
+  const [duplicating, setDuplicating] = useState(null)
+  const [aprovando, setAprovando] = useState(null)
+  const [togglingEnviado, setTogglingEnviado] = useState(null)
 
   const toggleCheck = (id, e) => {
     e.stopPropagation()
@@ -98,6 +99,19 @@ export default function OrcamentosPage() {
     }
   }
 
+  const handleToggleEnviado = async (e, id) => {
+    e.stopPropagation()
+    setTogglingEnviado(id)
+    try {
+      const res = await api.toggleEnviadoCliente(id)
+      setOrcamentos(prev => prev.map(o => o.id === id ? { ...o, enviadoParaCliente: res.enviadoParaCliente } : o))
+    } catch (err) {
+      alert('Erro: ' + err.message)
+    } finally {
+      setTogglingEnviado(null)
+    }
+  }
+
   const handleNovoManual = async () => {
     try {
       const novo = await api.createOrcamento({ medicaoId: null })
@@ -157,120 +171,146 @@ export default function OrcamentosPage() {
           <p className="text-sm mt-1">Crie orçamentos a partir das medições</p>
         </div>
       ) : (
-        <div className="card p-0 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  {isAdmin && <th className="px-4 py-3 w-10">
-                    <input type="checkbox" checked={checked.size === filtered.length && filtered.length > 0} onChange={toggleAll} className="rounded" />
-                  </th>}
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Nº</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Data</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Cliente</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Cidade</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Data Medição</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Medido por</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Total</th>
-                  <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Medição</th>
-                  <th className="px-4 py-3"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filtered.map(o => {
-                  const st = STATUS[o.status] || STATUS.rascunho
-                  return (
-                    <tr
-                      key={o.id}
-                      className="hover:bg-gray-50 cursor-pointer transition-colors"
-                      onClick={() => navigate(`/orcamentos/${o.id}`)}
-                    >
-                      {isAdmin && <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" checked={checked.has(o.id)} onChange={e => toggleCheck(o.id, e)} className="rounded" />
-                      </td>}
-                      <td className="px-4 py-3 font-mono text-xs text-gray-500">
-                        #{String(o.numero || '').padStart(4, '0')}
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                        {new Date(o.createdAt).toLocaleDateString('pt-BR')}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-gray-800">
-                        {o.cliente || '—'}
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">{o.cidade || '—'}</td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">
-                        {o.dataOrcamento
-                          ? (() => {
-                              const [y, m, d] = o.dataOrcamento.split('-')
-                              return d && m && y ? `${d}/${m}/${y}` : o.dataOrcamento
-                            })()
-                          : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-gray-700 text-xs whitespace-nowrap">
-                        {o.avaliadoPor || '—'}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-800">
-                        {fmt(o.totalLiquido)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`badge ${st.color}`}>{st.label}</span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">
-                        {o.medicaoId ? (
-                          <span
-                            className="cursor-pointer hover:text-primary font-mono"
-                            onClick={e => { e.stopPropagation(); navigate('/medicoes/' + o.medicaoId) }}
-                            title="Ver medição"
-                          >
-                            #{String(o.numeroMedicao || '').padStart(4, '0')}
-                          </span>
-                        ) : '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 justify-end flex-wrap">
-                          <button
-                            className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 font-medium"
-                            onClick={e => { e.stopPropagation(); window.open(api.getOrcamentoPdfUrl(o.id), '_blank'); }}
-                            title="Gerar PDF"
-                          >
-                            📄 PDF
-                          </button>
-                          <button
-                            className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-40"
-                            disabled={duplicating === o.id}
-                            onClick={e => handleDuplicar(e, o.id)}
-                            title="Duplicar este orçamento com novo número"
-                          >
-                            {duplicating === o.id ? '...' : '📋 Duplicar'}
-                          </button>
-                          {o.status !== 'aprovado' && (
-                            <button
-                              className="text-xs px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200 font-semibold disabled:opacity-40"
-                              disabled={aprovando === o.id}
-                              onClick={e => handleAprovarContrato(e, o.id)}
-                              title="Aprovar e gerar contrato"
-                            >
-                              {aprovando === o.id ? '...' : '✅ Aprovar → Contrato'}
-                            </button>
-                          )}
-                          {isAdmin && (
-                            <button
-                              className="text-xs px-2 py-1 rounded bg-red-100 text-red-600 hover:bg-red-200"
-                              onClick={e => handleDelete(e, o.id)}
-                              title="Excluir orçamento"
-                            >
-                              🗑️ Excluir
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+        <div className="space-y-3">
+          {/* Header */}
+          <div className="hidden md:flex items-center gap-3 px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
+            {isAdmin && <div className="w-5 flex-shrink-0"></div>}
+            <div className="w-14 flex-shrink-0">Nº</div>
+            <div className="w-24 flex-shrink-0">Data</div>
+            <div className="flex-1 min-w-0">Cliente</div>
+            <div className="w-28 flex-shrink-0 hidden lg:block">Cidade</div>
+            <div className="w-24 flex-shrink-0 hidden xl:block">Dt. Medição</div>
+            <div className="w-20 flex-shrink-0 hidden xl:block">Medidor</div>
+            <div className="w-28 text-right flex-shrink-0">Total</div>
+            <div className="w-24 text-center flex-shrink-0">Status</div>
+            <div className="w-16 text-center flex-shrink-0">Medição</div>
           </div>
+
+          {filtered.map(o => {
+            const st = STATUS[o.status] || STATUS.rascunho
+            return (
+              <div
+                key={o.id}
+                className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow overflow-hidden"
+              >
+                {/* Info row */}
+                <div
+                  className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                  onClick={() => navigate(`/orcamentos/${o.id}`)}
+                >
+                  {isAdmin && (
+                    <div className="flex-shrink-0" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={checked.has(o.id)}
+                        onChange={e => toggleCheck(o.id, e)}
+                        className="rounded"
+                      />
+                    </div>
+                  )}
+                  <span className="font-mono text-xs text-gray-400 w-14 flex-shrink-0">
+                    #{String(o.numero || '').padStart(4, '0')}
+                  </span>
+                  <span className="text-xs text-gray-500 w-24 flex-shrink-0 whitespace-nowrap">
+                    {new Date(o.createdAt).toLocaleDateString('pt-BR')}
+                  </span>
+                  <span className="font-semibold text-gray-800 flex-1 min-w-0 truncate">
+                    {o.cliente || '—'}
+                  </span>
+                  <span className="text-sm text-gray-500 w-28 flex-shrink-0 truncate hidden lg:block">
+                    {o.cidade || '—'}
+                  </span>
+                  <span className="text-xs text-gray-500 w-24 flex-shrink-0 hidden xl:block">
+                    {o.dataOrcamento
+                      ? (() => {
+                          const [y, m, d] = o.dataOrcamento.split('-')
+                          return d && m && y ? `${d}/${m}/${y}` : o.dataOrcamento
+                        })()
+                      : '—'}
+                  </span>
+                  <span className="text-xs text-gray-600 w-20 flex-shrink-0 hidden xl:block truncate">
+                    {o.avaliadoPor || '—'}
+                  </span>
+                  <span className="font-semibold text-gray-800 w-28 text-right flex-shrink-0">
+                    {fmt(o.totalLiquido)}
+                  </span>
+                  <div className="flex flex-col gap-1 w-24 flex-shrink-0 items-center">
+                    <span className={`badge ${st.color} w-full text-center`}>
+                      {st.label}
+                    </span>
+                    {o.enviadoParaCliente && (
+                      <span className="badge bg-emerald-100 text-emerald-700 w-full text-center text-xs font-bold">
+                        ✉️ CLIENTE
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-400 w-16 text-center flex-shrink-0">
+                    {o.medicaoId ? (
+                      <span
+                        className="cursor-pointer hover:text-primary font-mono"
+                        onClick={e => { e.stopPropagation(); navigate('/medicoes/' + o.medicaoId) }}
+                        title="Ver medição"
+                      >
+                        #{String(o.numeroMedicao || '').padStart(4, '0')}
+                      </span>
+                    ) : '—'}
+                  </span>
+                </div>
+
+                {/* Actions row */}
+                <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex-wrap">
+                  <button
+                    className="text-xs px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 font-medium flex items-center gap-1 transition-colors"
+                    onClick={e => { e.stopPropagation(); window.open(api.getOrcamentoPdfUrl(o.id), '_blank') }}
+                  >
+                    📄 PDF
+                  </button>
+                  <button
+                    className="text-xs px-3 py-1.5 rounded-lg bg-gray-200 text-gray-600 hover:bg-gray-300 font-medium disabled:opacity-40 flex items-center gap-1 transition-colors"
+                    disabled={duplicating === o.id}
+                    onClick={e => handleDuplicar(e, o.id)}
+                  >
+                    {duplicating === o.id ? '...' : '📋 Duplicar'}
+                  </button>
+                  {/* Toggle ENVIADO PARA CLIENTE */}
+                  <button
+                    title={o.enviadoParaCliente ? 'Clique para desmarcar enviado' : 'Marcar como enviado para o cliente'}
+                    disabled={togglingEnviado === o.id}
+                    onClick={e => handleToggleEnviado(e, o.id)}
+                    className={`text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-all disabled:opacity-40 ${
+                      o.enviadoParaCliente
+                        ? 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-sm'
+                        : 'bg-white text-gray-500 border border-gray-300 hover:border-emerald-400 hover:text-emerald-600'
+                    }`}
+                  >
+                    {togglingEnviado === o.id ? '...' : (
+                      o.enviadoParaCliente ? '✉️ Enviado ao Cliente' : '✉️ Enviado ao Cliente?'
+                    )}
+                  </button>
+                  {o.status !== 'aprovado' && (
+                    <button
+                      className="text-xs px-3 py-1.5 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 font-semibold disabled:opacity-40 flex items-center gap-1 transition-colors"
+                      disabled={aprovando === o.id}
+                      onClick={e => handleAprovarContrato(e, o.id)}
+                    >
+                      {aprovando === o.id ? '...' : '✅ Aprovar → Contrato'}
+                    </button>
+                  )}
+                  {isAdmin && (
+                    <>
+                      <div className="w-px h-5 bg-gray-300 mx-0.5" />
+                      <button
+                        className="text-xs px-3 py-1.5 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 font-medium flex items-center gap-1 transition-colors"
+                        onClick={e => handleDelete(e, o.id)}
+                      >
+                        🗑️ Excluir
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

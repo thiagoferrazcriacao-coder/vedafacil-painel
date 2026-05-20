@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
 import { useAuth } from '../App.jsx'
+import ContratoEditorModal from '../components/ContratoEditorModal.jsx'
 
 const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
 
@@ -32,7 +33,7 @@ function getPeriodRange(period) {
     return [start, end]
   }
   if (period === 'semana') {
-    const day = now.getDay() // 0=Sun
+    const day = now.getDay()
     const diffToMon = (day === 0 ? -6 : 1 - day)
     const mon = new Date(y, m, d + diffToMon, 0, 0, 0, 0)
     const sun = new Date(mon)
@@ -69,8 +70,8 @@ export default function ContratosPage() {
   const [checked, setChecked] = useState(new Set())
   const [deleting, setDeleting] = useState(false)
   const [updatingStatus, setUpdatingStatus] = useState(null)
+  const [editorContratoId, setEditorContratoId] = useState(null)
 
-  // Period filter state
   const [period, setPeriod] = useState('')
   const [dataInicio, setDataInicio] = useState('')
   const [dataFim, setDataFim] = useState('')
@@ -120,10 +121,8 @@ export default function ContratosPage() {
 
   const filtered = useMemo(() => {
     return contratos.filter(c => {
-      // Status filter
       if (statusFilter && c.status !== statusFilter) return false
 
-      // Period filter
       if (period && period !== 'personalizado') {
         const range = getPeriodRange(period)
         if (range) {
@@ -143,7 +142,6 @@ export default function ContratosPage() {
         }
       }
 
-      // Search filter
       if (search) {
         const q = search.toLowerCase()
         return [c.cliente, c.cidade, String(c.numero)].filter(Boolean).some(v => v.toLowerCase().includes(q))
@@ -152,7 +150,6 @@ export default function ContratosPage() {
     })
   }, [contratos, statusFilter, period, dataInicio, dataFim, search])
 
-  // Summary cards computed from filtered list
   const summary = useMemo(() => {
     const result = {
       rascunho: { count: 0, total: 0 },
@@ -195,15 +192,22 @@ export default function ContratosPage() {
   ]
 
   const handlePeriodClick = (key) => {
-    if (period === key) {
-      setPeriod('')
-    } else {
-      setPeriod(key)
-    }
+    if (period === key) setPeriod('')
+    else setPeriod(key)
   }
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      {editorContratoId && (
+        <ContratoEditorModal
+          contratoId={editorContratoId}
+          onClose={() => setEditorContratoId(null)}
+          onSaved={() => {
+            setEditorContratoId(null)
+            api.getContratos().then(setContratos).catch(console.error)
+          }}
+        />
+      )}
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-4 flex-wrap">
           <div>
@@ -274,7 +278,6 @@ export default function ContratosPage() {
             <button
               onClick={() => { setPeriod(''); setDataInicio(''); setDataFim('') }}
               className="text-xs px-2 py-1.5 text-gray-400 hover:text-gray-600 transition-colors"
-              title="Limpar filtro de período"
             >
               ✕ Limpar
             </button>
@@ -285,21 +288,11 @@ export default function ContratosPage() {
           <div className="flex gap-3 mt-3 flex-wrap items-center">
             <div className="flex items-center gap-2">
               <label className="text-xs text-gray-500 font-medium whitespace-nowrap">De:</label>
-              <input
-                type="date"
-                className="input text-sm"
-                value={dataInicio}
-                onChange={e => setDataInicio(e.target.value)}
-              />
+              <input type="date" className="input text-sm" value={dataInicio} onChange={e => setDataInicio(e.target.value)} />
             </div>
             <div className="flex items-center gap-2">
               <label className="text-xs text-gray-500 font-medium whitespace-nowrap">Até:</label>
-              <input
-                type="date"
-                className="input text-sm"
-                value={dataFim}
-                onChange={e => setDataFim(e.target.value)}
-              />
+              <input type="date" className="input text-sm" value={dataFim} onChange={e => setDataFim(e.target.value)} />
             </div>
           </div>
         )}
@@ -319,99 +312,111 @@ export default function ContratosPage() {
           <p className="text-sm mt-1">Contratos são gerados ao aprovar orçamentos</p>
         </div>
       ) : (
-        <div className="card p-0 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  {isAdmin && <th className="px-4 py-3 w-10">
-                    <input type="checkbox" checked={checked.size === filtered.length && filtered.length > 0} onChange={toggleAll} className="rounded" />
-                  </th>}
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Nº</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Data</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Cliente</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Cidade</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Valor</th>
-                  <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
-                  <th className="text-center px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Data Status</th>
-                  <th className="px-4 py-3"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filtered.map(c => {
-                  const st = STATUS[c.status] || STATUS.rascunho
-                  return (
-                    <tr
-                      key={c.id}
-                      className="hover:bg-gray-50 cursor-pointer transition-colors"
-                      onClick={() => navigate(`/contratos/${c.id}`)}
-                    >
-                      {isAdmin && <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" checked={checked.has(c.id)} onChange={e => toggleCheck(c.id, e)} className="rounded" />
-                      </td>}
-                      <td className="px-4 py-3 font-mono text-xs text-gray-500">
-                        #{String(c.numero || '').padStart(4, '0')}
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                        {new Date(c.createdAt).toLocaleDateString('pt-BR')}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-gray-800">{c.cliente || '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{c.cidade || '—'}</td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-800">{fmt(c.totalLiquido)}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`badge ${st.color}`}>{st.label}</span>
-                      </td>
-                      <td className="px-4 py-3 text-center text-xs text-gray-500">
-                        {(() => {
-                          const hist = c.statusHistorico || []
-                          const ultima = hist[hist.length - 1]
-                          return ultima?.data ? new Date(ultima.data).toLocaleDateString('pt-BR') : '—'
-                        })()}
-                      </td>
-                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                        <div className="flex gap-1.5 items-center flex-wrap justify-end">
-                          <button
-                            className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200"
-                            onClick={e => { e.stopPropagation(); window.open(api.getContratoPdfUrl(c.id), '_blank') }}
-                            title="Ver PDF do contrato"
-                          >
-                            📄
-                          </button>
-                          {c.status !== 'pendente_assinatura' && (
-                            <button
-                              className="text-xs px-2 py-1 rounded bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-40 whitespace-nowrap"
-                              disabled={updatingStatus === c.id}
-                              onClick={e => handleChangeStatus(e, c.id, 'pendente_assinatura')}
-                              title="Marcar como Pendente de Assinatura"
-                            >
-                              {updatingStatus === c.id ? '...' : '📝 Pend.'}
-                            </button>
-                          )}
-                          {c.status !== 'assinado' && (
-                            <button
-                              className="text-xs px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200 disabled:opacity-40"
-                              disabled={updatingStatus === c.id}
-                              onClick={e => handleChangeStatus(e, c.id, 'assinado')}
-                              title="Marcar como Assinado"
-                            >
-                              {updatingStatus === c.id ? '...' : '✅'}
-                            </button>
-                          )}
-                          <button
-                            className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200"
-                            onClick={e => { e.stopPropagation(); navigate(`/ordens-servico?contratoId=${c.id}`) }}
-                            title="Criar Ordem de Serviço"
-                          >
-                            OS
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+        <div className="space-y-3">
+          {/* Header row */}
+          <div className="hidden md:flex items-center gap-3 px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
+            {isAdmin && <div className="w-5 flex-shrink-0"></div>}
+            <div className="w-14 flex-shrink-0">Nº</div>
+            <div className="w-24 flex-shrink-0">Data</div>
+            <div className="flex-1 min-w-0">Cliente</div>
+            <div className="w-32 flex-shrink-0">Cidade</div>
+            <div className="w-28 text-right flex-shrink-0">Valor</div>
+            <div className="w-32 text-center flex-shrink-0">Status</div>
+            <div className="w-24 text-right flex-shrink-0">Últ. status</div>
           </div>
+
+          {filtered.map(c => {
+            const st = STATUS[c.status] || STATUS.rascunho
+            const hist = c.statusHistorico || []
+            const ultima = hist[hist.length - 1]
+            const ultimaData = ultima?.data ? new Date(ultima.data).toLocaleDateString('pt-BR') : '—'
+
+            return (
+              <div
+                key={c.id}
+                className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow overflow-hidden"
+              >
+                {/* Info row — clicável para editar */}
+                <div
+                  className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                  onClick={() => navigate(`/contratos/${c.id}`)}
+                >
+                  {isAdmin && (
+                    <div className="flex-shrink-0" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={checked.has(c.id)}
+                        onChange={e => toggleCheck(c.id, e)}
+                        className="rounded"
+                      />
+                    </div>
+                  )}
+                  <span className="font-mono text-xs text-gray-400 w-14 flex-shrink-0">
+                    #{String(c.numero || '').padStart(4, '0')}
+                  </span>
+                  <span className="text-xs text-gray-500 w-24 flex-shrink-0 whitespace-nowrap">
+                    {new Date(c.createdAt).toLocaleDateString('pt-BR')}
+                  </span>
+                  <span className="font-semibold text-gray-800 flex-1 min-w-0 truncate">
+                    {c.cliente || '—'}
+                  </span>
+                  <span className="text-sm text-gray-500 w-32 flex-shrink-0 truncate hidden md:block">
+                    {c.cidade || '—'}
+                  </span>
+                  <span className="font-semibold text-gray-800 w-28 text-right flex-shrink-0">
+                    {fmt(c.totalLiquido)}
+                  </span>
+                  <span className={`badge ${st.color} w-32 text-center flex-shrink-0`}>
+                    {st.label}
+                  </span>
+                  <span className="text-xs text-gray-400 w-24 text-right flex-shrink-0 hidden lg:block">
+                    {ultimaData}
+                  </span>
+                </div>
+
+                {/* Actions row */}
+                <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex-wrap">
+                  <button
+                    className="text-xs px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 font-medium flex items-center gap-1 transition-colors"
+                    onClick={e => { e.stopPropagation(); window.open(api.getContratoPdfUrl(c.id), '_blank') }}
+                  >
+                    📄 PDF
+                  </button>
+                  <button
+                    className={`text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1 transition-colors ${c.textoPersonalizado ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'}`}
+                    onClick={e => { e.stopPropagation(); setEditorContratoId(c.id) }}
+                    title="Editar texto do contrato antes de gerar PDF"
+                  >
+                    ✏️ {c.textoPersonalizado ? 'Editar no PDF *' : 'Editar no PDF'}
+                  </button>
+                  {c.status !== 'pendente_assinatura' && (
+                    <button
+                      className="text-xs px-3 py-1.5 rounded-lg bg-orange-100 text-orange-700 hover:bg-orange-200 font-medium disabled:opacity-40 flex items-center gap-1 transition-colors"
+                      disabled={updatingStatus === c.id}
+                      onClick={e => handleChangeStatus(e, c.id, 'pendente_assinatura')}
+                    >
+                      {updatingStatus === c.id ? '...' : '📝 Pend. Assinatura'}
+                    </button>
+                  )}
+                  {c.status !== 'assinado' && (
+                    <button
+                      className="text-xs px-3 py-1.5 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 font-medium disabled:opacity-40 flex items-center gap-1 transition-colors"
+                      disabled={updatingStatus === c.id}
+                      onClick={e => handleChangeStatus(e, c.id, 'assinado')}
+                    >
+                      {updatingStatus === c.id ? '...' : '✅ Marcar Assinado'}
+                    </button>
+                  )}
+                  <button
+                    className="text-xs px-3 py-1.5 rounded-lg bg-gray-200 text-gray-600 hover:bg-gray-300 font-medium flex items-center gap-1 transition-colors"
+                    onClick={e => { e.stopPropagation(); navigate(`/ordens-servico?contratoId=${c.id}`) }}
+                  >
+                    📋 Criar OS
+                  </button>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

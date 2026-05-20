@@ -99,19 +99,28 @@ export default function AgendaPage() {
     })
   }, [ordens, filtroStatus, filtroTipo, filtroEquipe])
 
-  // Mapa dia→[OS] para views rápidas
+  // Mapa dia→[OS] para views rápidas — usa diasAtivos se disponível
   const osPerDay = useMemo(() => {
     const map = {}
     ordensFiltradas.forEach(os => {
-      const start = parseLocal(os.dataInicio)
-      const end   = parseLocal(os.dataTermino) || start
-      if (!start) return
-      const cur = new Date(start)
-      while (cur <= end) {
-        const key = toStr(cur)
-        if (!map[key]) map[key] = []
-        map[key].push(os)
-        cur.setDate(cur.getDate() + 1)
+      if (os.diasAtivos?.length > 0) {
+        // Usa os dias específicos de trabalho cadastrados
+        os.diasAtivos.forEach(day => {
+          if (!map[day]) map[day] = []
+          map[day].push(os)
+        })
+      } else {
+        // Fallback: range contínuo start→end
+        const start = parseLocal(os.dataInicio)
+        const end   = parseLocal(os.dataTermino) || start
+        if (!start) return
+        const cur = new Date(start)
+        while (cur <= end) {
+          const key = toStr(cur)
+          if (!map[key]) map[key] = []
+          map[key].push(os)
+          cur.setDate(cur.getDate() + 1)
+        }
       }
     })
     return map
@@ -326,12 +335,26 @@ export default function AgendaPage() {
 
                 return (
                   <tr key={eq.id} className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
-                    {/* Nome da equipe */}
+                    {/* Nome da equipe + membros */}
                     <td className="border-r border-gray-200 p-2 align-top">
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: eq.cor }} />
                         <span className="text-xs font-semibold text-gray-700 leading-tight">{eq.nome}</span>
                       </div>
+                      {/* Membros da equipe */}
+                      {eq.id !== '__sem_equipe__' && (() => {
+                        const fullEq = equipes.find(e => (e.id || e._id) === eq.id)
+                        return fullEq?.membros?.length > 0 ? (
+                          <div className="mt-1 space-y-0.5">
+                            {fullEq.membros.map((m, mi) => (
+                              <div key={mi} className="flex items-center gap-1 text-[10px] text-gray-400 leading-none">
+                                <span>👤</span>
+                                <span>{m}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null
+                      })()}
                       {!temOSNaSemana && (
                         <div className="text-xs text-gray-300 mt-1 italic">sem obra</div>
                       )}
@@ -358,25 +381,34 @@ export default function AgendaPage() {
                             const isReparo = (os.tipo || 'normal') === 'reparo'
                             const isStart  = sameDay(d, parseLocal(os.dataInicio))
                             const isEnd    = sameDay(d, parseLocal(os.dataTermino) || parseLocal(os.dataInicio))
+                            const eqCor    = eq.cor || '#9ca3af'
+                            const chipBg   = os.status === 'cancelada' ? '#9ca3af'
+                              : os.status === 'concluida' ? eqCor + 'bb'
+                              : eqCor
                             return (
                               <div key={id}
                                 onClick={() => navigate(`/ordens-servico/${id}`)}
                                 title={`OS #${String(os.numero||'').padStart(3,'0')} — ${os.cliente}\nStatus: ${STATUS_LABEL[os.status]||os.status}${os.tipoReparo?' — '+os.tipoReparo:''}`}
-                                className="cursor-pointer mb-1 hover:opacity-80 transition-opacity text-xs leading-tight px-1.5 py-1 rounded"
+                                className="cursor-pointer mb-1 hover:brightness-90 transition-all text-xs leading-tight rounded overflow-hidden"
                                 style={{
-                                  background: c.bg,
-                                  color: c.text,
-                                  border: `1.5px solid ${c.border}`,
-                                  borderLeft: isStart ? `3px solid ${eq.cor}` : `1.5px solid ${c.border}`,
-                                  borderRadius: isStart && isEnd ? 4 : isStart ? '4px 0 0 4px' : isEnd ? '0 4px 4px 0' : 2,
+                                  background: chipBg,
+                                  boxShadow: `0 1px 3px ${eqCor}55`,
                                 }}>
-                                <div className="font-bold truncate">
-                                  {isReparo ? '🔧' : '🏗️'} #{String(os.numero||'').padStart(3,'0')}
+                                {/* Faixa de status no topo */}
+                                <div style={{ height: 3, background: c.border, opacity: 0.9 }} />
+                                <div className="px-1.5 py-0.5">
+                                  <div className="font-bold text-white truncate leading-tight">
+                                    {isReparo ? '🔧 ' : '🏗️ '}#{String(os.numero||'').padStart(3,'0')}
+                                  </div>
+                                  <div className="truncate text-white leading-tight" style={{ fontSize: 9, opacity: 0.85 }}>
+                                    {os.cliente}
+                                  </div>
+                                  {isStart && os.dataTermino && !isEnd && (
+                                    <div className="text-white leading-tight" style={{ fontSize: 9, opacity: 0.6 }}>
+                                      até {fmtPtBR(parseLocal(os.dataTermino))}
+                                    </div>
+                                  )}
                                 </div>
-                                <div className="truncate opacity-80">{os.cliente}</div>
-                                {isStart && os.dataTermino && !isEnd && (
-                                  <div className="text-xs opacity-60">até {fmtPtBR(parseLocal(os.dataTermino))}</div>
-                                )}
                               </div>
                             )
                           })}
@@ -553,12 +585,18 @@ export default function AgendaPage() {
                           {isReparo && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">REPARO</span>}
                           {prazo && <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${prazo.cls}`}>⏱ {prazo.text}</span>}
                         </div>
-                        <div className="flex items-center gap-2 mb-0.5">
+                        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                           {os.equipeNome && (
                             <span className="text-xs font-semibold px-2 py-0.5 rounded-full text-white" style={{ background: eqColor }}>
                               👷 {os.equipeNome}
                             </span>
                           )}
+                          {/* Membros da equipe */}
+                          {eq?.membros?.length > 0 && eq.membros.map((m, mi) => (
+                            <span key={mi} className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">
+                              👤 {m}
+                            </span>
+                          ))}
                           {os.tecnicoResponsavel && (
                             <span className="text-xs bg-orange-50 text-orange-700 px-2 py-0.5 rounded-full">🔧 {os.tecnicoResponsavel}</span>
                           )}

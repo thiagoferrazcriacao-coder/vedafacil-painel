@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../api/client.js'
 import { useAuth } from '../App.jsx'
+import WorkdayPicker from '../components/WorkdayPicker.jsx'
 
 const STATUS_CONFIG = {
   agendada:              { label: 'Agendada',          color: 'bg-blue-100 text-blue-700' },
@@ -15,11 +16,16 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
   const [contratos, setContratos] = useState([])
   const [equipes, setEquipes] = useState([])
   const [tecnicos, setTecnicos] = useState([])
+  const [modo, setModo] = useState('existente') // 'existente' | 'manual'
   const [form, setForm] = useState({
-    contratoId: contratoIdInicial || '', equipeId: '', dataInicio: '', dataTermino: '', obs: '', tecnicoResponsavel: ''
+    contratoId: contratoIdInicial || '', equipeId: '', equipeNome: '', dataInicio: '', dataTermino: '', diasAtivos: [], obs: '', tecnicoResponsavel: '',
+    // campos modo manual
+    contratoManualNome: '', contratoManualNumero: '', contratoManualPdfBase64: '',
+    cliente: '', endereco: '', cidade: '', celular: ''
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [pdfLoading, setPdfLoading] = useState(false)
 
   useEffect(() => {
     Promise.all([api.getContratos(), api.getEquipes(), api.getPrecos()])
@@ -35,7 +41,6 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
     const toDateInput = (d) => {
       if (!d) return ''
       const s = String(d)
-      // já está em YYYY-MM-DD
       if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
       const dt = new Date(s)
       if (isNaN(dt.getTime())) return ''
@@ -48,25 +53,57 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
     }))
   }, [form.contratoId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handlePdfUpload = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) { setError('PDF muito grande (máx 5MB)'); return }
+    setPdfLoading(true)
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setForm(f => ({ ...f, contratoManualPdfBase64: ev.target.result }))
+      setPdfLoading(false)
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
   const handleSubmit = async () => {
-    if (!form.contratoId) { setError('Selecione um contrato'); return }
     if (!form.dataInicio) { setError('Informe a data de início'); return }
     setSaving(true)
     setError('')
     try {
-      const c = contratoSel
-      const payload = {
-        ...form,
-        cliente: c?.cliente || '',
-        endereco: c?.endereco || '',
-        cidade: c?.cidade || '',
-        celular: c?.celular || '',
-        orcamentoId: c?.orcamentoId || '',
-        diasTrabalho: c?.diasTrabalho || 0,
-        consumoProduto: c?.consumoProduto || 0,
-        qtdInjetores: c?.qtdInjetores || 0,
-        pontos: c?.locais || [],
-        itens: c?.itens || [],
+      let payload
+      if (modo === 'manual') {
+        if (!form.contratoManualNome.trim()) { setError('Informe o nome do contrato'); setSaving(false); return }
+        if (!form.cliente.trim()) { setError('Informe o nome do cliente'); setSaving(false); return }
+        payload = {
+          ...form,
+          contratoManual: true,
+          pontos: [],
+          itens: [],
+          diasTrabalho: 0,
+          consumoProduto: 0,
+          qtdInjetores: 0,
+          orcamentoId: '',
+          contratoId: '',
+        }
+      } else {
+        if (!form.contratoId) { setError('Selecione um contrato'); setSaving(false); return }
+        const c = contratoSel
+        payload = {
+          ...form,
+          contratoManual: false,
+          cliente: c?.cliente || '',
+          endereco: c?.endereco || '',
+          cidade: c?.cidade || '',
+          celular: c?.celular || '',
+          orcamentoId: c?.orcamentoId || '',
+          diasTrabalho: c?.diasTrabalho || 0,
+          consumoProduto: c?.consumoProduto || 0,
+          qtdInjetores: c?.qtdInjetores || 0,
+          pontos: c?.locais || [],
+          itens: c?.itens || [],
+        }
       }
       await onSave(payload)
       onClose()
@@ -86,53 +123,156 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
         <div className="p-5 overflow-auto flex-1 space-y-4">
           {error && <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 text-sm">{error}</div>}
 
-          <div>
-            <label className="label">Contrato *</label>
-            <select className="input" value={form.contratoId} onChange={e => setForm(f => ({ ...f, contratoId: e.target.value }))}>
-              <option value="">Selecione um contrato...</option>
-              {contratos.map(c => (
-                <option key={c.id || c._id} value={c.id || c._id}>
-                  #{String(c.numero || '').padStart(4, '0')} — {c.cliente}
-                </option>
-              ))}
-            </select>
+          {/* Toggle modo */}
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm font-medium">
+            <button
+              className={`flex-1 py-2 transition-colors ${modo === 'existente' ? 'bg-primary text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              onClick={() => { setModo('existente'); setError('') }}>
+              📋 Contrato no sistema
+            </button>
+            <button
+              className={`flex-1 py-2 transition-colors border-l border-gray-200 ${modo === 'manual' ? 'bg-amber-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              onClick={() => { setModo('manual'); setError('') }}>
+              ✍️ Contrato manual
+            </button>
           </div>
 
-          {contratoSel && (
-            <div className="bg-blue-50 rounded-lg p-3 text-sm">
-              <p className="font-medium text-blue-800">{contratoSel.cliente}</p>
-              <p className="text-blue-600">{contratoSel.endereco}{contratoSel.cidade ? ` — ${contratoSel.cidade}` : ''}</p>
-              {(contratoSel.locais || []).length > 0 && (
-                <p className="text-blue-500 mt-1">{contratoSel.locais.length} local(is) · {contratoSel.prazoExecucao || contratoSel.diasTrabalho || 0} dia(s) úteis</p>
+          {/* ── MODO: Contrato existente ── */}
+          {modo === 'existente' && (
+            <>
+              <div>
+                <label className="label">Contrato *</label>
+                <select className="input" value={form.contratoId} onChange={e => setForm(f => ({ ...f, contratoId: e.target.value }))}>
+                  <option value="">Selecione um contrato...</option>
+                  {contratos.map(c => (
+                    <option key={c.id || c._id} value={c.id || c._id}>
+                      #{String(c.numero || '').padStart(4, '0')} — {c.cliente}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {contratoSel && (
+                <div className="bg-blue-50 rounded-lg p-3 text-sm">
+                  <p className="font-medium text-blue-800">{contratoSel.cliente}</p>
+                  <p className="text-blue-600">{contratoSel.endereco}{contratoSel.cidade ? ` — ${contratoSel.cidade}` : ''}</p>
+                  {(contratoSel.locais || []).length > 0 && (
+                    <p className="text-blue-500 mt-1">{contratoSel.locais.length} local(is) · {contratoSel.prazoExecucao || contratoSel.diasTrabalho || 0} dia(s) úteis</p>
+                  )}
+                  {(contratoSel.dataInicio || contratoSel.dataTermino) && (
+                    <p className="text-blue-400 mt-1 text-xs">
+                      📅 Datas do contrato: {contratoSel.dataInicio || '—'} → {contratoSel.dataTermino || '—'}
+                    </p>
+                  )}
+                </div>
               )}
-              {(contratoSel.dataInicio || contratoSel.dataTermino) && (
-                <p className="text-blue-400 mt-1 text-xs">
-                  📅 Datas do contrato: {contratoSel.dataInicio || '—'} → {contratoSel.dataTermino || '—'}
-                </p>
-              )}
+            </>
+          )}
+
+          {/* ── MODO: Contrato manual ── */}
+          {modo === 'manual' && (
+            <div className="space-y-3">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                <p className="font-semibold">📁 Modo transição — contrato físico</p>
+                <p className="mt-0.5">Use quando o contrato foi assinado no sistema antigo e ainda não está cadastrado aqui.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Nome do contrato *</label>
+                  <input className="input" value={form.contratoManualNome} onChange={e => setForm(f => ({ ...f, contratoManualNome: e.target.value }))} placeholder="Ex: Contrato Residencial..." />
+                </div>
+                <div>
+                  <label className="label">Número / Ref.</label>
+                  <input className="input" value={form.contratoManualNumero} onChange={e => setForm(f => ({ ...f, contratoManualNumero: e.target.value }))} placeholder="Ex: 2024/001" />
+                </div>
+              </div>
+              <div>
+                <label className="label">Anexar PDF do contrato</label>
+                <label className={`flex items-center gap-2 border-2 border-dashed rounded-lg px-4 py-3 cursor-pointer transition-colors ${form.contratoManualPdfBase64 ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-primary bg-gray-50'}`}>
+                  <input type="file" accept="application/pdf" className="hidden" onChange={handlePdfUpload} />
+                  {pdfLoading ? (
+                    <span className="text-sm text-gray-500">Carregando PDF...</span>
+                  ) : form.contratoManualPdfBase64 ? (
+                    <>
+                      <span className="text-green-600 text-lg">✅</span>
+                      <span className="text-sm text-green-700 font-medium">PDF anexado</span>
+                      <button type="button" className="ml-auto text-xs text-red-500 hover:text-red-700" onClick={e => { e.preventDefault(); setForm(f => ({ ...f, contratoManualPdfBase64: '' })) }}>Remover</button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-gray-400 text-lg">📄</span>
+                      <span className="text-sm text-gray-500">Clique para anexar (máx. 5MB)</span>
+                    </>
+                  )}
+                </label>
+              </div>
+              <div className="border-t pt-3">
+                <p className="text-xs font-semibold text-gray-600 mb-2">Dados do cliente</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="label">Cliente *</label>
+                    <input className="input" value={form.cliente} onChange={e => setForm(f => ({ ...f, cliente: e.target.value }))} placeholder="Nome do cliente" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="label">Endereço</label>
+                    <input className="input" value={form.endereco} onChange={e => setForm(f => ({ ...f, endereco: e.target.value }))} placeholder="Rua, número, complemento" />
+                  </div>
+                  <div>
+                    <label className="label">Cidade</label>
+                    <input className="input" value={form.cidade} onChange={e => setForm(f => ({ ...f, cidade: e.target.value }))} placeholder="Cidade" />
+                  </div>
+                  <div>
+                    <label className="label">Celular</label>
+                    <input className="input" value={form.celular} onChange={e => setForm(f => ({ ...f, celular: e.target.value }))} placeholder="(21) 99999-0000" />
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
+          {/* ── Campos comuns ── */}
           <div>
             <label className="label">Equipe</label>
-            <select className="input" value={form.equipeId} onChange={e => setForm(f => ({ ...f, equipeId: e.target.value }))}>
+            <select className="input" value={form.equipeId} onChange={e => {
+              const eq = equipes.find(x => (x.id || x._id) === e.target.value)
+              setForm(f => ({ ...f, equipeId: e.target.value, equipeNome: eq?.nome || '' }))
+            }}>
               <option value="">Sem equipe atribuída</option>
               {equipes.filter(e => e.ativa !== false).map(eq => (
                 <option key={eq.id || eq._id} value={eq.id || eq._id}>{eq.nome}</option>
               ))}
             </select>
+            {form.equipeId && (() => {
+              const eq = equipes.find(x => (x.id || x._id) === form.equipeId)
+              return eq?.membros?.length > 0 ? (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {eq.membros.map((m, i) => (
+                    <span key={i} className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full">👤 {m}</span>
+                  ))}
+                </div>
+              ) : null
+            })()}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Data de Início *</label>
-              <input type="date" className="input" value={form.dataInicio} onChange={e => setForm(f => ({ ...f, dataInicio: e.target.value }))} />
+              <input type="date" className="input" value={form.dataInicio}
+                onChange={e => setForm(f => ({ ...f, dataInicio: e.target.value, diasAtivos: [] }))} />
             </div>
             <div>
               <label className="label">Data Prevista de Término</label>
-              <input type="date" className="input" value={form.dataTermino} onChange={e => setForm(f => ({ ...f, dataTermino: e.target.value }))} />
+              <input type="date" className="input" value={form.dataTermino}
+                onChange={e => setForm(f => ({ ...f, dataTermino: e.target.value, diasAtivos: [] }))} />
             </div>
           </div>
+
+          <WorkdayPicker
+            dataInicio={form.dataInicio}
+            dataTermino={form.dataTermino}
+            diasAtivos={form.diasAtivos}
+            onChange={dias => setForm(f => ({ ...f, diasAtivos: dias }))}
+          />
 
           <div>
             <label className="label">Técnico Responsável</label>
@@ -456,6 +596,9 @@ export default function OrdensServicoPage() {
             const cfg = STATUS_CONFIG[os.status] || STATUS_CONFIG.agendada
             const isReparo = (os.tipo || 'normal') === 'reparo'
             const isSel = selecionados.includes(id)
+            const pontos = os.pontos || []
+            const temCroqui = pontos.some(p => p.croquiBase64 || p.croquiOtimizado)
+            const pendenteCroqui = pontos.length > 0 && !temCroqui && os.status !== 'cancelada'
             return (
               <div key={id}
                 className={`card hover:shadow-md transition-shadow cursor-pointer ${
@@ -485,6 +628,16 @@ export default function OrdensServicoPage() {
                       )}
                       {os.tecnicoResponsavel && (
                         <span className="text-xs bg-orange-50 text-orange-700 px-2 py-0.5 rounded-full">🔧 {os.tecnicoResponsavel}</span>
+                      )}
+                      {os.contratoManual && (
+                        <span className="text-xs bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded-full font-semibold">
+                          📁 Contrato Manual
+                        </span>
+                      )}
+                      {pendenteCroqui && (
+                        <span className="text-xs bg-purple-100 text-purple-700 border border-purple-300 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
+                          📐 Pend. Croqui
+                        </span>
                       )}
                     </div>
                     <p className="font-medium text-gray-800 truncate">{os.cliente}</p>

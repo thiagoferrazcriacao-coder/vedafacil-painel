@@ -104,14 +104,20 @@ function NovaMedicaoModal({ onClose, onCreated }) {
 }
 
 const STATUS_COLORS = {
-  pendente: 'bg-yellow-100 text-yellow-800',
+  recebida:  'bg-green-100 text-green-800',
+  reaberta:  'bg-amber-100 text-amber-800',
+  alterada:  'bg-red-100 text-red-700 font-bold animate-pulse',
+  pendente:  'bg-yellow-100 text-yellow-800',
   em_andamento: 'bg-blue-100 text-blue-800',
   concluido: 'bg-green-100 text-green-800',
   cancelado: 'bg-red-100 text-red-800'
 }
 
 const STATUS_LABELS = {
-  pendente: 'Pendente',
+  recebida:  'Recebida',
+  reaberta:  'Reaberta',
+  alterada:  '⚠️ Alterada',
+  pendente:  'Pendente',
   em_andamento: 'Em Andamento',
   concluido: 'Concluído',
   cancelado: 'Cancelado'
@@ -349,12 +355,21 @@ export default function MedicoesPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          className="btn-primary text-xs py-1 px-3"
-                          onClick={(e) => { e.stopPropagation(); navigate(`/orcamentos/novo/${m.id}`) }}
-                        >
-                          Gerar Orçamento
-                        </button>
+                        {m.status === 'alterada' ? (
+                          <button
+                            className="text-xs py-1 px-3 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 animate-pulse"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/medicoes/${m.id}`) }}
+                          >
+                            ⚠️ Ver Alterações
+                          </button>
+                        ) : !m.temOrcamento ? (
+                          <button
+                            className="btn-primary text-xs py-1 px-3"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/orcamentos/novo/${m.id}`) }}
+                          >
+                            Gerar Orçamento
+                          </button>
+                        ) : null}
                       </td>
                     </tr>
                   ))}
@@ -469,9 +484,11 @@ function MedicaoPanel({ medicao: m, onClose, onGenerateOrcamento, onViewDetail }
       </div>
 
       <div className="mt-6 space-y-2">
-        <button className="btn-primary w-full" onClick={onGenerateOrcamento}>
-          Gerar Orçamento
-        </button>
+        {!m.temOrcamento && (
+          <button className="btn-primary w-full" onClick={onGenerateOrcamento}>
+            Gerar Orçamento
+          </button>
+        )}
         <button className="btn-secondary w-full text-sm" onClick={() => onViewDetail && onViewDetail()}>
           Ver detalhes completos
         </button>

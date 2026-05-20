@@ -4,26 +4,20 @@ import { api } from '../api/client.js'
 
 // ── Helpers de Data ──────────────────────────────────────────────────────────
 
-function isoDate(d) {
-  return d.toISOString().split('T')[0]
-}
+function isoDate(d) { return d.toISOString().split('T')[0] }
 function fmtBR(str) {
   if (!str) return '—'
   return new Date(str + 'T12:00:00').toLocaleDateString('pt-BR')
 }
 function fmtBRShort(str) {
   if (!str) return ''
-  const d = new Date(str + 'T12:00:00')
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  return new Date(str + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 }
 
 function getPeriodDates(period, customStart, customEnd) {
   const today = new Date()
   const todayStr = isoDate(today)
-
-  if (period === 'today') {
-    return { start: todayStr, end: todayStr, label: `Hoje, ${fmtBR(todayStr)}` }
-  }
+  if (period === 'today') return { start: todayStr, end: todayStr, label: `Hoje, ${fmtBR(todayStr)}` }
   if (period === 'week') {
     const day = today.getDay() === 0 ? 7 : today.getDay()
     const mon = new Date(today); mon.setDate(today.getDate() - (day - 1))
@@ -46,94 +40,138 @@ function getPeriodDates(period, customStart, customEnd) {
   return { start: todayStr, end: todayStr, label: '' }
 }
 
-// ── Componente: Card de Métrica ───────────────────────────────────────────────
+// ── Metric Card — gradient, white text ───────────────────────────────────────
 
-function MetricCard({ icon, label, value, sub, badge, badgeColor = 'bg-gray-100 text-gray-600', bg = 'bg-blue-50', textColor = 'text-blue-600', onClick, trend, trendLabel }) {
-  const trendUp = trend > 0
-  const trendNeutral = trend === 0 || trend == null
-
+function MetricCard({ label, value, sub, icon, gradient, trend, onClick }) {
+  const isUp   = trend > 0
+  const isDown = trend < 0
   return (
     <div
-      className={`card ${onClick ? 'cursor-pointer hover:shadow-md' : ''} transition-shadow`}
       onClick={onClick}
+      className={`relative overflow-hidden rounded-2xl p-5 text-white shadow-md cursor-pointer
+        hover:shadow-xl hover:-translate-y-0.5 active:scale-95 transition-all duration-200 ${gradient}`}
     >
-      <div className="flex items-start justify-between gap-2 mb-3">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${bg}`}>
-          <span className={`text-xl ${textColor}`}>{icon}</span>
+      <div className="flex items-start justify-between">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-widest opacity-75 mb-1">{label}</p>
+          <p className="text-4xl font-black leading-none">{value ?? '—'}</p>
+          {sub && <p className="text-xs opacity-65 mt-1.5 truncate">{sub}</p>}
         </div>
-        {badge && (
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badgeColor}`}>{badge}</span>
-        )}
+        <span className="text-3xl opacity-40 flex-shrink-0 ml-2">{icon}</span>
       </div>
-      <div className="text-3xl font-bold text-gray-800">{value ?? '—'}</div>
-      <div className="text-sm font-medium text-gray-600 mt-0.5">{label}</div>
-      {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
       {trend != null && (
-        <div className={`flex items-center gap-1 mt-2 text-xs font-medium ${trendNeutral ? 'text-gray-400' : trendUp ? 'text-green-600' : 'text-red-500'}`}>
-          <span>{trendNeutral ? '→' : trendUp ? '↑' : '↓'}</span>
-          <span>{trendNeutral ? 'igual ao período anterior' : `${Math.abs(trend)} vs período anterior`}</span>
+        <div className={`mt-3 flex items-center gap-1 text-xs font-semibold
+          ${isUp ? 'text-green-200' : isDown ? 'text-red-200' : 'text-white/50'}`}>
+          <span className="text-sm">{isUp ? '↑' : isDown ? '↓' : '→'}</span>
+          <span>{isUp ? `+${trend}` : trend} vs anterior</span>
         </div>
       )}
+      {/* Decorative circles */}
+      <div className="absolute -right-5 -bottom-5 w-24 h-24 rounded-full bg-white/10 pointer-events-none" />
+      <div className="absolute -right-10 -bottom-10 w-36 h-36 rounded-full bg-white/5 pointer-events-none" />
     </div>
   )
 }
 
-// ── Componente: Barra de Consumo ──────────────────────────────────────────────
+// ── GVF Consumption Progress Bar ─────────────────────────────────────────────
 
-function ConsumoBar({ label, real, estimado, maxVal }) {
-  const pctReal  = maxVal > 0 ? Math.min(100, (real  / maxVal) * 100) : 0
-  const pctEstim = maxVal > 0 ? Math.min(100, (estimado / maxVal) * 100) : 0
+function ConsumoProgressBar({ label, real, estimado }) {
+  const pct = estimado > 0 ? Math.min(100, (real / estimado) * 100) : 0
+  const over = real > estimado
   return (
-    <div className="mb-3">
-      <div className="flex justify-between text-xs text-gray-500 mb-1">
-        <span className="font-medium">{label}</span>
-        <span>
-          <span className="text-orange-600 font-semibold">{real.toFixed(1)}L</span>
-          <span className="text-gray-300 mx-1">/</span>
-          <span className="text-blue-500">{estimado.toFixed(1)}L est.</span>
+    <div className="mb-4">
+      <div className="flex justify-between items-baseline mb-1.5">
+        <span className="text-sm font-medium text-gray-700">{label}</span>
+        <div className="text-right">
+          <span className={`text-base font-bold ${over ? 'text-red-600' : 'text-orange-600'}`}>
+            {real.toFixed(1)}L
+          </span>
+          <span className="text-xs text-gray-400 ml-1">/ {estimado.toFixed(1)}L est.</span>
+        </div>
+      </div>
+      <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${over ? 'bg-red-400' : 'bg-gradient-to-r from-orange-400 to-orange-500'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+        <span>0L</span>
+        <span className={`font-medium ${over ? 'text-red-500' : 'text-gray-500'}`}>
+          {pct.toFixed(0)}% {over ? '⚠ acima' : 'do estimado'}
         </span>
       </div>
-      <div className="relative h-5 bg-gray-100 rounded-full overflow-hidden">
-        <div className="absolute inset-y-0 left-0 bg-blue-200 rounded-full transition-all" style={{ width: `${pctEstim}%` }} />
-        <div className="absolute inset-y-0 left-0 bg-orange-400 rounded-full transition-all" style={{ width: `${pctReal}%`, opacity: 0.85 }} />
-      </div>
     </div>
   )
 }
 
-// ── Componente: Badge de Status ───────────────────────────────────────────────
+// ── Status Progress Row ───────────────────────────────────────────────────────
 
-function StatusBadge({ status }) {
-  const map = {
-    pendente: ['bg-yellow-100 text-yellow-800', 'Pendente'],
-    rascunho: ['bg-gray-100 text-gray-700', 'Rascunho'],
-    enviado: ['bg-blue-100 text-blue-800', 'Enviado'],
-    aprovado: ['bg-green-100 text-green-800', 'Aprovado'],
-    aguardando_assinatura: ['bg-amber-100 text-amber-800', 'Aguard. Assin.'],
-    assinado: ['bg-green-100 text-green-800', 'Assinado'],
-    agendada: ['bg-blue-100 text-blue-700', 'Agendada'],
-    em_andamento: ['bg-yellow-100 text-yellow-700', 'Em Andamento'],
-    concluida: ['bg-green-100 text-green-700', 'Concluída'],
-    cancelada: ['bg-red-100 text-red-700', 'Cancelada'],
-    recebida: ['bg-purple-100 text-purple-700', 'Recebida'],
-  }
-  const [cls, lbl] = map[status] || ['bg-gray-100 text-gray-600', status]
-  return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{lbl}</span>
+function StatusRow({ label, value, total, colorClass, dotColor }) {
+  const pct = total > 0 ? Math.round((value / total) * 100) : 0
+  return (
+    <div className="flex items-center gap-3 py-2">
+      <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dotColor}`} />
+      <div className="flex-1">
+        <div className="flex justify-between text-sm mb-1">
+          <span className="text-gray-600">{label}</span>
+          <span className="font-bold text-gray-800">{value}</span>
+        </div>
+        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+          <div className={`h-full rounded-full transition-all duration-700 ${colorClass}`} style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+      <span className="text-xs text-gray-400 w-8 text-right">{pct}%</span>
+    </div>
+  )
 }
 
-// ── Componente: Seção de Comparativo ─────────────────────────────────────────
+// ── Comparativo Row ───────────────────────────────────────────────────────────
 
 function ComparativoRow({ label, atual, anterior }) {
   const diff = atual - anterior
   return (
-    <div className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+    <div className="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
       <span className="text-sm text-gray-600">{label}</span>
       <div className="flex items-center gap-3">
         <span className="text-sm font-bold text-gray-800 w-8 text-right">{atual}</span>
-        <span className={`text-xs font-medium w-12 text-right ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-          {diff > 0 ? '+' : ''}{diff !== 0 ? diff : '='}
+        <span className={`text-xs font-bold w-12 text-right px-1.5 py-0.5 rounded-md
+          ${diff > 0 ? 'bg-green-50 text-green-600' : diff < 0 ? 'bg-red-50 text-red-500' : 'text-gray-300'}`}>
+          {diff > 0 ? `+${diff}` : diff !== 0 ? diff : '='}
         </span>
-        <span className="text-xs text-gray-400 w-8 text-right">{anterior}</span>
+        <span className="text-xs text-gray-300 w-8 text-right">{anterior}</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Atividade Recente Item ────────────────────────────────────────────────────
+
+const TIPO_CONFIG = {
+  medicao: { label: 'Medição', border: 'border-l-purple-400', dot: 'bg-purple-400', bg: 'bg-purple-50 text-purple-700' },
+  os:      { label: 'Obra',    border: 'border-l-green-400',  dot: 'bg-green-400',  bg: 'bg-green-50 text-green-700' },
+  reparo:  { label: 'Reparo',  border: 'border-l-red-400',    dot: 'bg-red-400',    bg: 'bg-red-50 text-red-600' },
+}
+
+function AtividadeItem({ item, onClick }) {
+  const t = TIPO_CONFIG[item.tipo] || TIPO_CONFIG.os
+  const dataFmt = item.data
+    ? new Date(item.data).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : '—'
+  return (
+    <div
+      onClick={onClick}
+      className={`flex items-start gap-3 p-3 border-l-[3px] bg-white rounded-r-xl shadow-sm
+        hover:shadow-md cursor-pointer transition-all duration-150 hover:-translate-y-px ${t.border}`}
+    >
+      <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${t.dot}`} />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-gray-800 truncate">{item.titulo}</p>
+        {item.subtitulo && <p className="text-xs text-gray-400 truncate mt-0.5">{item.subtitulo}</p>}
+      </div>
+      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${t.bg}`}>{t.label}</span>
+        <span className="text-[10px] text-gray-400">{dataFmt}</span>
       </div>
     </div>
   )
@@ -144,349 +182,327 @@ function ComparativoRow({ label, atual, anterior }) {
 const PERIODS = [
   { value: 'today',   label: 'Hoje' },
   { value: 'week',    label: 'Esta semana' },
-  { value: '15days',  label: 'Últimos 15 dias' },
-  { value: '30days',  label: 'Últimos 30 dias' },
-  { value: 'custom',  label: 'Período personalizado' },
+  { value: '15days',  label: '15 dias' },
+  { value: '30days',  label: '30 dias' },
+  { value: 'custom',  label: 'Período' },
 ]
 
 export default function DashboardPage() {
   const navigate = useNavigate()
-  const [period, setPeriod]           = useState('week')
-  const [customStart, setCustomStart] = useState('')
-  const [customEnd, setCustomEnd]     = useState('')
-  const [stats, setStats]             = useState(null)
-  const [loading, setLoading]         = useState(true)
+  const [period, setPeriod]             = useState('week')
+  const [customStart, setCustomStart]   = useState('')
+  const [customEnd, setCustomEnd]       = useState('')
+  const [stats, setStats]               = useState(null)
   const [loadingStats, setLoadingStats] = useState(false)
 
   const { start, end, label } = getPeriodDates(period, customStart, customEnd)
 
-  // Carrega estatísticas por período
   const loadStats = useCallback(async (s, e) => {
     if (!s || !e) return
     setLoadingStats(true)
-    try {
-      const data = await api.getDashboardStats(s, e)
-      setStats(data)
-    } catch (err) {
-      console.error('Dashboard stats error:', err)
-    } finally {
-      setLoadingStats(false)
-    }
+    try { setStats(await api.getDashboardStats(s, e)) }
+    catch (err) { console.error('Dashboard stats error:', err) }
+    finally { setLoadingStats(false) }
   }, [])
 
-  // Initial load
-  useEffect(() => {
-    setLoading(false)
-  }, [])
+  useEffect(() => { if (start && end) loadStats(start, end) }, [start, end, loadStats])
 
-  // Carrega stats quando período muda
-  useEffect(() => {
-    if (start && end) loadStats(start, end)
-  }, [start, end, loadStats])
-
-  // ── Consumo por dia (para gráfico) ─────────────────────────────────────────
-  const diasConsumo = stats?.consumoProduto?.porDia
-    ? Object.entries(stats.consumoProduto.porDia)
-        .sort(([a], [b]) => a > b ? 1 : -1)
-    : []
-  const maxConsumo = diasConsumo.length > 0
-    ? Math.max(...diasConsumo.map(([, v]) => Math.max(v.real, v.estimado, 1)))
-    : 1
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-      </div>
-    )
-  }
-
-  const S = stats
+  const S    = stats
   const prev = S?.periodoAnterior
 
-  return (
-    <div className="p-6 max-w-7xl mx-auto">
+  const diasConsumo = S?.consumoProduto?.porDia
+    ? Object.entries(S.consumoProduto.porDia).sort(([a], [b]) => a > b ? 1 : -1)
+    : []
 
-      {/* ── Header + Seletor de Período ─────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
-          <p className="text-gray-500 text-sm mt-0.5">{label}</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <select
-            className="input py-1.5 text-sm min-w-[180px]"
-            value={period}
-            onChange={e => setPeriod(e.target.value)}
-          >
-            {PERIODS.map(p => (
-              <option key={p.value} value={p.value}>{p.label}</option>
-            ))}
-          </select>
-          {period === 'custom' && (
-            <>
-              <input type="date" className="input py-1.5 text-sm" value={customStart}
-                onChange={e => setCustomStart(e.target.value)} />
-              <span className="text-gray-400 text-sm">até</span>
-              <input type="date" className="input py-1.5 text-sm" value={customEnd}
-                onChange={e => setCustomEnd(e.target.value)} />
-            </>
-          )}
-          {loadingStats && (
-            <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-          )}
+  return (
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div className="bg-gradient-to-r from-[#c45d12] via-[#e87722] to-[#f59340] rounded-2xl p-6 text-white shadow-lg">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-black tracking-tight">Dashboard</h1>
+            <p className="text-orange-100 text-sm mt-0.5 font-medium">{label}</p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            {/* Period pills */}
+            <div className="flex bg-white/20 rounded-xl p-1 gap-0.5 backdrop-blur-sm">
+              {PERIODS.map(p => (
+                <button
+                  key={p.value}
+                  onClick={() => setPeriod(p.value)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all duration-150
+                    ${period === p.value
+                      ? 'bg-white text-orange-700 shadow-md'
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                    }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            {/* Custom dates */}
+            {period === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input type="date" className="rounded-lg px-2 py-1.5 text-sm text-gray-700 bg-white border-0 outline-none"
+                  value={customStart} onChange={e => setCustomStart(e.target.value)} />
+                <span className="text-white/70 text-sm">até</span>
+                <input type="date" className="rounded-lg px-2 py-1.5 text-sm text-gray-700 bg-white border-0 outline-none"
+                  value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+              </div>
+            )}
+            {loadingStats && (
+              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ── Cards de Métricas ────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+      {/* ── Metric Cards ────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <MetricCard
-          icon="📋" label="Medições" bg="bg-purple-50" textColor="text-purple-600"
+          icon="📋" label="Medições"
+          gradient="bg-gradient-to-br from-purple-500 to-purple-700"
           value={S?.medicoes?.total ?? '—'}
-          sub={`Total no período`}
+          sub="no período"
           trend={S && prev ? S.medicoes.total - prev.medicoes : null}
           onClick={() => navigate('/medicoes')}
         />
         <MetricCard
-          icon="📄" label="Orçamentos" bg="bg-blue-50" textColor="text-blue-600"
+          icon="📄" label="Orçamentos"
+          gradient="bg-gradient-to-br from-blue-500 to-blue-700"
           value={S?.orcamentos?.total ?? '—'}
-          sub={S ? `${S.orcamentos.aprovado} aprovado(s)` : ''}
-          badge={S?.orcamentos?.rascunho > 0 ? `${S.orcamentos.rascunho} rascunho` : undefined}
-          badgeColor="bg-gray-100 text-gray-600"
+          sub={S ? `${S.orcamentos.aprovado} aprovado(s)` : 'no período'}
           trend={S && prev ? S.orcamentos.total - prev.orcamentos : null}
           onClick={() => navigate('/orcamentos')}
         />
         <MetricCard
-          icon="✍️" label="Contratos" bg="bg-orange-50" textColor="text-orange-600"
+          icon="✍️" label="Contratos"
+          gradient="bg-gradient-to-br from-[#e87722] to-[#c45d12]"
           value={S?.contratos?.total ?? '—'}
-          sub={S ? `${S.contratos.assinado} assinado(s)` : ''}
-          badge={S?.contratos?.aguardando > 0 ? `${S.contratos.aguardando} aguardando` : undefined}
-          badgeColor="bg-amber-100 text-amber-700"
+          sub={S ? `${S.contratos.assinado} assinado(s)` : 'no período'}
           trend={S && prev ? S.contratos.total - prev.contratos : null}
           onClick={() => navigate('/contratos')}
         />
         <MetricCard
-          icon="🔧" label="Obras Ativas" bg="bg-green-50" textColor="text-green-600"
+          icon="🔧" label="Obras Ativas"
+          gradient="bg-gradient-to-br from-emerald-500 to-emerald-700"
           value={S?.ordensServico?.total ?? '—'}
-          sub={S ? `${S.ordensServico.em_andamento} em andamento` : ''}
-          badge={S?.ordensServico?.aguardando_assinatura > 0 ? `${S.ordensServico.aguardando_assinatura} ass.` : undefined}
-          badgeColor="bg-green-100 text-green-700"
+          sub={S ? `${S.ordensServico.em_andamento} em andamento` : 'no período'}
           trend={S && prev ? S.ordensServico.total - prev.ordensServico : null}
           onClick={() => navigate('/ordens-servico')}
         />
         <MetricCard
-          icon="🛠️" label="Reparos" bg="bg-red-50" textColor="text-red-500"
+          icon="🛠️" label="Reparos"
+          gradient="bg-gradient-to-br from-red-500 to-rose-700"
           value={S?.reparos?.total ?? '—'}
-          sub={S ? `${S.reparos.em_andamento} em andamento · ${S.reparos.concluida} concluído(s)` : ''}
+          sub={S ? `${S.reparos.em_andamento} em andamento` : 'no período'}
           trend={S && prev ? S.reparos.total - prev.reparos : null}
           onClick={() => navigate('/ordens-servico')}
         />
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-4 mb-4">
+      {/* ── GVF Seal + Comparativo ───────────────────────────────────────────── */}
+      <div className="grid lg:grid-cols-3 gap-4">
 
-        {/* ── Consumo de GVF Seal ─────────────────────────────────────────────── */}
-        <div className="card lg:col-span-2">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-800">🧪 Consumo de GVF Seal</h2>
+        {/* GVF Seal */}
+        <div className="card lg:col-span-2 space-y-0">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="font-bold text-gray-800 text-base">Consumo de GVF Seal</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Realizado vs Estimado no período</p>
+            </div>
             {S?.consumoProduto && (
-              <span className={`text-xs px-2 py-1 rounded-full font-semibold ${
-                S.consumoProduto.variacaoPercent > 5  ? 'bg-red-100 text-red-700' :
-                S.consumoProduto.variacaoPercent < -5 ? 'bg-green-100 text-green-700' :
-                'bg-gray-100 text-gray-600'
+              <div className={`text-center px-4 py-2 rounded-xl font-bold text-sm ${
+                S.consumoProduto.variacaoPercent > 5  ? 'bg-red-50 text-red-600' :
+                S.consumoProduto.variacaoPercent < -5 ? 'bg-green-50 text-green-600' :
+                'bg-orange-50 text-orange-600'
               }`}>
-                {S.consumoProduto.variacaoPercent > 0 ? '+' : ''}{S.consumoProduto.variacaoPercent}% vs estimado
-              </span>
+                <div className="text-xl">{S.consumoProduto.variacaoPercent > 0 ? '+' : ''}{S.consumoProduto.variacaoPercent}%</div>
+                <div className="text-[10px] font-medium opacity-70">vs estimado</div>
+              </div>
             )}
           </div>
 
           {!S ? (
-            <div className="text-sm text-gray-400 text-center py-6">Carregando...</div>
+            <div className="flex items-center justify-center h-32 text-gray-300 text-sm">Carregando...</div>
           ) : (
             <>
-              {/* Totais gerais */}
-              <div className="grid grid-cols-3 gap-3 mb-4">
-                <div className="text-center p-3 bg-blue-50 rounded-xl">
-                  <div className="text-xl font-bold text-blue-700">
-                    {S.consumoProduto.estimado.toLocaleString('pt-BR', { minimumFractionDigits: 1 })}L
+              {/* Big totals */}
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                {[
+                  { label: 'Estimado',  val: S.consumoProduto.estimado, cls: 'from-blue-50 to-blue-100 text-blue-700', sub: 'total previsto' },
+                  { label: 'Realizado', val: S.consumoProduto.real,     cls: 'from-orange-50 to-orange-100 text-orange-600', sub: 'total consumido' },
+                  {
+                    label: S.consumoProduto.diferenca > 0 ? 'Excedente' : S.consumoProduto.diferenca < 0 ? 'Economia' : 'No previsto',
+                    val: Math.abs(S.consumoProduto.diferenca),
+                    cls: S.consumoProduto.diferenca > 0 ? 'from-red-50 to-red-100 text-red-600' :
+                         S.consumoProduto.diferenca < 0 ? 'from-green-50 to-green-100 text-green-600' :
+                         'from-gray-50 to-gray-100 text-gray-500',
+                    sub: 'diferença',
+                  },
+                ].map(item => (
+                  <div key={item.label} className={`bg-gradient-to-br ${item.cls} rounded-2xl p-4 text-center`}>
+                    <div className={`text-2xl font-black ${item.cls.split(' ').pop()}`}>
+                      {item.val.toLocaleString('pt-BR', { minimumFractionDigits: 1 })}L
+                    </div>
+                    <div className="text-[11px] font-semibold opacity-70 mt-1">{item.sub}</div>
+                    <div className="text-[10px] opacity-50 mt-0.5">{item.label}</div>
                   </div>
-                  <div className="text-xs text-blue-600 mt-1">Estimado total</div>
-                </div>
-                <div className="text-center p-3 bg-orange-50 rounded-xl">
-                  <div className="text-xl font-bold text-orange-600">
-                    {S.consumoProduto.real.toLocaleString('pt-BR', { minimumFractionDigits: 1 })}L
-                  </div>
-                  <div className="text-xs text-orange-500 mt-1">Realizado total</div>
-                </div>
-                <div className={`text-center p-3 rounded-xl ${
-                  S.consumoProduto.diferenca > 0 ? 'bg-red-50' :
-                  S.consumoProduto.diferenca < 0 ? 'bg-green-50' : 'bg-gray-50'
-                }`}>
-                  <div className={`text-xl font-bold ${
-                    S.consumoProduto.diferenca > 0 ? 'text-red-600' :
-                    S.consumoProduto.diferenca < 0 ? 'text-green-600' : 'text-gray-500'
-                  }`}>
-                    {S.consumoProduto.diferenca > 0 ? '+' : ''}
-                    {S.consumoProduto.diferenca.toLocaleString('pt-BR', { minimumFractionDigits: 1 })}L
-                  </div>
-                  <div className={`text-xs mt-1 ${
-                    S.consumoProduto.diferenca > 0 ? 'text-red-500' :
-                    S.consumoProduto.diferenca < 0 ? 'text-green-500' : 'text-gray-400'
-                  }`}>
-                    {S.consumoProduto.diferenca > 0 ? 'Acima' :
-                     S.consumoProduto.diferenca < 0 ? 'Abaixo' : 'No previsto'}
-                  </div>
-                </div>
+                ))}
               </div>
 
-              {/* Breakdown Obras vs Reparos */}
+              {/* Obras vs Reparos bars */}
               {(S.consumoProduto.obras || S.consumoProduto.reparos) && (
-                <div className="grid grid-cols-2 gap-2 mb-4">
-                  <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
-                    <div className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1">
-                      <span>🔧</span> Obras
-                    </div>
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-base font-bold text-orange-600">
-                        {(S.consumoProduto.obras?.real ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1 })}L
-                      </span>
-                      <span className="text-xs text-gray-400">realizado</span>
-                    </div>
-                    <div className="text-xs text-blue-500 mt-0.5">
-                      {(S.consumoProduto.obras?.estimado ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1 })}L estimado
-                    </div>
-                  </div>
-                  <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
-                    <div className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1">
-                      <span>🛠️</span> Reparos
-                    </div>
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-base font-bold text-orange-600">
-                        {(S.consumoProduto.reparos?.real ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1 })}L
-                      </span>
-                      <span className="text-xs text-gray-400">realizado</span>
-                    </div>
-                    <div className="text-xs text-blue-500 mt-0.5">
-                      {(S.consumoProduto.reparos?.estimado ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1 })}L estimado
-                    </div>
-                  </div>
+                <div className="space-y-1">
+                  <ConsumoProgressBar
+                    label="Obras"
+                    real={S.consumoProduto.obras?.real ?? 0}
+                    estimado={S.consumoProduto.obras?.estimado ?? 0}
+                  />
+                  <ConsumoProgressBar
+                    label="Reparos"
+                    real={S.consumoProduto.reparos?.real ?? 0}
+                    estimado={S.consumoProduto.reparos?.estimado ?? 0}
+                  />
                 </div>
               )}
 
-              {/* Gráfico de barras por dia */}
-              {diasConsumo.length > 0 ? (
-                <div>
-                  <div className="flex items-center gap-4 mb-3 text-xs text-gray-500">
-                    <span className="flex items-center gap-1"><span className="w-3 h-2 rounded bg-orange-400 inline-block" /> Realizado</span>
-                    <span className="flex items-center gap-1"><span className="w-3 h-2 rounded bg-blue-200 inline-block" /> Estimado/dia</span>
-                  </div>
-                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+              {/* Day-by-day bars */}
+              {diasConsumo.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Por dia</p>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
                     {diasConsumo.map(([data, vals]) => (
-                      <ConsumoBar
-                        key={data}
+                      <ConsumoProgressBar key={data}
                         label={fmtBRShort(data)}
                         real={vals.real || 0}
                         estimado={vals.estimado || 0}
-                        maxVal={maxConsumo}
                       />
                     ))}
                   </div>
-                </div>
-              ) : (
-                <div className="text-center text-sm text-gray-400 py-4">
-                  Nenhum consumo registrado no período
                 </div>
               )}
             </>
           )}
         </div>
 
-        {/* ── Comparativo com Período Anterior ────────────────────────────────── */}
+        {/* Comparativo */}
         <div className="card">
-          <h2 className="font-semibold text-gray-800 mb-1">📊 Comparativo</h2>
+          <h2 className="font-bold text-gray-800 text-base mb-1">Comparativo</h2>
           <p className="text-xs text-gray-400 mb-4">Atual vs período anterior</p>
           {!S || !prev ? (
-            <div className="text-sm text-gray-400 text-center py-6">Carregando...</div>
+            <div className="flex items-center justify-center h-32 text-gray-300 text-sm">Carregando...</div>
           ) : (
-            <div>
-              <div className="flex justify-between text-[10px] text-gray-400 mb-1 px-1">
+            <>
+              <div className="flex justify-between text-[10px] text-gray-300 mb-2 px-0.5">
                 <span>Indicador</span>
                 <div className="flex gap-3">
-                  <span className="w-8 text-right font-semibold text-gray-600">Atual</span>
-                  <span className="w-12 text-right">Variação</span>
-                  <span className="w-8 text-right">Anterior</span>
+                  <span className="w-8 text-right font-semibold text-gray-500">Atual</span>
+                  <span className="w-12 text-right">Var.</span>
+                  <span className="w-8 text-right">Ant.</span>
                 </div>
               </div>
-              <ComparativoRow label="Medições"   atual={S.medicoes.total}     anterior={prev.medicoes} />
-              <ComparativoRow label="Orçamentos" atual={S.orcamentos.total}   anterior={prev.orcamentos} />
-              <ComparativoRow label="Contratos"  atual={S.contratos.total}    anterior={prev.contratos} />
+              <ComparativoRow label="Medições"   atual={S.medicoes.total}      anterior={prev.medicoes} />
+              <ComparativoRow label="Orçamentos" atual={S.orcamentos.total}    anterior={prev.orcamentos} />
+              <ComparativoRow label="Contratos"  atual={S.contratos.total}     anterior={prev.contratos} />
               <ComparativoRow label="Obras"      atual={S.ordensServico.total} anterior={prev.ordensServico} />
-              <ComparativoRow label="Reparos"    atual={S.reparos.total}      anterior={prev.reparos} />
+              <ComparativoRow label="Reparos"    atual={S.reparos.total}       anterior={prev.reparos} />
               <div className="mt-3 pt-3 border-t border-gray-100">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-500">GVF Realizado</span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-bold text-orange-600">
-                      {S.consumoProduto.real.toFixed(1)}L
+                  <span className="text-xs text-gray-500 font-medium">GVF Realizado</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-base font-black text-orange-600">{S.consumoProduto.real.toFixed(1)}L</span>
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded-md
+                      ${S.consumoProduto.real - prev.consumoReal > 0 ? 'bg-red-50 text-red-500' :
+                        S.consumoProduto.real - prev.consumoReal < 0 ? 'bg-green-50 text-green-600' :
+                        'text-gray-300'}`}>
+                      {S.consumoProduto.real - prev.consumoReal > 0 ? '+' : ''}
+                      {(S.consumoProduto.real - prev.consumoReal).toFixed(1)}L
                     </span>
-                    <span className={`text-xs font-medium ${S.consumoProduto.real - prev.consumoReal > 0 ? 'text-red-500' : S.consumoProduto.real - prev.consumoReal < 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                      {S.consumoProduto.real - prev.consumoReal > 0 ? '+' : ''}{(S.consumoProduto.real - prev.consumoReal).toFixed(1)}L
-                    </span>
-                    <span className="text-xs text-gray-400">{prev.consumoReal.toFixed(1)}L</span>
                   </div>
                 </div>
               </div>
-            </div>
+            </>
           )}
         </div>
       </div>
 
-      {/* ── Breakdown Detalhado (OS + Reparos) ──────────────────────────────── */}
+      {/* ── Status Breakdown ────────────────────────────────────────────────── */}
       {S && (
-        <div className="grid sm:grid-cols-2 gap-4 mb-4">
-          {/* OS por status */}
+        <div className="grid sm:grid-cols-2 gap-4">
           <div className="card">
-            <h2 className="font-semibold text-gray-800 mb-3">🔧 Obras — por Status</h2>
-            <div className="space-y-2">
+            <h2 className="font-bold text-gray-800 text-base mb-4">Obras por Status</h2>
+            <div className="divide-y divide-gray-50">
               {[
-                ['agendada',              S.ordensServico.agendada,             'bg-blue-100 text-blue-700'],
-                ['em andamento',          S.ordensServico.em_andamento,         'bg-yellow-100 text-yellow-700'],
-                ['aguard. assinatura',    S.ordensServico.aguardando_assinatura,'bg-amber-100 text-amber-800'],
-                ['concluída',             S.ordensServico.concluida,            'bg-green-100 text-green-700'],
-                ['cancelada',             S.ordensServico.cancelada,            'bg-red-100 text-red-700'],
-              ].map(([lbl, val, cls]) => (
-                <div key={lbl} className="flex items-center justify-between">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${cls}`}>{lbl}</span>
-                  <span className="font-bold text-gray-700 text-sm">{val}</span>
-                </div>
+                ['Agendada',           S.ordensServico.agendada,              'bg-blue-400',   S.ordensServico.total],
+                ['Em andamento',       S.ordensServico.em_andamento,          'bg-amber-400',  S.ordensServico.total],
+                ['Aguard. Assinatura', S.ordensServico.aguardando_assinatura, 'bg-orange-400', S.ordensServico.total],
+                ['Concluída',          S.ordensServico.concluida,             'bg-green-500',  S.ordensServico.total],
+                ['Cancelada',          S.ordensServico.cancelada,             'bg-red-400',    S.ordensServico.total],
+              ].map(([lbl, val, color, total]) => (
+                <StatusRow key={lbl} label={lbl} value={val} total={total} colorClass={color} dotColor={color} />
               ))}
             </div>
           </div>
 
-          {/* Reparos por status */}
           <div className="card">
-            <h2 className="font-semibold text-gray-800 mb-3">🛠️ Reparos — por Status</h2>
+            <h2 className="font-bold text-gray-800 text-base mb-4">Reparos por Status</h2>
             {S.reparos.total === 0 ? (
-              <div className="text-sm text-gray-400 text-center py-6">Nenhum reparo no período</div>
+              <div className="flex items-center justify-center h-32 text-gray-300 text-sm">
+                Nenhum reparo no período
+              </div>
             ) : (
-              <div className="space-y-2">
+              <div className="divide-y divide-gray-50">
                 {[
-                  ['agendado',     S.reparos.agendada,     'bg-blue-100 text-blue-700'],
-                  ['em andamento', S.reparos.em_andamento, 'bg-yellow-100 text-yellow-700'],
-                  ['concluído',    S.reparos.concluida,    'bg-green-100 text-green-700'],
-                ].map(([lbl, val, cls]) => (
-                  <div key={lbl} className="flex items-center justify-between">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${cls}`}>{lbl}</span>
-                    <span className="font-bold text-gray-700 text-sm">{val}</span>
-                  </div>
+                  ['Agendado',     S.reparos.agendada,     'bg-blue-400',  S.reparos.total],
+                  ['Em andamento', S.reparos.em_andamento, 'bg-amber-400', S.reparos.total],
+                  ['Concluído',    S.reparos.concluida,    'bg-green-500', S.reparos.total],
+                ].map(([lbl, val, color, total]) => (
+                  <StatusRow key={lbl} label={lbl} value={val} total={total} colorClass={color} dotColor={color} />
                 ))}
-                <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
-                  <span className="text-xs text-gray-500 font-medium">Total</span>
-                  <span className="font-bold text-gray-800">{S.reparos.total}</span>
+                <div className="flex items-center justify-between pt-3 pb-1">
+                  <span className="text-sm font-semibold text-gray-500">Total</span>
+                  <span className="text-xl font-black text-gray-800">{S.reparos.total}</span>
                 </div>
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── Atividade Recente ────────────────────────────────────────────────── */}
+      {S?.atividadeRecente && (
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="font-bold text-gray-800 text-base">Atividade Recente</h2>
+              <p className="text-xs text-gray-400 mt-0.5">{S.atividadeRecente.length} eventos no período</p>
+            </div>
+            <div className="flex items-center gap-3 text-[10px] text-gray-400">
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />Medição</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-400 inline-block" />Obra</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-400 inline-block" />Reparo</span>
+            </div>
+          </div>
+          {S.atividadeRecente.length === 0 ? (
+            <div className="flex items-center justify-center h-24 text-gray-300 text-sm">
+              Nenhuma atividade no período
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-2">
+              {S.atividadeRecente.map((item, i) => (
+                <AtividadeItem
+                  key={`${item.tipo}-${item.id || i}`}
+                  item={item}
+                  onClick={item.tipo === 'medicao'
+                    ? () => navigate(`/medicoes/${item.id}`)
+                    : () => navigate(`/ordens-servico/${item.id}`)
+                  }
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 

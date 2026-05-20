@@ -1,6 +1,32 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
+import { resolvePhotoSrc } from '../utils/photos.js'
+
+// Comprime imagem para base64 (máx 800px, qualidade 0.65)
+function compressImage(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const img = new Image()
+      img.onload = () => {
+        const MAX = 800
+        let w = img.width, h = img.height
+        if (w > MAX || h > MAX) {
+          if (w > h) { h = Math.round(h * MAX / w); w = MAX }
+          else       { w = Math.round(w * MAX / h); h = MAX }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = w; canvas.height = h
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+        resolve(canvas.toDataURL('image/jpeg', 0.65))
+      }
+      img.onerror = () => resolve(ev.target.result)
+      img.src = ev.target.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
 
 export default function MedicaoDetailPage() {
   const { id } = useParams()
@@ -10,9 +36,12 @@ export default function MedicaoDetailPage() {
   const [editing, setEditing] = useState(false)
   const [editData, setEditData] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [savingFotos, setSavingFotos] = useState(false)
   const [showPartialModal, setShowPartialModal] = useState(false)
   const [selectedLocais, setSelectedLocais] = useState([])
   const [error, setError] = useState('')
+  const [processandoAlteracao, setProcessandoAlteracao] = useState(false)
+  const fileInputRefs = useRef({})
 
   useEffect(() => {
     api.getMedicao(id)
@@ -22,13 +51,13 @@ export default function MedicaoDetailPage() {
   }, [id])
 
   const handleEdit = () => {
-    setEditData({ ...medicao })
+    setEditData(JSON.parse(JSON.stringify(medicao))) // deep copy with fotos
     setEditing(true)
     setError('')
   }
 
   const handleCancelEdit = () => {
-    setEditData({ ...medicao })
+    setEditData(JSON.parse(JSON.stringify(medicao)))
     setEditing(false)
     setError('')
   }
@@ -37,9 +66,23 @@ export default function MedicaoDetailPage() {
     setSaving(true)
     setError('')
     try {
-      const updated = await api.updateMedicao(id, editData)
-      setMedicao(updated)
-      setEditData(updated)
+      // Save photos separately (no orcamento restriction)
+      await api.updateMedicaoFotos(id, editData.locais || [])
+      // Save other data (will fail gracefully if orcamento already generated)
+      try {
+        const updated = await api.updateMedicao(id, editData)
+        setMedicao(updated)
+        setEditData(updated)
+      } catch (putErr) {
+        // If blocked by orcamento, still show success for photo update
+        if (putErr.message?.includes('orçamento')) {
+          const refetched = await api.getMedicao(id)
+          setMedicao(refetched)
+          setEditData(refetched)
+        } else {
+          throw putErr
+        }
+      }
       setEditing(false)
     } catch (err) {
       setError(err.message)
@@ -58,10 +101,38 @@ export default function MedicaoDetailPage() {
     setEditData(prev => ({ ...prev, locais }))
   }
 
-  // Seleção Integral → cria orçamento com todos os locais
-  const handleIntegral = () => {
-    navigate(`/orcamentos/novo/${medicao.id}`)
+  // ── Gerenciamento de fotos ───────────────────────────────────────────────
+  const handleAddFotos = async (locIdx, files) => {
+    if (!files || files.length === 0) return
+    setSavingFotos(true)
+    try {
+      const compressed = await Promise.all(Array.from(files).map(f => compressImage(f)))
+      const novas = compressed.map(data => ({ id: Date.now() + Math.random(), data }))
+      setEditData(prev => {
+        const locais = [...(prev.locais || [])]
+        locais[locIdx] = {
+          ...locais[locIdx],
+          fotos: [...(locais[locIdx].fotos || []), ...novas]
+        }
+        return { ...prev, locais }
+      })
+    } finally {
+      setSavingFotos(false)
+    }
   }
+
+  const handleRemoveFoto = (locIdx, fotoIdx) => {
+    setEditData(prev => {
+      const locais = [...(prev.locais || [])]
+      const fotos = [...(locais[locIdx].fotos || [])]
+      fotos.splice(fotoIdx, 1)
+      locais[locIdx] = { ...locais[locIdx], fotos }
+      return { ...prev, locais }
+    })
+  }
+
+  // ── Orçamento ────────────────────────────────────────────────────────────
+  const handleIntegral = () => navigate(`/orcamentos/novo/${medicao.id}`)
 
   const handleReabrir = async () => {
     if (!confirm('Reabrir esta medição para que o medidor possa corrigir e reenviar?')) return
@@ -73,7 +144,87 @@ export default function MedicaoDetailPage() {
     }
   }
 
-  // Seleção Parcial → abre modal com checklist
+  const handleAceitarAlteracao = async () => {
+    if (!confirm('Aceitar as alterações? Os dados da medição e do orçamento vinculado serão atualizados.')) return
+    setProcessandoAlteracao(true)
+    setError('')
+    try {
+      const res = await api.aceitarAlteracaoMedicao(medicao._id || medicao.id)
+      if (res.ok) {
+        setMedicao(prev => ({ ...prev, ...res.medicao, dadosAlterados: null, status: 'recebida' }))
+        setEditData(prev => ({ ...prev, ...res.medicao, dadosAlterados: null, status: 'recebida' }))
+        alert(res.orcamentoAtualizado
+          ? '✅ Alterações aceitas! Medição e orçamento foram atualizados.'
+          : '✅ Alterações aceitas! Medição atualizada.')
+      }
+    } catch (err) {
+      if (err.message?.includes('bloqueado') || err.message?.includes('409')) {
+        alert('⚠️ O orçamento desta medição já foi marcado como "Enviado ao Cliente". Não é possível aceitar alterações automaticamente.\n\nGere um novo orçamento com os dados atualizados.')
+      } else {
+        // tenta extrair o json do erro
+        try {
+          const parsed = JSON.parse(err.message)
+          if (parsed?.bloqueado) {
+            alert('⚠️ ' + parsed.error)
+            return
+          }
+        } catch {}
+        setError(err.message)
+      }
+    } finally {
+      setProcessandoAlteracao(false)
+    }
+  }
+
+  // fetch melhorado para capturar erros 409 com body
+  const handleAceitarAlteracaoSafe = async () => {
+    if (!confirm('Aceitar as alterações? Os dados da medição e do orçamento vinculado serão atualizados.')) return
+    setProcessandoAlteracao(true)
+    setError('')
+    try {
+      const token = localStorage.getItem('veda_token')
+      const r = await fetch(`/api/medicoes/${medicao._id || medicao.id}/aceitar-alteracao`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+      })
+      const data = await r.json()
+      if (!r.ok) {
+        if (data.bloqueado) {
+          alert('⚠️ ' + data.error)
+        } else {
+          setError(data.error || 'Erro ao aceitar alteração.')
+        }
+        return
+      }
+      setMedicao(prev => ({ ...prev, ...data.medicao, dadosAlterados: null, status: 'recebida' }))
+      setEditData(prev => ({ ...prev, ...data.medicao, dadosAlterados: null, status: 'recebida' }))
+      alert(data.orcamentoAtualizado
+        ? '✅ Alterações aceitas! Medição e orçamento foram atualizados.'
+        : '✅ Alterações aceitas! Medição atualizada.')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setProcessandoAlteracao(false)
+    }
+  }
+
+  const handleRecusarAlteracao = async () => {
+    if (!confirm('Recusar as alterações? As mudanças enviadas pelo medidor serão descartadas e a medição voltará ao estado anterior.')) return
+    setProcessandoAlteracao(true)
+    setError('')
+    try {
+      const res = await api.recusarAlteracaoMedicao(medicao._id || medicao.id)
+      if (res.ok) {
+        setMedicao(prev => ({ ...prev, dadosAlterados: null, status: 'recebida' }))
+        setEditData(prev => ({ ...prev, dadosAlterados: null, status: 'recebida' }))
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setProcessandoAlteracao(false)
+    }
+  }
+
   const handleParcial = () => {
     setSelectedLocais((medicao.locais || []).map((_, i) => i))
     setShowPartialModal(true)
@@ -86,12 +237,8 @@ export default function MedicaoDetailPage() {
   }
 
   const confirmarParcial = () => {
-    if (selectedLocais.length === 0) {
-      alert('Selecione pelo menos um local')
-      return
-    }
-    const locaisIds = selectedLocais.join(',')
-    navigate(`/orcamentos/novo/${medicao.id}?locais=${locaisIds}`)
+    if (selectedLocais.length === 0) { alert('Selecione pelo menos um local'); return }
+    navigate(`/orcamentos/novo/${medicao.id}?locais=${selectedLocais.join(',')}`)
     setShowPartialModal(false)
   }
 
@@ -113,6 +260,30 @@ export default function MedicaoDetailPage() {
     juntaDilat: 'Juntas Dilatação (m)', ferragem: 'Trat. Ferragens (m)',
     cortina: 'Cortina (m²)', juntaGerber: 'Juntas Gerber (m)'
   }
+
+  // Calcula diff para medições no status 'alterada'
+  const dadosAlterados = medicao.dadosAlterados
+  const diffLocais = (() => {
+    if (!dadosAlterados?.locais) return []
+    const orig = medicao.locais || []
+    const novo = dadosAlterados.locais || []
+    const linhas = []
+    const maxLen = Math.max(orig.length, novo.length)
+    for (let i = 0; i < maxLen; i++) {
+      const a = orig[i]
+      const b = novo[i]
+      if (!a && b) { linhas.push({ tipo: 'novo', nome: b.nome || `Local ${i+1}`, campos: [] }); continue }
+      if (a && !b) { linhas.push({ tipo: 'removido', nome: a.nome || `Local ${i+1}`, campos: [] }); continue }
+      const campos = []
+      CAMPOS_QUANTIDADES.forEach(c => {
+        const va = Array.isArray(a[c]) ? a[c].reduce((s,x)=>s+parseFloat(x||0),0) : parseFloat(a[c]||0)
+        const vb = Array.isArray(b[c]) ? b[c].reduce((s,x)=>s+parseFloat(x||0),0) : parseFloat(b[c]||0)
+        if (va !== vb) campos.push({ campo: LABELS_QTDE[c] || c, de: va, para: vb })
+      })
+      if (campos.length > 0) linhas.push({ tipo: 'mudou', nome: a.nome || b.nome || `Local ${i+1}`, campos })
+    }
+    return linhas
+  })()
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -148,7 +319,7 @@ export default function MedicaoDetailPage() {
               <button onClick={handleCancelEdit} className="btn-secondary" disabled={saving}>
                 Cancelar
               </button>
-              <button onClick={handleSave} className="btn-primary" disabled={saving}>
+              <button onClick={handleSave} className="btn-primary" disabled={saving || savingFotos}>
                 {saving ? 'Salvando...' : '💾 Salvar'}
               </button>
             </>
@@ -160,9 +331,108 @@ export default function MedicaoDetailPage() {
         <div className="bg-red-50 text-red-700 border border-red-200 rounded-lg p-3 mb-4 text-sm">{error}</div>
       )}
 
+      {/* ── Banner de medição ALTERADA ─────────────────────────────────────────── */}
+      {medicao.status === 'alterada' && dadosAlterados && (
+        <div className="mb-5 border-2 border-red-400 rounded-xl overflow-hidden shadow-md">
+          {/* Header */}
+          <div className="bg-red-600 text-white px-5 py-3 flex items-center gap-3">
+            <span className="text-xl">⚠️</span>
+            <div className="flex-1">
+              <div className="font-bold text-base">Medição Alterada — Aguarda Revisão</div>
+              <div className="text-red-100 text-xs mt-0.5">
+                O medidor <strong>{dadosAlterados.user || medicao.user || 'Medidor'}</strong> reenviou esta medição com alterações. Confira abaixo e decida.
+              </div>
+            </div>
+          </div>
+
+          {/* Diff */}
+          <div className="bg-red-50 px-5 py-4">
+            {diffLocais.length === 0 ? (
+              <p className="text-sm text-gray-600 italic">Sem alterações detectadas nos locais. Verifique os detalhes.</p>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Alterações detectadas:</p>
+                {diffLocais.map((d, i) => (
+                  <div key={i} className={`rounded-lg px-4 py-2.5 text-sm border ${
+                    d.tipo === 'novo' ? 'bg-green-50 border-green-200 text-green-800' :
+                    d.tipo === 'removido' ? 'bg-red-100 border-red-200 text-red-800' :
+                    'bg-amber-50 border-amber-200 text-amber-900'
+                  }`}>
+                    <span className="font-semibold">{d.tipo === 'novo' ? '➕' : d.tipo === 'removido' ? '➖' : '✏️'} {d.nome}</span>
+                    {d.tipo === 'mudou' && d.campos.length > 0 && (
+                      <ul className="mt-1 ml-4 space-y-0.5">
+                        {d.campos.map((c, j) => (
+                          <li key={j} className="text-xs">
+                            {c.campo}: <span className="line-through text-gray-500">{c.de}</span> → <span className="font-bold text-amber-700">{c.para}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {d.tipo === 'novo' && <span className="text-xs ml-2">(local novo)</span>}
+                    {d.tipo === 'removido' && <span className="text-xs ml-2">(local removido)</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Campos de texto alterados */}
+            {(() => {
+              const CAMPOS_TEXTO = [
+                ['cliente', 'Cliente'], ['endereco', 'Endereço'], ['bairro', 'Bairro'],
+                ['cidade', 'Cidade'], ['cep', 'CEP'], ['celular', 'Celular'],
+                ['ac', 'AC'], ['obs', 'Observação'], ['garantia', 'Garantia'],
+                ['andaime', 'Andaime'],
+              ]
+              const diffs = CAMPOS_TEXTO.filter(([k]) => {
+                const a = String(medicao[k] || '')
+                const b = String(dadosAlterados[k] || '')
+                return a !== b && (a || b)
+              })
+              if (!diffs.length) return null
+              return (
+                <div className="mt-3">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Dados do cliente/identificação:</p>
+                  <div className="grid sm:grid-cols-2 gap-1.5">
+                    {diffs.map(([k, label]) => (
+                      <div key={k} className="bg-white rounded px-3 py-1.5 text-xs border border-amber-200">
+                        <span className="font-medium text-gray-600">{label}:</span>{' '}
+                        <span className="line-through text-gray-400">{medicao[k] || '—'}</span>
+                        {' → '}
+                        <span className="font-bold text-amber-700">{dadosAlterados[k] || '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+
+          {/* Botões de ação */}
+          <div className="bg-white border-t border-red-200 px-5 py-3 flex gap-3 items-center flex-wrap">
+            <button
+              disabled={processandoAlteracao}
+              onClick={handleAceitarAlteracaoSafe}
+              className="flex items-center gap-2 bg-green-600 text-white rounded-lg px-5 py-2 font-bold text-sm hover:bg-green-700 disabled:opacity-50 transition-colors"
+            >
+              {processandoAlteracao ? '⏳ Processando...' : '✅ ACEITAR ALTERAÇÃO'}
+            </button>
+            <button
+              disabled={processandoAlteracao}
+              onClick={handleRecusarAlteracao}
+              className="flex items-center gap-2 bg-red-600 text-white rounded-lg px-5 py-2 font-bold text-sm hover:bg-red-700 disabled:opacity-50 transition-colors"
+            >
+              {processandoAlteracao ? '...' : '❌ RECUSAR ALTERAÇÃO'}
+            </button>
+            <p className="text-xs text-gray-500 italic flex-1">
+              Se aceitar e houver orçamento marcado como "Enviado ao Cliente", o sistema irá bloquear e sugerir um novo orçamento.
+            </p>
+          </div>
+        </div>
+      )}
+
       {editing && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-sm text-blue-700">
-          ✏️ Modo de edição ativo — altere os dados e clique em Salvar
+          ✏️ Modo de edição — altere dados, adicione ou remova fotos, e clique em Salvar
         </div>
       )}
 
@@ -173,12 +443,13 @@ export default function MedicaoDetailPage() {
           {editing ? (
             <div className="space-y-3">
               {[
-                ['cliente', 'Nome / Condomínio', 'text'],
-                ['ac', 'AC (Responsável)', 'text'],
-                ['endereco', 'Endereço', 'text'],
-                ['cidade', 'Cidade', 'text'],
-                ['cep', 'CEP', 'text'],
-                ['celular', 'Celular', 'text'],
+                ['cliente', 'Nome / Condomínio'],
+                ['ac', 'AC (Responsável)'],
+                ['endereco', 'Endereço'],
+                ['bairro', 'Bairro'],
+                ['cidade', 'Cidade'],
+                ['cep', 'CEP'],
+                ['celular', 'Celular'],
               ].map(([field, label]) => (
                 <div key={field}>
                   <label className="label">{label}</label>
@@ -189,6 +460,42 @@ export default function MedicaoDetailPage() {
                   />
                 </div>
               ))}
+              <div>
+                <label className="label">Garantia</label>
+                <div className="flex gap-4 mt-1">
+                  {[['15', '15 anos'], ['7', '7 anos']].map(([val, lbl]) => (
+                    <label key={val} className="flex items-center gap-2 cursor-pointer">
+                      <input type="radio" name="edit-garantia" value={val}
+                        checked={String(editData.garantia || '15') === val}
+                        onChange={() => updateField('garantia', val)}
+                        className="accent-primary" />
+                      <span className="text-sm">{lbl}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="label">Andaime necessário?</label>
+                <div className="flex gap-4 mt-1">
+                  {[['nao', 'Não'], ['sim', 'Sim']].map(([val, lbl]) => (
+                    <label key={val} className="flex items-center gap-2 cursor-pointer">
+                      <input type="radio" name="edit-andaime" value={val}
+                        checked={(editData.andaime || 'nao') === val}
+                        onChange={() => updateField('andaime', val)}
+                        className="accent-primary" />
+                      <span className="text-sm">{lbl}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="label">Observações</label>
+                <textarea
+                  className="input min-h-[60px] resize-y"
+                  value={editData.obs || ''}
+                  onChange={e => updateField('obs', e.target.value)}
+                />
+              </div>
             </div>
           ) : (
             <dl className="space-y-2 text-sm">
@@ -196,9 +503,13 @@ export default function MedicaoDetailPage() {
                 ['Nome', m.cliente || m.nomeCliente],
                 ['AC', m.ac],
                 ['Endereço', m.endereco],
+                ['Bairro', m.bairro],
                 ['Cidade', m.cidade],
                 ['CEP', m.cep],
-                ['Celular', m.celular || m.telefone]
+                ['Celular', m.celular || m.telefone],
+                ['Garantia', m.garantia ? `${m.garantia} anos` : null],
+                ['Andaime', m.andaime === 'sim' ? `Sim${m.andaimeMetros > 0 ? ` — ${m.andaimeMetros}m` : ''}` : null],
+                ['Obs', m.obs]
               ].map(([k, v]) => v ? (
                 <div key={k} className="flex gap-2">
                   <dt className="font-medium text-gray-500 w-24 flex-shrink-0">{k}:</dt>
@@ -235,10 +546,21 @@ export default function MedicaoDetailPage() {
             <div className="grid sm:grid-cols-2 gap-3">
               {m.locais.map((local, i) => (
                 <div key={i} className="bg-gray-50 rounded-lg p-3 text-sm">
-                  <div className="font-medium mb-2 text-gray-700">
-                    {local.nome || local.local || `Local ${i + 1}`}
-                  </div>
-                  {/* Quantidades editáveis */}
+                  {editing ? (
+                    <div className="mb-2">
+                      <label className="text-xs text-gray-500 font-medium uppercase tracking-wide">Nome do Local</label>
+                      <input
+                        className="input py-1 text-sm font-medium mt-0.5"
+                        value={local.nome || local.local || ''}
+                        onChange={e => updateLocal(i, 'nome', e.target.value)}
+                        placeholder={`Local ${i + 1}`}
+                      />
+                    </div>
+                  ) : (
+                    <div className="font-medium mb-2 text-gray-700">
+                      {local.nome || local.local || `Local ${i + 1}`}
+                    </div>
+                  )}
                   {CAMPOS_QUANTIDADES.map(campo => {
                     const val = local[campo]
                     if (!editing && (!val || val === 0)) return null
@@ -260,7 +582,6 @@ export default function MedicaoDetailPage() {
                       </div>
                     )
                   })}
-                  {/* Outros campos */}
                   {!editing && Object.entries(local)
                     .filter(([k]) => !CAMPOS_IGNORAR.includes(k))
                     .map(([k, v]) => (
@@ -275,25 +596,89 @@ export default function MedicaoDetailPage() {
           </div>
         )}
 
-        {/* Fotos */}
-        {(medicao.locais || []).some(l => l.fotos && l.fotos.length > 0) && (
+        {/* ── Fotos ─────────────────────────────────────────────────────────── */}
+        {editing ? (
+          /* Modo edição: fotos editáveis por local */
           <div className="card md:col-span-2">
-            <h2 className="font-semibold mb-3 text-primary">Fotos por Local</h2>
-            {(medicao.locais || []).filter(l => l.fotos && l.fotos.length > 0).map((local, li) => (
-              <div key={li} className="mb-4">
-                <h3 className="text-sm font-medium text-gray-600 mb-2">
-                  {local.nome || `Local ${li+1}`} ({local.fotos.length} fotos)
-                </h3>
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                  {local.fotos.map((foto, i) => (
-                    <img key={i} src={foto.data || foto.url || foto} alt={`Foto ${i+1}`}
-                      className="w-full aspect-square object-cover rounded-lg cursor-pointer"
-                      onClick={() => window.open(foto.data || foto.url || foto, '_blank')} />
-                  ))}
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold text-primary">📷 Fotos por Local</h2>
+              <span className="text-xs text-gray-400">Clique × para remover · botão + para adicionar</span>
+            </div>
+            {(editData?.locais || []).map((local, li) => (
+              <div key={li} className="mb-5">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-gray-700">
+                    {local.nome || `Local ${li + 1}`}
+                    <span className="font-normal text-gray-400 ml-1">({(local.fotos || []).length} foto{(local.fotos||[]).length !== 1 ? 's' : ''})</span>
+                  </h3>
+                  {/* Input file oculto */}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    style={{ display: 'none' }}
+                    ref={el => fileInputRefs.current[li] = el}
+                    onChange={e => { handleAddFotos(li, e.target.files); e.target.value = '' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRefs.current[li]?.click()}
+                    disabled={savingFotos}
+                    className="flex items-center gap-1.5 text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors font-medium"
+                  >
+                    {savingFotos ? '⏳' : '📷'} + Adicionar Fotos
+                  </button>
                 </div>
+
+                {(local.fotos || []).length === 0 ? (
+                  <div className="border-2 border-dashed border-gray-200 rounded-lg py-6 text-center text-gray-400 text-xs">
+                    Nenhuma foto — clique em "+ Adicionar Fotos" para incluir
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                    {(local.fotos || []).map((foto, fi) => (
+                      <div key={fi} className="relative group">
+                        <img
+                          src={resolvePhotoSrc(foto.data || foto.url || foto)}
+                          alt={`Foto ${fi + 1}`}
+                          className="w-full aspect-square object-cover rounded-lg"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFoto(li, fi)}
+                          className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 leading-none"
+                          title="Remover foto"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
+        ) : (
+          /* Modo visualização: fotos estáticas */
+          (medicao.locais || []).some(l => l.fotos && l.fotos.length > 0) && (
+            <div className="card md:col-span-2">
+              <h2 className="font-semibold mb-3 text-primary">Fotos por Local</h2>
+              {(medicao.locais || []).filter(l => l.fotos && l.fotos.length > 0).map((local, li) => (
+                <div key={li} className="mb-4">
+                  <h3 className="text-sm font-medium text-gray-600 mb-2">
+                    {local.nome || `Local ${li+1}`} ({local.fotos.length} fotos)
+                  </h3>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                    {local.fotos.map((foto, i) => (
+                      <img key={i} src={resolvePhotoSrc(foto.data || foto.url || foto)} alt={`Foto ${i+1}`}
+                        className="w-full aspect-square object-cover rounded-lg cursor-pointer"
+                        onClick={() => window.open(resolvePhotoSrc(foto.data || foto.url || foto), '_blank')} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
         )}
       </div>
 
@@ -326,7 +711,6 @@ export default function MedicaoDetailPage() {
               <div className="space-y-2">
                 {(medicao.locais || []).map((local, i) => {
                   const isSelected = selectedLocais.includes(i)
-                  // Calcular total do local
                   const CAMPOS_QT = ['trinca','juntaFria','ralo','juntaDilat','ferragem','cortina','juntaGerber']
                   const totais = CAMPOS_QT.filter(c => local[c] && local[c] !== 0)
                     .map(c => {
