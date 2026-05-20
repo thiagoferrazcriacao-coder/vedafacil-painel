@@ -547,17 +547,29 @@ export default function MedicaoDetailPage() {
               {m.locais.map((local, i) => (
                 <div key={i} className="bg-gray-50 rounded-lg p-3 text-sm">
                   {editing ? (
-                    <div className="mb-2">
-                      <label className="text-xs text-gray-500 font-medium uppercase tracking-wide">Nome do Local</label>
-                      <input
-                        className="input py-1 text-sm font-medium mt-0.5"
-                        value={local.nome || local.local || ''}
-                        onChange={e => updateLocal(i, 'nome', e.target.value)}
-                        placeholder={`Local ${i + 1}`}
-                      />
+                    <div className="mb-2 space-y-2">
+                      <div>
+                        <label className="text-xs text-gray-500 font-medium uppercase tracking-wide">Nome do Local</label>
+                        <input
+                          className="input py-1 text-sm font-medium mt-0.5"
+                          value={local.nome || local.local || ''}
+                          onChange={e => updateLocal(i, 'nome', e.target.value)}
+                          placeholder={`Local ${i + 1}`}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500 font-medium uppercase tracking-wide">Andar</label>
+                        <input
+                          className="input py-1 text-sm mt-0.5"
+                          value={local.andar || ''}
+                          onChange={e => updateLocal(i, 'andar', e.target.value)}
+                          placeholder="ex: Subsolo 1, Térreo, 5º Andar…"
+                        />
+                      </div>
                     </div>
                   ) : (
                     <div className="font-medium mb-2 text-gray-700">
+                      {local.andar && <div className="text-xs text-gray-400 font-normal">🏢 {local.andar}</div>}
                       {local.nome || local.local || `Local ${i + 1}`}
                     </div>
                   )}
