@@ -59,6 +59,7 @@ export const api = {
   deleteMedicao: (id) => request('DELETE', `/medicoes/${id}`),
   deleteContrato: (id) => request('DELETE', `/contratos/${id}`),
   approveOrcamento: (id) => request('POST', `/orcamentos/${id}/approve`),
+  desfazerAprovacao: (id) => request('POST', `/orcamentos/${id}/desfazer-aprovacao`),
   toggleEnviadoCliente: (id) => request('POST', `/orcamentos/${id}/enviado-cliente`),
   aceitarAlteracaoMedicao: (id) => request('POST', `/medicoes/${id}/aceitar-alteracao`),
   recusarAlteracaoMedicao: (id) => request('POST', `/medicoes/${id}/recusar-alteracao`),

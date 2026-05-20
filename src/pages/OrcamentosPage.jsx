@@ -23,6 +23,7 @@ export default function OrcamentosPage() {
   const [deleting, setDeleting] = useState(false)
   const [duplicating, setDuplicating] = useState(null)
   const [aprovando, setAprovando] = useState(null)
+  const [desfazendo, setDesfazendo] = useState(null)
   const [togglingEnviado, setTogglingEnviado] = useState(null)
 
   const toggleCheck = (id, e) => {
@@ -96,6 +97,20 @@ export default function OrcamentosPage() {
       alert('Erro: ' + err.message)
     } finally {
       setAprovando(null)
+    }
+  }
+
+  const handleDesfazerAprovacao = async (e, id) => {
+    e.stopPropagation()
+    if (!confirm('Desfazer aprovação?\n\nO contrato gerado (se ainda não assinado e sem OS criada) será movido para a lixeira e o orçamento voltará ao status "Enviado".')) return
+    setDesfazendo(id)
+    try {
+      const res = await api.desfazerAprovacao(id)
+      setOrcamentos(prev => prev.map(o => o.id === id ? { ...o, status: res.orcamento?.status || 'enviado' } : o))
+    } catch (err) {
+      alert('Não foi possível desfazer:\n' + err.message)
+    } finally {
+      setDesfazendo(null)
     }
   }
 
@@ -287,13 +302,22 @@ export default function OrcamentosPage() {
                       o.enviadoParaCliente ? '✉️ Enviado ao Cliente' : '✉️ Enviado ao Cliente?'
                     )}
                   </button>
-                  {o.status !== 'aprovado' && (
+                  {o.status !== 'aprovado' ? (
                     <button
                       className="text-xs px-3 py-1.5 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 font-semibold disabled:opacity-40 flex items-center gap-1 transition-colors"
                       disabled={aprovando === o.id}
                       onClick={e => handleAprovarContrato(e, o.id)}
                     >
                       {aprovando === o.id ? '...' : '✅ Aprovar → Contrato'}
+                    </button>
+                  ) : (
+                    <button
+                      className="text-xs px-3 py-1.5 rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200 font-semibold disabled:opacity-40 flex items-center gap-1 transition-colors"
+                      disabled={desfazendo === o.id}
+                      onClick={e => handleDesfazerAprovacao(e, o.id)}
+                      title="Desfaz a aprovação e move o contrato para a lixeira (apenas se não assinado e sem OS)"
+                    >
+                      {desfazendo === o.id ? '...' : '↩ Desfazer Aprovação'}
                     </button>
                   )}
                   {isAdmin && (

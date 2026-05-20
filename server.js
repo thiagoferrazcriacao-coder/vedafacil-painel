@@ -1297,6 +1297,79 @@ app.post('/api/orcamentos/:id/approve', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Desfazer aprovação — reverte status e deleta contrato vinculado ────────────
+app.post('/api/orcamentos/:id/desfazer-aprovacao', auth, async (req, res) => {
+  try {
+    await connectDB();
+
+    // 1. Busca o orçamento
+    let orc;
+    if (isConnected) orc = await Orcamento.findById(req.params.id);
+    else orc = memStore.orcamentos.find(x => x._id === req.params.id);
+    if (!orc) return res.status(404).json({ error: 'Orçamento não encontrado' });
+    if ((orc.status || orc.status) !== 'aprovado') {
+      return res.status(400).json({ error: 'Orçamento não está aprovado' });
+    }
+
+    // 2. Busca o contrato vinculado
+    let contrato = null;
+    if (isConnected) {
+      contrato = await Contrato.findOne({ orcamentoId: req.params.id });
+    } else {
+      contrato = memStore.contratos?.find(c => c.orcamentoId === req.params.id);
+    }
+
+    if (contrato) {
+      const cStatus = contrato.status || 'rascunho';
+      // Bloqueia se já foi assinado
+      if (cStatus === 'assinado') {
+        return res.status(400).json({ error: 'Não é possível desfazer: o contrato já foi assinado.' });
+      }
+      // Bloqueia se já tem OS criada
+      let temOS = false;
+      if (isConnected) {
+        temOS = !!(await OS.findOne({ contratoId: String(contrato._id) }));
+      } else {
+        temOS = !!(memStore.ordensServico?.find(o => o.contratoId === String(contrato._id)));
+      }
+      if (temOS) {
+        return res.status(400).json({ error: 'Não é possível desfazer: já existe uma Ordem de Serviço criada a partir deste contrato.' });
+      }
+
+      // 3. Salva na lixeira e deleta o contrato
+      const deletadoPor = req.user?.email || req.user?.username || 'sistema';
+      await salvarNaLixeira('contrato', 'Contrato', 'contratos', contrato, deletadoPor);
+      if (isConnected) {
+        await Contrato.findByIdAndDelete(contrato._id);
+      } else {
+        memStore.contratos = memStore.contratos.filter(c => String(c._id) !== String(contrato._id));
+      }
+    }
+
+    // 4. Reverte status do orçamento para 'enviado'
+    if (isConnected) {
+      orc = await Orcamento.findByIdAndUpdate(
+        req.params.id,
+        { status: 'enviado', updatedAt: Date.now() },
+        { new: true }
+      );
+    } else {
+      const idx = memStore.orcamentos.findIndex(x => x._id === req.params.id);
+      memStore.orcamentos[idx].status = 'enviado';
+      orc = memStore.orcamentos[idx];
+    }
+
+    return res.json({
+      ok: true,
+      orcamento: orc,
+      contratoExcluido: contrato ? String(contrato._id) : null,
+    });
+  } catch (err) {
+    console.error('[desfazer-aprovacao]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── PDF Generation ────────────────────────────────────────────────────────────
 
 
