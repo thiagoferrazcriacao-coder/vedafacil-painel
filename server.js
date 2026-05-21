@@ -84,6 +84,7 @@ const medicaoSchema = new mongoose.Schema({
   numeroMedicao: Number,
   user: String,
   createdAt: { type: Number, default: Date.now },
+  dataMedicao: String, // data da visita no formato YYYY-MM-DD (manual entry)
   status: { type: String, default: 'recebida' },
   cliente: String,
   endereco: String,
@@ -801,6 +802,10 @@ app.post('/api/medicoes/manual', auth, async (req, res) => {
     await Config.findByIdAndUpdate('main', { 'precos.numMedicao': numero + 1 });
     const data = sanitizeImages(req.body, 'medicao-manual');
     const id = uuidv4();
+    // Se informou dataMedicao (YYYY-MM-DD), usa como createdAt para ordenação correta
+    const createdAt = data.dataMedicao
+      ? new Date(data.dataMedicao + 'T12:00:00').getTime()
+      : Date.now();
     const medicao = await Medicao.create({
       ...data,
       _id: id,
@@ -808,7 +813,7 @@ app.post('/api/medicoes/manual', auth, async (req, res) => {
       numeroMedicao: numero,
       status: 'recebida',
       user: req.user?.email || req.user?.username || 'manual',
-      createdAt: Date.now(),
+      createdAt,
     });
     return res.json({ success: true, id: medicao._id, numeroMedicao: numero, ...medicao.toObject() });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1149,7 +1154,7 @@ app.post('/api/orcamentos', auth, async (req, res) => {
       celular: medicao?.celular || '',
       dataOrcamento: new Date().toLocaleDateString('pt-BR'),
       validade: '30',
-      avaliadoPor: medicao?.avaliadoPor || '', acompanhadoPor: '', tecnicoResponsavel: '', elaboradoPor: '',
+      avaliadoPor: medicao?.avaliadoPor || '', acompanhadoPor: medicao?.ac || '', tecnicoResponsavel: '', elaboradoPor: '',
       origem: '', sigla: '',
       garantia: Number(medicao?.garantia) || 15,
       andaime: String(medicao?.andaime || 'nao').trim().toLowerCase(),
@@ -3685,9 +3690,12 @@ app.get('/api/calendar/events', auth, async (req, res) => {
     if (!accessToken) return res.json([]);
 
     const now = new Date();
+    // timeMin = início do dia atual (meia-noite) para não perder eventos que já passaram no dia
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
     const maxTime = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const params = new URLSearchParams({
-      timeMin: now.toISOString(),
+      timeMin: todayStart.toISOString(),
       timeMax: maxTime.toISOString(),
       maxResults: '30',
       singleEvents: 'true',

@@ -235,7 +235,9 @@ function LocalCard({ local, idx, onChange, onRemove }) {
 
 // ── Modal principal — 3 etapas ────────────────────────────────────────────────
 function NovaMedicaoModal({ onClose, onCreated }) {
+  const todayIso = () => new Date().toISOString().slice(0, 10)
   const EMPTY_FORM = {
+    dataMedicao: todayIso(),
     cliente: '', ac: '', celular: '', endereco: '', bairro: '', cidade: '', cep: '',
     garantia: '15',
     andaime: 'nao', andaimeMetros: '', andaimeRodinhas: false, andaimeBases: false, andaimeLargura: '1m',
@@ -308,6 +310,7 @@ function NovaMedicaoModal({ onClose, onCreated }) {
         locais,
         garantia: String(form.garantia),
         andaimeMetros: parseFloat(form.andaimeMetros) || 0,
+        dataMedicao: form.dataMedicao || todayIso(),
       }
       const result = await api.createMedicaoManual(payload)
       onCreated(result)
@@ -358,6 +361,27 @@ function NovaMedicaoModal({ onClose, onCreated }) {
           {/* ── Etapa 1: Dados do cliente ── */}
           {step === 1 && (
             <div className="space-y-3">
+              {/* Data da medição */}
+              <div className="bg-primary/5 border border-primary/20 rounded-xl p-3">
+                <label className="label text-primary font-semibold">📅 Data da Medição</label>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => upd('dataMedicao', todayIso())}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border-2 transition-colors ${form.dataMedicao === todayIso() ? 'bg-primary text-white border-primary' : 'bg-white text-gray-500 border-gray-300 hover:border-primary hover:text-primary'}`}
+                  >
+                    Hoje
+                  </button>
+                  <input
+                    type="date"
+                    className="input py-1.5 text-sm flex-1"
+                    value={form.dataMedicao}
+                    onChange={updE('dataMedicao')}
+                    max={todayIso()}
+                  />
+                </div>
+              </div>
+
               <div className="flex items-center gap-2 mb-1">
                 <div className="w-1 h-5 bg-primary rounded-full" />
                 <h3 className="font-semibold text-gray-700 text-sm">Dados do Cliente</h3>
