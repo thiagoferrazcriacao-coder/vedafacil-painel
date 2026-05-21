@@ -863,11 +863,12 @@ export default function OrcamentoFormPage() {
       <section className="card mb-4">
         <h2 className="font-semibold text-primary mb-3 flex items-center gap-2">
           <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">6</span>
-          Observações Adicionais
+          Observações Internas
+          <span className="text-xs font-normal bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">🔒 não aparece no PDF</span>
         </h2>
         <textarea
           className="input min-h-[80px] resize-y"
-          placeholder="Informações adicionais, condições especiais, garantias..."
+          placeholder="Anotações internas, condições especiais, informações para a equipe..."
           value={orc.obsAdicionais || ''}
           onChange={updateField('obsAdicionais')}
         />

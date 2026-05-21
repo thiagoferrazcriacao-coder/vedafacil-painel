@@ -1741,7 +1741,6 @@ ${secM('8','INFORMAÇÕES ADICIONAIS')}
 ${hasAndaime ? `<p style="font-size:11px;margin:8px 0;">
   &rarr; <strong>Andaime:</strong> necessário${o.andaimeMetros>0?` — ${o.andaimeMetros}m de altura`:''}${o.andaimeLargura?` — largura ${o.andaimeLargura}`:''}${o.andaimeRodinhas?' — com rodinhas':''}${o.andaimeBases?' — com bases':''}.
 </p>` : ''}
-${o.obsAdicionais ? `<div class="obs-box" style="margin-top:10px;font-size:10.5px;"><strong>Observações adicionais:</strong> ${o.obsAdicionais}</div>` : ''}
 <p style="margin:12px 0;">A <strong>VEDAFACIL</strong> agradece sua atenção e fica ao seu dispor para maiores esclarecimentos.</p>
 <p style="margin-bottom:18px;">Atenciosamente,</p>
 
