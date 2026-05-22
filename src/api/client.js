@@ -154,4 +154,12 @@ export const api = {
   updateUsuario: (email, data) => request('PUT', `/usuarios/${encodeURIComponent(email)}`, data),
   deleteUsuario: (email) => request('DELETE', `/usuarios/${encodeURIComponent(email)}`),
   getUsuarioMe: () => request('GET', '/usuarios/me'),
+
+  // Notifications
+  getNotificationCounts: () => request('GET', '/notifications/counts'),
+
+  // Push
+  getPushVapidKey: () => request('GET', '/push/vapid-public-key'),
+  pushSubscribe: (subscription) => request('POST', '/push/subscribe', { subscription }),
+  pushUnsubscribe: () => request('DELETE', '/push/unsubscribe'),
 }

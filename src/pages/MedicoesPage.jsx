@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
 import { useAuth } from '../App.jsx'
 import { resolvePhotoSrc } from '../utils/photos.js'
+import { useBadges } from '../components/Layout.jsx'
 
 // ── Tipos de serviço (igual ao PWA medidor) ───────────────────────────────────
 const SERVICE_TYPES = [
@@ -642,6 +643,7 @@ const STATUS_LABELS = {
 export default function MedicoesPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { refreshBadges } = useBadges()
   const isAdmin = user?.role === 'admin'
   const [medicoes, setMedicoes] = useState([])
   const [loading, setLoading] = useState(true)
@@ -881,7 +883,7 @@ export default function MedicoesPage() {
                         ) : !m.temOrcamento ? (
                           <button
                             className="btn-primary text-xs py-1 px-3"
-                            onClick={(e) => { e.stopPropagation(); navigate(`/orcamentos/novo/${m.id}`) }}
+                            onClick={(e) => { e.stopPropagation(); refreshBadges(); navigate(`/orcamentos/novo/${m.id}`) }}
                           >
                             Gerar Orçamento
                           </button>
@@ -902,7 +904,7 @@ export default function MedicoesPage() {
           <MedicaoPanel
             medicao={selected}
             onClose={() => setSelected(null)}
-            onGenerateOrcamento={() => navigate(`/orcamentos/novo/${selected.id}`)}
+            onGenerateOrcamento={() => { refreshBadges(); navigate(`/orcamentos/novo/${selected.id}`) }}
             onViewDetail={() => navigate(`/medicoes/${selected.id}`)}
           />
         </div>

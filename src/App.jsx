@@ -22,6 +22,35 @@ import AgendaPage from './pages/AgendaPage.jsx'
 import PerfilPage from './pages/PerfilPage.jsx'
 import ProdutosPage from './pages/ProdutosPage.jsx'
 
+// ─── Push Notification Setup ──────────────────────────────────────────────────
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+}
+
+async function setupPush(token) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    const keyRes = await fetch('/api/push/vapid-public-key');
+    const { key } = await keyRes.json();
+    if (!key) return;
+    const reg = await navigator.serviceWorker.register('/sw-push.js');
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(key)
+    });
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ subscription: sub })
+    });
+  } catch (e) { console.warn('Push setup failed:', e.message); }
+}
+
 // ─── Auth Context ─────────────────────────────────────────────────────────────
 export const AuthContext = createContext(null)
 
@@ -48,6 +77,7 @@ function AuthProvider({ children }) {
         localStorage.setItem('veda_user', JSON.stringify(newUser))
         setToken(googleToken)
         setUser(newUser)
+        setupPush(googleToken)
         window.history.replaceState({}, '', window.location.pathname)
       } catch (e) { console.error('Google token parse error', e) }
     }
@@ -58,6 +88,7 @@ function AuthProvider({ children }) {
     localStorage.setItem('veda_user', JSON.stringify(newUser))
     setToken(newToken)
     setUser(newUser)
+    setupPush(newToken)
   }
 
   const logout = () => {

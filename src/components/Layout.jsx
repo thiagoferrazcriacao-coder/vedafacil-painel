@@ -1,6 +1,13 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef, createContext, useContext } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../App.jsx'
+
+// ── Badges Context ────────────────────────────────────────────────────────────
+const BadgesContext = createContext({ medicoesSemOrcamento: 0, orcamentosAprovados: 0, refreshBadges: () => {} })
+
+export function useBadges() {
+  return useContext(BadgesContext)
+}
 
 const navItems = [
   {
@@ -16,6 +23,7 @@ const navItems = [
   {
     to: '/medicoes',
     label: 'Medições',
+    badgeKey: 'medicoesSemOrcamento',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -36,6 +44,7 @@ const navItems = [
   {
     to: '/contratos',
     label: 'Contratos',
+    badgeKey: 'orcamentosAprovados',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -166,6 +175,27 @@ export default function Layout({ children }) {
   const { user, logout, isAdmin } = useAuth()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [badges, setBadges] = useState({ medicoesSemOrcamento: 0, orcamentosAprovados: 0 })
+  const intervalRef = useRef(null)
+
+  async function fetchBadges() {
+    try {
+      const token = localStorage.getItem('veda_token')
+      if (!token) return
+      const res = await fetch('/api/notifications/counts', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      setBadges({ medicoesSemOrcamento: data.medicoesSemOrcamento || 0, orcamentosAprovados: data.orcamentosAprovados || 0 })
+    } catch { /* silently ignore */ }
+  }
+
+  useEffect(() => {
+    fetchBadges()
+    intervalRef.current = setInterval(fetchBadges, 60000)
+    return () => clearInterval(intervalRef.current)
+  }, [])
 
   const handleLogout = () => {
     logout()
@@ -182,23 +212,31 @@ export default function Layout({ children }) {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {[...navItems, ...(isAdmin ? adminNavItems : []), ...(user?.role === 'operador' ? operadorNavItems : [])].map(item => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            onClick={() => setMobileOpen(false)}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-white/20 text-white'
-                  : 'text-white/80 hover:bg-white/10 hover:text-white'
-              }`
-            }
-          >
-            {item.icon}
-            {item.label}
-          </NavLink>
-        ))}
+        {[...navItems, ...(isAdmin ? adminNavItems : []), ...(user?.role === 'operador' ? operadorNavItems : [])].map(item => {
+          const badgeCount = item.badgeKey ? badges[item.badgeKey] : 0
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={() => setMobileOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'bg-white/20 text-white'
+                    : 'text-white/80 hover:bg-white/10 hover:text-white'
+                }`
+              }
+            >
+              {item.icon}
+              <span className="flex-1">{item.label}</span>
+              {badgeCount > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-xs font-bold rounded-full leading-none">
+                  {badgeCount > 99 ? '99+' : badgeCount}
+                </span>
+              )}
+            </NavLink>
+          )
+        })}
       </nav>
 
       {/* User */}
@@ -238,42 +276,44 @@ export default function Layout({ children }) {
   )
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:flex flex-col w-56 flex-shrink-0" style={{ background: 'linear-gradient(180deg, #c45d12 0%, #e87722 50%, #f59340 100%)' }}>
-        <SidebarContent />
-      </aside>
+    <BadgesContext.Provider value={{ ...badges, refreshBadges: fetchBadges }}>
+      <div className="flex h-screen bg-gray-50">
+        {/* Desktop Sidebar */}
+        <aside className="hidden md:flex flex-col w-56 flex-shrink-0" style={{ background: 'linear-gradient(180deg, #c45d12 0%, #e87722 50%, #f59340 100%)' }}>
+          <SidebarContent />
+        </aside>
 
-      {/* Mobile Sidebar Overlay */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute left-0 top-0 bottom-0 w-56 flex flex-col" style={{ background: 'linear-gradient(180deg, #c45d12 0%, #e87722 50%, #f59340 100%)' }}>
-            <SidebarContent />
-          </aside>
+        {/* Mobile Sidebar Overlay */}
+        {mobileOpen && (
+          <div className="fixed inset-0 z-50 md:hidden">
+            <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
+            <aside className="absolute left-0 top-0 bottom-0 w-56 flex flex-col" style={{ background: 'linear-gradient(180deg, #c45d12 0%, #e87722 50%, #f59340 100%)' }}>
+              <SidebarContent />
+            </aside>
+          </div>
+        )}
+
+        {/* Main */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          {/* Mobile Header */}
+          <header className="md:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200">
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="p-1.5 rounded-lg hover:bg-gray-100"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <span className="font-bold text-[#e87722]">Vedafácil</span>
+          </header>
+
+          {/* Content */}
+          <main className="flex-1 overflow-auto">
+            {children}
+          </main>
         </div>
-      )}
-
-      {/* Main */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Mobile Header */}
-        <header className="md:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-200">
-          <button
-            onClick={() => setMobileOpen(true)}
-            className="p-1.5 rounded-lg hover:bg-gray-100"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-          <span className="font-bold text-[#e87722]">Vedafácil</span>
-        </header>
-
-        {/* Content */}
-        <main className="flex-1 overflow-auto">
-          {children}
-        </main>
       </div>
-    </div>
+    </BadgesContext.Provider>
   )
 }

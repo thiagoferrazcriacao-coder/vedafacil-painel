@@ -26,6 +26,7 @@ const PRICE_UNITS = {
 const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
 
 const DEFAULT_TECNICOS = ['Alan', 'Fernando', 'Thiago', 'Daniel']
+const DEFAULT_SETORES = ['Administrativo', 'Financeiro', 'Orçamentos', 'Comercial', 'Adm. de Obras', 'Operacional de Obras']
 
 export default function ConfigPage() {
   const [precos, setPrecos] = useState(null)
@@ -34,6 +35,7 @@ export default function ConfigPage() {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [novoTecnico, setNovoTecnico] = useState('')
+  const [novoSetor, setNovoSetor] = useState('')
 
   useEffect(() => {
     api.getPrecos()
@@ -217,6 +219,54 @@ export default function ConfigPage() {
               if (!novoTecnico.trim()) return
               setPrecos(prev => ({ ...prev, tecnicos: [...(prev?.tecnicos || DEFAULT_TECNICOS), novoTecnico.trim()] }))
               setNovoTecnico('')
+              setSaved(false)
+            }}
+            className="btn-primary px-4"
+          >+ Adicionar</button>
+        </div>
+      </div>
+
+      {/* Setores */}
+      <div className="card mt-4">
+        <h2 className="font-semibold text-gray-700 mb-1 text-sm uppercase tracking-wide">Setores</h2>
+        <p className="text-xs text-gray-400 mb-4">Lista de setores disponíveis para atribuição a usuários e envio de notificações push</p>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {(precos?.setores || DEFAULT_SETORES).map((s, i) => (
+            <div key={i} className="flex items-center gap-1.5 bg-blue-50 border border-blue-200 rounded-full px-3 py-1.5">
+              <span className="text-sm font-medium text-blue-800">{s}</span>
+              <button
+                onClick={() => {
+                  const arr = [...(precos?.setores || DEFAULT_SETORES)]
+                  arr.splice(i, 1)
+                  setPrecos(prev => ({ ...prev, setores: arr }))
+                  setSaved(false)
+                }}
+                className="text-blue-400 hover:text-red-500 text-xs leading-none ml-1"
+                title="Remover"
+              >×</button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            className="input flex-1"
+            placeholder="Nome do setor..."
+            value={novoSetor}
+            onChange={e => setNovoSetor(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && novoSetor.trim()) {
+                setPrecos(prev => ({ ...prev, setores: [...(prev?.setores || DEFAULT_SETORES), novoSetor.trim()] }))
+                setNovoSetor('')
+                setSaved(false)
+              }
+            }}
+          />
+          <button
+            onClick={() => {
+              if (!novoSetor.trim()) return
+              setPrecos(prev => ({ ...prev, setores: [...(prev?.setores || DEFAULT_SETORES), novoSetor.trim()] }))
+              setNovoSetor('')
               setSaved(false)
             }}
             className="btn-primary px-4"

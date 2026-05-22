@@ -12,6 +12,7 @@ import path from 'path';
 import { createRequire } from 'module';
 import { google } from 'googleapis';
 import { readFileSync, existsSync } from 'fs';
+import webpush from 'web-push';
 import {
   log, sanitizeImages, MAX_IMG_B64_BYTES,
   calcObra, expandSubPontos, ensureSubPontos, calcProgressoOS,
@@ -64,6 +65,22 @@ const ASSINATURA_B64 = existsSync(path.join(__dirname, 'assinatura_b64.txt'))
   : '';
 
 const app = express();
+
+// ── Web Push (VAPID) setup ────────────────────────────────────────────────────
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  try {
+    webpush.setVapidDetails(
+      'mailto:thiagoferrazcriacao@gmail.com',
+      process.env.VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    );
+  } catch (e) {
+    console.warn('VAPID setup failed:', e.message);
+  }
+} else {
+  console.log('[Push] VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY não configurados — notificações push desabilitadas.');
+  console.log('[Push] Para gerar chaves: node -e "const wp=require(\'web-push\'); const k=wp.generateVAPIDKeys(); console.log(JSON.stringify(k,null,2))"');
+}
 
 // MongoDB connection
 let isConnected = false;
@@ -219,6 +236,8 @@ const userSchema = new mongoose.Schema({
   googleAccessToken: String,
   googleRefreshToken: String,
   googleTokenExpiry: Number,
+  setores: { type: [String], default: [] },
+  pushSubscription: { type: mongoose.Schema.Types.Mixed },
 }, { _id: false });
 const User = mongoose.model('User', userSchema);
 
@@ -236,6 +255,7 @@ const configSchema = new mongoose.Schema({
     numOrcamento: { type: Number, default: 1 },
     numMedicao:   { type: Number, default: 1 },
     tecnicos: { type: [String], default: ['Alan', 'Fernando', 'Thiago', 'Daniel'] },
+    setores: { type: [String], default: ['Administrativo', 'Financeiro', 'Orçamentos', 'Comercial', 'Adm. de Obras', 'Operacional de Obras'] },
   }
 }, { _id: false });
 
@@ -395,6 +415,21 @@ const garantiaDocSchema = new mongoose.Schema({
   criadoEm:       { type: Date, default: Date.now }
 });
 const GarantiaDoc = mongoose.model('GarantiaDoc', garantiaDocSchema, 'garantias');
+
+// ── Push notification helper ──────────────────────────────────────────────────
+async function sendPushToSetores(setoresAlvo, payload) {
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) return;
+  try {
+    const users = await User.find({ setores: { $in: setoresAlvo }, pushSubscription: { $exists: true } });
+    for (const u of users) {
+      try {
+        await webpush.sendNotification(u.pushSubscription, JSON.stringify(payload));
+      } catch (e) {
+        if (e.statusCode === 410) await User.findByIdAndUpdate(u._id, { $unset: { pushSubscription: 1 } });
+      }
+    }
+  } catch (e) { console.error('Push error:', e.message); }
+}
 
 // In-memory fallback (when no MongoDB)
 const memStore = { medicoes: [], orcamentos: [], contratos: [], config: null, users: [], equipes: [], ordens: [], lixeira: [] };
@@ -764,6 +799,13 @@ app.post('/api/medicao', async (req, res) => {
       // Incrementa para a próxima
       await Config.findByIdAndUpdate('main', { 'precos.numMedicao': numero + 1 });
       const medicao = await Medicao.create({ ...data, _id: data.id || uuidv4(), numeroMedicao: numero, status: 'recebida' });
+      // Push notification para setor Orçamentos
+      sendPushToSetores(['Orçamentos'], {
+        title: 'Nova Medição',
+        body: `${data.cliente || data.nomeCliente || 'Cliente'} — ${data.cidade || ''}`.trim().replace(/—\s*$/, ''),
+        icon: '/logo.png',
+        url: '/medicoes'
+      });
       return res.json({ success: true, id: medicao._id });
     } else {
       const medicao = { ...data, _id: data.id || uuidv4(), numeroMedicao: memStore.medicoes.length + 1, status: 'recebida' };
@@ -1297,6 +1339,15 @@ app.post('/api/orcamentos/:id/approve', auth, async (req, res) => {
       if (idx === -1) return res.status(404).json({ error: 'Not found' });
       memStore.orcamentos[idx].status = 'aprovado';
       o = memStore.orcamentos[idx];
+    }
+    // Push notification para setores Administrativo e Financeiro
+    if (o) {
+      sendPushToSetores(['Administrativo', 'Financeiro'], {
+        title: 'Orçamento Aprovado',
+        body: `Orçamento #${o.numero || ''} — ${o.cliente || ''}`.trim().replace(/—\s*$/, ''),
+        icon: '/logo.png',
+        url: '/contratos'
+      });
     }
     res.json(o);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -3779,33 +3830,34 @@ app.get('/api/usuarios', auth, adminOnly, async (req, res) => {
     await connectDB();
     if (isConnected) {
       const users = await User.find().select('-googleAccessToken -googleRefreshToken -googleTokenExpiry');
-      return res.json(users.map(u => ({ id: u._id, email: u.email, name: u.name, role: u.role, picture: u.picture })));
+      return res.json(users.map(u => ({ id: u._id, email: u.email, name: u.name, role: u.role, picture: u.picture, setores: u.setores || [] })));
     }
-    res.json(memStore.users.map(u => ({ id: u._id || u.email, email: u.email, name: u.name, role: u.role, picture: u.picture })));
+    res.json(memStore.users.map(u => ({ id: u._id || u.email, email: u.email, name: u.name, role: u.role, picture: u.picture, setores: u.setores || [] })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/usuarios', auth, adminOnly, async (req, res) => {
   try {
     await connectDB();
-    const { email, name, role, password } = req.body;
+    const { email, name, role, password, setores } = req.body;
     if (!email) return res.status(400).json({ error: 'Email obrigatório' });
     const isOperador = (role || 'medidor') === 'operador';
     const userData = {
       _id: email, email, name: name || '', role: role || 'medidor',
+      setores: setores || [],
       ...(isOperador ? { password: password || '123456', mustChangePassword: true } : {}),
     };
     if (isConnected) {
       const existing = await User.findById(email);
       if (existing) return res.status(409).json({ error: 'Usuário já existe' });
       const created = await User.create(userData);
-      return res.json({ id: created._id, email: created.email, name: created.name, role: created.role });
+      return res.json({ id: created._id, email: created.email, name: created.name, role: created.role, setores: created.setores || [] });
     }
     if (memStore.users.find(u => u._id === email || u.email === email)) {
       return res.status(409).json({ error: 'Usuário já existe' });
     }
     memStore.users.push(userData);
-    res.json({ id: email, email, name: userData.name, role: userData.role });
+    res.json({ id: email, email, name: userData.name, role: userData.role, setores: userData.setores || [] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -3813,19 +3865,20 @@ app.put('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
   try {
     await connectDB();
     const { email } = req.params;
-    const { name, role } = req.body;
+    const { name, role, setores } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (role !== undefined) updates.role = role;
+    if (setores !== undefined) updates.setores = setores;
     if (isConnected) {
       const updated = await User.findByIdAndUpdate(email, updates, { new: true });
       if (!updated) return res.status(404).json({ error: 'Usuário não encontrado' });
-      return res.json({ id: updated._id, email: updated.email, name: updated.name, role: updated.role });
+      return res.json({ id: updated._id, email: updated.email, name: updated.name, role: updated.role, setores: updated.setores || [] });
     }
     const u = memStore.users.find(x => x._id === email || x.email === email);
     if (!u) return res.status(404).json({ error: 'Usuário não encontrado' });
     Object.assign(u, updates);
-    res.json({ id: u._id || u.email, email: u.email, name: u.name, role: u.role });
+    res.json({ id: u._id || u.email, email: u.email, name: u.name, role: u.role, setores: u.setores || [] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -3837,6 +3890,58 @@ app.delete('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
       await User.findByIdAndDelete(email);
     } else {
       memStore.users = memStore.users.filter(u => u._id !== email && u.email !== email);
+    }
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Notification badge counts ─────────────────────────────────────────────────
+app.get('/api/notifications/counts', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) {
+      const [medicoesSemOrcamento, orcamentosAprovados] = await Promise.all([
+        Medicao.countDocuments({ temOrcamento: { $ne: true } }),
+        Orcamento.countDocuments({ status: 'aprovado' }),
+      ]);
+      return res.json({ medicoesSemOrcamento, orcamentosAprovados });
+    }
+    const medicoesSemOrcamento = memStore.medicoes.filter(m => m.temOrcamento !== true).length;
+    const orcamentosAprovados = memStore.orcamentos.filter(o => o.status === 'aprovado').length;
+    res.json({ medicoesSemOrcamento, orcamentosAprovados });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Push Notifications ────────────────────────────────────────────────────────
+app.get('/api/push/vapid-public-key', (req, res) => {
+  res.json({ key: process.env.VAPID_PUBLIC_KEY || null });
+});
+
+app.post('/api/push/subscribe', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const { subscription } = req.body;
+    if (!subscription) return res.status(400).json({ error: 'subscription required' });
+    const email = req.user.email;
+    if (isConnected) {
+      await User.findByIdAndUpdate(email, { pushSubscription: subscription });
+    } else {
+      const u = memStore.users.find(x => x._id === email || x.email === email);
+      if (u) u.pushSubscription = subscription;
+    }
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/push/unsubscribe', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const email = req.user.email;
+    if (isConnected) {
+      await User.findByIdAndUpdate(email, { $unset: { pushSubscription: 1 } });
+    } else {
+      const u = memStore.users.find(x => x._id === email || x.email === email);
+      if (u) delete u.pushSubscription;
     }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }

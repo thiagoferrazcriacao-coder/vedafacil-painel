@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
 import { useAuth } from '../App.jsx'
+import { useBadges } from '../components/Layout.jsx'
 
 const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
 
@@ -14,6 +15,7 @@ const STATUS = {
 export default function OrcamentosPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { refreshBadges } = useBadges()
   const isAdmin = user?.role === 'admin'
   const [orcamentos, setOrcamentos] = useState([])
   const [loading, setLoading] = useState(true)
@@ -92,6 +94,7 @@ export default function OrcamentosPage() {
     try {
       await api.approveOrcamento(id)
       const contrato = await api.createContrato({ orcamentoId: id })
+      refreshBadges()
       navigate(`/contratos/${contrato.id || contrato._id}`)
     } catch (err) {
       alert('Erro: ' + err.message)

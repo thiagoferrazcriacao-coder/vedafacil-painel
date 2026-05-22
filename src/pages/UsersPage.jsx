@@ -3,7 +3,9 @@ import { api } from '../api/client.js'
 
 const ROLE_LABELS = { admin: 'Admin', medidor: 'Medidor', operador: 'Operador' }
 
-const emptyForm = { email: '', name: '', role: 'operador' }
+const DEFAULT_SETORES = ['Administrativo', 'Financeiro', 'Orçamentos', 'Comercial', 'Adm. de Obras', 'Operacional de Obras']
+
+const emptyForm = { email: '', name: '', role: 'operador', setores: [] }
 
 export default function UsersPage() {
   const [users, setUsers] = useState([])
@@ -14,13 +16,15 @@ export default function UsersPage() {
   const [editingEmail, setEditingEmail] = useState(null)
   const [saving, setSaving] = useState(false)
   const [deletingEmail, setDeletingEmail] = useState(null)
+  const [setoresDisponiveis, setSetoresDisponiveis] = useState(DEFAULT_SETORES)
 
   async function load() {
     setLoading(true)
     setError(null)
     try {
-      const data = await api.getUsuarios()
+      const [data, precos] = await Promise.all([api.getUsuarios(), api.getPrecos()])
       setUsers(Array.isArray(data) ? data : [])
+      if (precos?.setores?.length) setSetoresDisponiveis(precos.setores)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -37,7 +41,7 @@ export default function UsersPage() {
   }
 
   function openEdit(user) {
-    setForm({ email: user.email, name: user.name || '', role: user.role || 'medidor' })
+    setForm({ email: user.email, name: user.name || '', role: user.role || 'medidor', setores: user.setores || [] })
     setEditingEmail(user.email)
     setShowForm(true)
   }
@@ -48,15 +52,24 @@ export default function UsersPage() {
     setForm(emptyForm)
   }
 
+  function toggleSetor(setor) {
+    setForm(f => ({
+      ...f,
+      setores: f.setores.includes(setor)
+        ? f.setores.filter(s => s !== setor)
+        : [...f.setores, setor]
+    }))
+  }
+
   async function handleSave(e) {
     e.preventDefault()
     setSaving(true)
     setError(null)
     try {
       if (editingEmail) {
-        await api.updateUsuario(editingEmail, { name: form.name, role: form.role })
+        await api.updateUsuario(editingEmail, { name: form.name, role: form.role, setores: form.setores })
       } else {
-        await api.createUsuario({ email: form.email, name: form.name, role: form.role })
+        await api.createUsuario({ email: form.email, name: form.name, role: form.role, setores: form.setores })
       }
       cancelForm()
       await load()
@@ -114,45 +127,66 @@ export default function UsersPage() {
           <h2 className="text-base font-semibold text-gray-700 mb-4">
             {editingEmail ? 'Editar Usuário' : 'Novo Usuário'}
           </h2>
-          <form onSubmit={handleSave} className="flex flex-col sm:flex-row gap-3 items-end">
-            <div className="flex-1 min-w-0">
-              <label className="block text-xs font-medium text-gray-600 mb-1">Email (Gmail)</label>
-              <input
-                type="email"
-                required
-                disabled={!!editingEmail}
-                value={form.email}
-                onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                placeholder="usuario@gmail.com"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:bg-gray-100"
-              />
+          <form onSubmit={handleSave} className="flex flex-col gap-4">
+            <div className="flex flex-col sm:flex-row gap-3 items-end">
+              <div className="flex-1 min-w-0">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Email (Gmail)</label>
+                <input
+                  type="email"
+                  required
+                  disabled={!!editingEmail}
+                  value={form.email}
+                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                  placeholder="usuario@gmail.com"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:bg-gray-100"
+                />
+              </div>
+              <div className="flex-1 min-w-0">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Nome</label>
+                <input
+                  type="text"
+                  required
+                  value={form.name}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Nome completo"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+              </div>
+              <div className="w-36">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Papel</label>
+                <select
+                  value={form.role}
+                  onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                >
+                  <option value="operador">Operador</option>
+                  <option value="medidor">Medidor</option>
+                  <option value="admin">Admin</option>
+                </select>
+                {form.role === 'operador' && !editingEmail && (
+                  <p className="text-xs text-amber-600 mt-1">Senha temporária: <strong>123456</strong>. O usuário deverá trocá-la no primeiro acesso.</p>
+                )}
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <label className="block text-xs font-medium text-gray-600 mb-1">Nome</label>
-              <input
-                type="text"
-                required
-                value={form.name}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="Nome completo"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              />
+
+            {/* Setores */}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-2">Setores</label>
+              <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto">
+                {setoresDisponiveis.map(setor => (
+                  <label key={setor} className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={form.setores.includes(setor)}
+                      onChange={() => toggleSetor(setor)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-300"
+                    />
+                    <span className="text-sm text-gray-700">{setor}</span>
+                  </label>
+                ))}
+              </div>
             </div>
-            <div className="w-36">
-              <label className="block text-xs font-medium text-gray-600 mb-1">Papel</label>
-              <select
-                value={form.role}
-                onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-              >
-                <option value="operador">Operador</option>
-                <option value="medidor">Medidor</option>
-                <option value="admin">Admin</option>
-              </select>
-              {form.role === 'operador' && !editingEmail && (
-                <p className="text-xs text-amber-600 mt-1">Senha temporária: <strong>123456</strong>. O usuário deverá trocá-la no primeiro acesso.</p>
-              )}
-            </div>
+
             <div className="flex gap-2">
               <button
                 type="submit"
@@ -195,6 +229,7 @@ export default function UsersPage() {
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Nome</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Email</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Papel</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Setores</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -227,6 +262,19 @@ export default function UsersPage() {
                     }`}>
                       {ROLE_LABELS[u.role] || u.role}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {(u.setores || []).length === 0 ? (
+                        <span className="text-gray-400 text-xs italic">Nenhum</span>
+                      ) : (
+                        (u.setores || []).map(s => (
+                          <span key={s} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600">
+                            {s}
+                          </span>
+                        ))
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
