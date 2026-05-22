@@ -41,6 +41,7 @@ export default function MedicaoDetailPage() {
   const [selectedLocais, setSelectedLocais] = useState([])
   const [error, setError] = useState('')
   const [processandoAlteracao, setProcessandoAlteracao] = useState(false)
+  const [lightbox, setLightbox] = useState(null) // { src, list, idx }
   const fileInputRefs = useRef({})
 
   useEffect(() => {
@@ -681,11 +682,15 @@ export default function MedicaoDetailPage() {
                     {local.nome || `Local ${li+1}`} ({local.fotos.length} fotos)
                   </h3>
                   <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                    {local.fotos.map((foto, i) => (
-                      <img key={i} src={resolvePhotoSrc(foto.data || foto.url || foto)} alt={`Foto ${i+1}`}
-                        className="w-full aspect-square object-cover rounded-lg cursor-pointer"
-                        onClick={() => window.open(resolvePhotoSrc(foto.data || foto.url || foto), '_blank')} />
-                    ))}
+                    {local.fotos.map((foto, i) => {
+                      const src = resolvePhotoSrc(foto.data || foto.url || foto)
+                      const list = local.fotos.map(f => resolvePhotoSrc(f.data || f.url || f))
+                      return (
+                        <img key={i} src={src} alt={`Foto ${i+1}`}
+                          className="w-full aspect-square object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                          onClick={() => setLightbox({ src, list, idx: i })} />
+                      )
+                    })}
                   </div>
                 </div>
               ))}
@@ -693,6 +698,59 @@ export default function MedicaoDetailPage() {
           )
         )}
       </div>
+
+      {/* Lightbox de fotos */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center"
+          onClick={() => setLightbox(null)}
+          onKeyDown={e => {
+            if (e.key === 'Escape') setLightbox(null)
+            if (e.key === 'ArrowRight') setLightbox(lb => lb.idx < lb.list.length - 1 ? { ...lb, idx: lb.idx + 1, src: lb.list[lb.idx + 1] } : lb)
+            if (e.key === 'ArrowLeft') setLightbox(lb => lb.idx > 0 ? { ...lb, idx: lb.idx - 1, src: lb.list[lb.idx - 1] } : lb)
+          }}
+          tabIndex={0}
+          style={{ outline: 'none' }}
+          ref={el => el && el.focus()}
+        >
+          {/* Fechar */}
+          <button
+            className="absolute top-4 right-4 text-white/80 hover:text-white bg-black/40 rounded-full w-10 h-10 flex items-center justify-center text-2xl z-10"
+            onClick={() => setLightbox(null)}
+          >×</button>
+
+          {/* Anterior */}
+          {lightbox.idx > 0 && (
+            <button
+              className="absolute left-4 top-1/2 -translate-y-1/2 text-white/80 hover:text-white bg-black/40 rounded-full w-10 h-10 flex items-center justify-center text-2xl z-10"
+              onClick={e => { e.stopPropagation(); setLightbox(lb => ({ ...lb, idx: lb.idx - 1, src: lb.list[lb.idx - 1] })) }}
+            >‹</button>
+          )}
+
+          {/* Próximo */}
+          {lightbox.idx < lightbox.list.length - 1 && (
+            <button
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-white/80 hover:text-white bg-black/40 rounded-full w-10 h-10 flex items-center justify-center text-2xl z-10"
+              onClick={e => { e.stopPropagation(); setLightbox(lb => ({ ...lb, idx: lb.idx + 1, src: lb.list[lb.idx + 1] })) }}
+            >›</button>
+          )}
+
+          {/* Imagem */}
+          <img
+            src={lightbox.src}
+            alt={`Foto ${lightbox.idx + 1}`}
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          />
+
+          {/* Contador */}
+          {lightbox.list.length > 1 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/50 text-white text-sm px-3 py-1 rounded-full">
+              {lightbox.idx + 1} / {lightbox.list.length}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Modal Seleção Parcial */}
       {showPartialModal && (
