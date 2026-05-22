@@ -30,25 +30,50 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
 }
 
-async function setupPush(token) {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+// Registra SW e faz subscribe sem pedir permissão
+// Retorna true se subscreveu com sucesso, false caso contrário
+async function registerPushSW(token) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
   try {
     const keyRes = await fetch('/api/push/vapid-public-key');
     const { key } = await keyRes.json();
-    if (!key) return;
+    if (!key) return false;
     const reg = await navigator.serviceWorker.register('/sw-push.js');
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') return;
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(key)
-    });
+    await navigator.serviceWorker.ready;
+    // Verifica se já tem subscription ativa
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      if (Notification.permission !== 'granted') return false;
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
+    }
     await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ subscription: sub })
     });
-  } catch (e) { console.warn('Push setup failed:', e.message); }
+    return true;
+  } catch (e) { console.warn('Push SW failed:', e.message); return false; }
+}
+
+// Pede permissão ao usuário e então registra — chamar a partir de um clique
+export async function setupPush(token) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+  try {
+    const keyRes = await fetch('/api/push/vapid-public-key');
+    const { key } = await keyRes.json();
+    if (!key) return false;
+    const reg = await navigator.serviceWorker.register('/sw-push.js');
+    await navigator.serviceWorker.ready;
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return false;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ subscription: sub })
+    });
+    return true;
+  } catch (e) { console.warn('Push setup failed:', e.message); return false; }
 }
 
 // ─── Auth Context ─────────────────────────────────────────────────────────────
@@ -83,11 +108,17 @@ function AuthProvider({ children }) {
     }
   }, [])
 
+  // Tenta registrar SW silenciosamente se já tem permissão (sessão existente)
+  useEffect(() => {
+    if (token) registerPushSW(token);
+  }, [token])
+
   const login = (newToken, newUser) => {
     localStorage.setItem('veda_token', newToken)
     localStorage.setItem('veda_user', JSON.stringify(newUser))
     setToken(newToken)
     setUser(newUser)
+    // Pede permissão no login (vem de clique do usuário = permitido pelo browser)
     setupPush(newToken)
   }
 

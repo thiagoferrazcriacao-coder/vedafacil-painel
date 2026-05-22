@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { useAuth } from '../App.jsx'
+import { useAuth, setupPush } from '../App.jsx'
 
 // ── Badges Context ────────────────────────────────────────────────────────────
 const BadgesContext = createContext({ medicoesSemOrcamento: 0, orcamentosAprovados: 0, refreshBadges: () => {} })
@@ -176,7 +176,19 @@ export default function Layout({ children }) {
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [badges, setBadges] = useState({ medicoesSemOrcamento: 0, orcamentosAprovados: 0 })
+  const [pushStatus, setPushStatus] = useState(() => {
+    if (!('Notification' in window)) return 'unsupported'
+    return Notification.permission // 'default' | 'granted' | 'denied'
+  })
   const intervalRef = useRef(null)
+
+  async function handleActivatePush() {
+    const token = localStorage.getItem('veda_token')
+    if (!token) return
+    setPushStatus('loading')
+    const ok = await setupPush(token)
+    setPushStatus(ok ? 'granted' : (Notification.permission === 'denied' ? 'denied' : 'default'))
+  }
 
   async function fetchBadges() {
     try {
@@ -261,6 +273,24 @@ export default function Layout({ children }) {
             <div className="text-white/70 text-xs capitalize">{user?.role || 'admin'}</div>
           </div>
         </div>
+        {/* Botão notificações */}
+        {pushStatus !== 'unsupported' && pushStatus !== 'granted' && (
+          <button
+            onClick={handleActivatePush}
+            disabled={pushStatus === 'loading' || pushStatus === 'denied'}
+            className="w-full flex items-center gap-2 px-3 py-2 mb-1 rounded-lg text-sm transition-colors disabled:opacity-50"
+            style={{ background: pushStatus === 'denied' ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.15)', color: 'white' }}
+            title={pushStatus === 'denied' ? 'Permissão bloqueada no browser' : 'Ativar notificações push'}
+          >
+            <span className="text-base">{pushStatus === 'loading' ? '⟳' : pushStatus === 'denied' ? '🔕' : '🔔'}</span>
+            <span>{pushStatus === 'denied' ? 'Notif. bloqueadas' : pushStatus === 'loading' ? 'Ativando...' : 'Ativar Notificações'}</span>
+          </button>
+        )}
+        {pushStatus === 'granted' && (
+          <div className="flex items-center gap-2 px-3 py-1.5 mb-1 text-xs text-white/60">
+            <span>✅</span><span>Notificações ativas</span>
+          </div>
+        )}
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-2 px-3 py-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg text-sm transition-colors"
