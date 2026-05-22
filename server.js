@@ -3919,7 +3919,7 @@ app.get('/api/notifications/counts', auth, async (req, res) => {
       const medicaoIdsComOrcamento = await Orcamento.distinct('medicaoId', { medicaoId: { $ne: null } });
       const [medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados] = await Promise.all([
         verOrcamento  ? Medicao.countDocuments({ _id: { $nin: medicaoIdsComOrcamento } }) : Promise.resolve(0),
-        verOrcamento  ? Orcamento.countDocuments({ status: 'rascunho' }) : Promise.resolve(0),
+        verOrcamento  ? Orcamento.countDocuments({ enviadoParaCliente: { $ne: true }, status: { $nin: ['aprovado'] } }) : Promise.resolve(0),
         verFinanceiro ? Orcamento.countDocuments({ status: 'aprovado' }) : Promise.resolve(0),
       ]);
       return res.json({ medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados });
@@ -3927,7 +3927,7 @@ app.get('/api/notifications/counts', auth, async (req, res) => {
     // fallback memStore
     const idsComOrc = new Set(memStore.orcamentos.map(o => o.medicaoId).filter(Boolean));
     const medicoesSemOrcamento = verOrcamento  ? memStore.medicoes.filter(m => !idsComOrc.has(m._id || m.id)).length : 0;
-    const orcamentosNaoEnviados  = verOrcamento  ? memStore.orcamentos.filter(o => o.status === 'rascunho').length : 0;
+    const orcamentosNaoEnviados  = verOrcamento  ? memStore.orcamentos.filter(o => !o.enviadoParaCliente && o.status !== 'aprovado').length : 0;
     const orcamentosAprovados    = verFinanceiro ? memStore.orcamentos.filter(o => o.status === 'aprovado').length : 0;
     res.json({ medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados });
   } catch (err) { res.status(500).json({ error: err.message }); }
