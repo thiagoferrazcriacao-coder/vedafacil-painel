@@ -799,9 +799,9 @@ app.post('/api/medicao', async (req, res) => {
       // Incrementa para a próxima
       await Config.findByIdAndUpdate('main', { 'precos.numMedicao': numero + 1 });
       const medicao = await Medicao.create({ ...data, _id: data.id || uuidv4(), numeroMedicao: numero, status: 'recebida' });
-      // Push notification para setor Orçamentos
-      sendPushToSetores(['Orçamentos'], {
-        title: 'Nova Medição',
+      // Push notification para setores Orçamentos e Comercial
+      sendPushToSetores(['Orçamentos', 'Comercial'], {
+        title: '📐 Nova Medição',
         body: `${data.cliente || data.nomeCliente || 'Cliente'} — ${data.cidade || ''}`.trim().replace(/—\s*$/, ''),
         icon: '/logo.png',
         url: '/medicoes'
@@ -1340,11 +1340,11 @@ app.post('/api/orcamentos/:id/approve', auth, async (req, res) => {
       memStore.orcamentos[idx].status = 'aprovado';
       o = memStore.orcamentos[idx];
     }
-    // Push notification para setores Administrativo e Financeiro
+    // Push notification para setores Financeiro e Administrativo
     if (o) {
-      sendPushToSetores(['Administrativo', 'Financeiro'], {
-        title: 'Orçamento Aprovado',
-        body: `Orçamento #${o.numero || ''} — ${o.cliente || ''}`.trim().replace(/—\s*$/, ''),
+      sendPushToSetores(['Financeiro', 'Administrativo'], {
+        title: '📋 Contrato Pendente',
+        body: `Orçamento #${o.numero || ''} aprovado — ${o.cliente || ''}`.trim().replace(/—\s*$/, ''),
         icon: '/logo.png',
         url: '/contratos'
       });
@@ -3899,20 +3899,37 @@ app.delete('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
 app.get('/api/notifications/counts', auth, async (req, res) => {
   try {
     await connectDB();
+
+    // Descobre setores do usuário logado para filtrar o que mostrar
+    const setoresOrcamento = ['Orçamentos', 'Comercial'];
+    const setoresFinanceiro = ['Financeiro', 'Administrativo'];
+
+    let userSetores = [];
     if (isConnected) {
-      // medicoesSemOrcamento: medições que não têm nenhum orçamento vinculado
+      const u = await User.findById(req.user?.email || req.user?.id || req.user?._id).lean();
+      userSetores = u?.setores || [];
+    }
+    // admin e quem não tem setor vê tudo
+    const isAdminRole = req.user?.role === 'admin';
+    const semSetor = userSetores.length === 0;
+    const verOrcamento = isAdminRole || semSetor || userSetores.some(s => setoresOrcamento.includes(s));
+    const verFinanceiro = isAdminRole || semSetor || userSetores.some(s => setoresFinanceiro.includes(s));
+
+    if (isConnected) {
       const medicaoIdsComOrcamento = await Orcamento.distinct('medicaoId', { medicaoId: { $ne: null } });
-      const [medicoesSemOrcamento, orcamentosAprovados] = await Promise.all([
-        Medicao.countDocuments({ _id: { $nin: medicaoIdsComOrcamento } }),
-        Orcamento.countDocuments({ status: 'aprovado' }),
+      const [medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados] = await Promise.all([
+        verOrcamento  ? Medicao.countDocuments({ _id: { $nin: medicaoIdsComOrcamento } }) : Promise.resolve(0),
+        verOrcamento  ? Orcamento.countDocuments({ status: 'rascunho' }) : Promise.resolve(0),
+        verFinanceiro ? Orcamento.countDocuments({ status: 'aprovado' }) : Promise.resolve(0),
       ]);
-      return res.json({ medicoesSemOrcamento, orcamentosAprovados });
+      return res.json({ medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados });
     }
     // fallback memStore
     const idsComOrc = new Set(memStore.orcamentos.map(o => o.medicaoId).filter(Boolean));
-    const medicoesSemOrcamento = memStore.medicoes.filter(m => !idsComOrc.has(m._id || m.id)).length;
-    const orcamentosAprovados = memStore.orcamentos.filter(o => o.status === 'aprovado').length;
-    res.json({ medicoesSemOrcamento, orcamentosAprovados });
+    const medicoesSemOrcamento = verOrcamento  ? memStore.medicoes.filter(m => !idsComOrc.has(m._id || m.id)).length : 0;
+    const orcamentosNaoEnviados  = verOrcamento  ? memStore.orcamentos.filter(o => o.status === 'rascunho').length : 0;
+    const orcamentosAprovados    = verFinanceiro ? memStore.orcamentos.filter(o => o.status === 'aprovado').length : 0;
+    res.json({ medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

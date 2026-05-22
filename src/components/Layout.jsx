@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth, setupPush } from '../App.jsx'
 
 // ── Badges Context ────────────────────────────────────────────────────────────
-const BadgesContext = createContext({ medicoesSemOrcamento: 0, orcamentosAprovados: 0, refreshBadges: () => {} })
+const BadgesContext = createContext({ medicoesSemOrcamento: 0, orcamentosNaoEnviados: 0, orcamentosAprovados: 0, refreshBadges: () => {} })
 
 export function useBadges() {
   return useContext(BadgesContext)
@@ -34,6 +34,7 @@ const navItems = [
   {
     to: '/orcamentos',
     label: 'Orçamentos',
+    badgeKey: 'orcamentosNaoEnviados',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -175,7 +176,7 @@ export default function Layout({ children }) {
   const { user, logout, isAdmin } = useAuth()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [badges, setBadges] = useState({ medicoesSemOrcamento: 0, orcamentosAprovados: 0 })
+  const [badges, setBadges] = useState({ medicoesSemOrcamento: 0, orcamentosNaoEnviados: 0, orcamentosAprovados: 0 })
   const [pushStatus, setPushStatus] = useState(() => {
     if (!('Notification' in window)) return 'unsupported'
     return Notification.permission // 'default' | 'granted' | 'denied'
@@ -199,7 +200,7 @@ export default function Layout({ children }) {
       })
       if (!res.ok) return
       const data = await res.json()
-      setBadges({ medicoesSemOrcamento: data.medicoesSemOrcamento || 0, orcamentosAprovados: data.orcamentosAprovados || 0 })
+      setBadges({ medicoesSemOrcamento: data.medicoesSemOrcamento || 0, orcamentosNaoEnviados: data.orcamentosNaoEnviados || 0, orcamentosAprovados: data.orcamentosAprovados || 0 })
     } catch { /* silently ignore */ }
   }
 
