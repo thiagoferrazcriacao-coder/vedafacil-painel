@@ -218,7 +218,7 @@ export default function DashboardPage() {
     <div className="p-6 max-w-7xl mx-auto space-y-6">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="bg-gradient-to-r from-[#c45d12] via-[#e87722] to-[#f59340] rounded-2xl p-6 text-white shadow-lg">
+      <div className="bg-gradient-to-r from-[#2d1106] via-[#5a2209] to-[#8b3812] rounded-2xl p-6 text-white shadow-lg">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-black tracking-tight">Dashboard</h1>
@@ -278,7 +278,7 @@ export default function DashboardPage() {
         />
         <MetricCard
           icon="✍️" label="Contratos"
-          gradient="bg-gradient-to-br from-[#e87722] to-[#c45d12]"
+          gradient="bg-gradient-to-br from-[#5a2209] to-[#2d1106]"
           value={S?.contratos?.total ?? '—'}
           sub={S ? `${S.contratos.assinado} assinado(s)` : 'no período'}
           trend={S && prev ? S.contratos.total - prev.contratos : null}

@@ -309,7 +309,7 @@ export default function Layout({ children }) {
     <BadgesContext.Provider value={{ ...badges, refreshBadges: fetchBadges }}>
       <div className="flex h-screen bg-gray-50">
         {/* Desktop Sidebar */}
-        <aside className="hidden md:flex flex-col w-56 flex-shrink-0" style={{ background: 'linear-gradient(180deg, #c45d12 0%, #e87722 50%, #f59340 100%)' }}>
+        <aside className="hidden md:flex flex-col w-56 flex-shrink-0" style={{ background: 'linear-gradient(180deg, #2d1106 0%, #5a2209 55%, #8b3812 100%)' }}>
           <SidebarContent />
         </aside>
 
@@ -317,7 +317,7 @@ export default function Layout({ children }) {
         {mobileOpen && (
           <div className="fixed inset-0 z-50 md:hidden">
             <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
-            <aside className="absolute left-0 top-0 bottom-0 w-56 flex flex-col" style={{ background: 'linear-gradient(180deg, #c45d12 0%, #e87722 50%, #f59340 100%)' }}>
+            <aside className="absolute left-0 top-0 bottom-0 w-56 flex flex-col" style={{ background: 'linear-gradient(180deg, #2d1106 0%, #5a2209 55%, #8b3812 100%)' }}>
               <SidebarContent />
             </aside>
           </div>
