@@ -3900,13 +3900,17 @@ app.get('/api/notifications/counts', auth, async (req, res) => {
   try {
     await connectDB();
     if (isConnected) {
+      // medicoesSemOrcamento: medições que não têm nenhum orçamento vinculado
+      const medicaoIdsComOrcamento = await Orcamento.distinct('medicaoId', { medicaoId: { $ne: null } });
       const [medicoesSemOrcamento, orcamentosAprovados] = await Promise.all([
-        Medicao.countDocuments({ temOrcamento: { $ne: true } }),
+        Medicao.countDocuments({ _id: { $nin: medicaoIdsComOrcamento } }),
         Orcamento.countDocuments({ status: 'aprovado' }),
       ]);
       return res.json({ medicoesSemOrcamento, orcamentosAprovados });
     }
-    const medicoesSemOrcamento = memStore.medicoes.filter(m => m.temOrcamento !== true).length;
+    // fallback memStore
+    const idsComOrc = new Set(memStore.orcamentos.map(o => o.medicaoId).filter(Boolean));
+    const medicoesSemOrcamento = memStore.medicoes.filter(m => !idsComOrc.has(m._id || m.id)).length;
     const orcamentosAprovados = memStore.orcamentos.filter(o => o.status === 'aprovado').length;
     res.json({ medicoesSemOrcamento, orcamentosAprovados });
   } catch (err) { res.status(500).json({ error: err.message }); }
