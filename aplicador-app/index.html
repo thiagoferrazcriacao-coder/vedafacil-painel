@@ -224,15 +224,56 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
           <option value="">Carregando equipes...</option>
         </select>
       </div>
-      <div style="margin-bottom:18px">
+      <div style="margin-bottom:14px">
         <label class="label">Seu nome</label>
         <select id="sel-membro" class="input">
           <option value="">Selecione a equipe primeiro</option>
         </select>
       </div>
+      <div style="margin-bottom:18px">
+        <label class="label">Senha</label>
+        <div style="position:relative">
+          <input id="inp-senha" class="input" type="password" placeholder="Digite a senha da equipe" style="padding-right:44px">
+          <button type="button" onclick="toggleSenhaVis('inp-senha','btn-vis-login')" id="btn-vis-login" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af;padding:0">👁</button>
+        </div>
+      </div>
       <button class="btn btn-primary" onclick="doLogin()">Entrar →</button>
     </div>
     <div id="login-error" class="alert alert-error" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ── SCREEN: TROCAR SENHA ──────────────────────────────────────────────── -->
+<div id="screen-trocar-senha" class="screen">
+  <div class="header"><h1>🔐 Criar Senha</h1></div>
+  <div class="content">
+    <div style="text-align:center;padding:20px 0 16px">
+      <div style="font-size:48px;margin-bottom:8px">🔑</div>
+      <h2 style="font-size:18px;font-weight:800;color:#1a202c">Defina sua senha</h2>
+      <p style="font-size:13px;color:#6b7280;margin-top:6px;line-height:1.5">Este é o seu primeiro acesso. Por segurança, você precisa criar uma nova senha para sua equipe.</p>
+    </div>
+    <div class="card">
+      <div style="margin-bottom:14px">
+        <label class="label">Senha atual (123456)</label>
+        <div style="position:relative">
+          <input id="inp-senha-atual" class="input" type="password" placeholder="Senha atual" style="padding-right:44px">
+          <button type="button" onclick="toggleSenhaVis('inp-senha-atual','btn-vis-atual')" id="btn-vis-atual" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af;padding:0">👁</button>
+        </div>
+      </div>
+      <div style="margin-bottom:14px">
+        <label class="label">Nova senha</label>
+        <div style="position:relative">
+          <input id="inp-nova-senha" class="input" type="password" placeholder="Mínimo 6 caracteres" style="padding-right:44px">
+          <button type="button" onclick="toggleSenhaVis('inp-nova-senha','btn-vis-nova')" id="btn-vis-nova" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af;padding:0">👁</button>
+        </div>
+      </div>
+      <div style="margin-bottom:18px">
+        <label class="label">Confirmar nova senha</label>
+        <input id="inp-conf-senha" class="input" type="password" placeholder="Repita a nova senha">
+      </div>
+      <div id="trocar-senha-error" class="alert alert-error" style="display:none;margin-bottom:12px"></div>
+      <button class="btn btn-primary" onclick="trocarSenha()">✅ Salvar nova senha</button>
+    </div>
   </div>
 </div>
 
@@ -263,7 +304,7 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
         <span class="hb-count" id="home-count-concluidas">—</span>
         <span class="hb-sub">este mês</span>
       </button>
-      <button class="hb hb-produto" onclick="abrirEstoqueModal()">
+      <button class="hb hb-produto" onclick="abrirTelaProduto()">
         <span class="hb-icon">📦</span>
         <span class="hb-lbl">Produto</span>
         <span class="hb-count" id="home-count-produto" style="font-size:18px">—L</span>
@@ -271,7 +312,7 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
       </button>
     </div>
     <div style="margin-top:16px;text-align:center">
-      <button onclick="showScreen('screen-login')" style="background:none;border:none;font-size:12px;color:#9ca3af;cursor:pointer;padding:8px">↩ Trocar equipe</button>
+      <button onclick="trocarEquipe()" style="background:none;border:none;font-size:12px;color:#9ca3af;cursor:pointer;padding:8px">↩ Trocar equipe</button>
     </div>
   </div>
 </div>
@@ -299,13 +340,86 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
   </div>
 </div>
 
+<!-- ── SCREEN: PRODUTO ──────────────────────────────────────────────────── -->
+<div id="screen-produto" class="screen">
+  <div class="header">
+    <button class="back-btn" onclick="irParaHome()">←</button>
+    <h1>📦 GVF Seal</h1>
+    <button class="btn-home-nav" onclick="irParaHome()">🏠 HOME</button>
+  </div>
+  <div class="content" style="padding-bottom:24px">
+    <div id="produto-spinner" class="spinner"></div>
+    <div id="produto-content" style="display:none">
+
+      <!-- Semana atual -->
+      <div style="margin-bottom:6px">
+        <div class="sec-header">📅 Esta semana <span id="produto-semana-chave" class="sec-count">—</span></div>
+        <div class="stats-row" style="grid-template-columns:repeat(3,1fr)">
+          <div class="stat-box" style="border-top:3px solid #16a34a">
+            <div class="stat-num" style="color:#16a34a" id="ps-recebido">—</div>
+            <div class="stat-lbl">Recebido (L)</div>
+          </div>
+          <div class="stat-box" style="border-top:3px solid #dc2626">
+            <div class="stat-num" style="color:#dc2626" id="ps-gasto">—</div>
+            <div class="stat-lbl">Gasto (L)</div>
+          </div>
+          <div class="stat-box" style="border-top:3px solid #e87722">
+            <div class="stat-num" style="color:#e87722" id="ps-saldo">—</div>
+            <div class="stat-lbl">Saldo (L)</div>
+          </div>
+        </div>
+        <!-- barra de progresso de consumo -->
+        <div style="margin-top:4px;padding:0 2px">
+          <div class="progress-bar" style="height:10px">
+            <div id="ps-barra" class="progress-fill" style="width:0%"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;margin-top:2px">
+            <span>0L</span>
+            <span id="ps-barra-pct">0% usado</span>
+            <span id="ps-barra-max">—L</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mês atual -->
+      <div style="margin-bottom:6px">
+        <div class="sec-header">🗓 Este mês <span id="produto-mes-chave" class="sec-count">—</span></div>
+        <div class="stats-row" style="grid-template-columns:repeat(3,1fr)">
+          <div class="stat-box" style="border-top:3px solid #16a34a">
+            <div class="stat-num" style="color:#16a34a" id="pm-recebido">—</div>
+            <div class="stat-lbl">Recebido (L)</div>
+          </div>
+          <div class="stat-box" style="border-top:3px solid #dc2626">
+            <div class="stat-num" style="color:#dc2626" id="pm-gasto">—</div>
+            <div class="stat-lbl">Gasto (L)</div>
+          </div>
+          <div class="stat-box" style="border-top:3px solid #7c3aed">
+            <div class="stat-num" style="color:#7c3aed" id="pm-saldo">—</div>
+            <div class="stat-lbl">Saldo (L)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Botão adicionar -->
+      <div class="card" style="margin-top:8px">
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:4px;color:#1a202c">Receber mais produto</h3>
+        <p style="font-size:13px;color:#6b7280;margin-bottom:14px">Pegou mais GVF Seal? Registre aqui para atualizar seu saldo da semana.</p>
+        <label class="label">Quantidade (litros) *</label>
+        <input id="prod-add-litros" class="input" type="number" min="0.1" step="0.1" placeholder="Ex: 25" style="margin-bottom:10px;font-size:18px;text-align:center;font-weight:700">
+        <div id="prod-add-error" class="alert alert-error" style="display:none;margin-bottom:10px"></div>
+        <button class="btn btn-primary" style="font-size:16px" onclick="confirmarAdicionarProduto()">+ Adicionar produto</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── SCREEN: OS LIST ───────────────────────────────────────────────────── -->
 <div id="screen-os-list" class="screen">
   <div class="header">
     <button class="btn-home-nav" onclick="irParaHome()">🏠 HOME</button>
     <h1 style="flex:1;text-align:center">Vedafácil</h1>
     <span id="equipe-badge" class="badge"></span>
-    <button class="back-btn" onclick="showScreen('screen-login')" title="Trocar equipe">↩</button>
+    <button class="back-btn" onclick="trocarEquipe()" title="Trocar equipe">↩</button>
   </div>
   <div class="content" style="padding-top:12px;padding-bottom:80px">
     <div id="os-list-spinner" class="spinner"></div>
@@ -756,7 +870,8 @@ async function boot() {
     console.warn('Equipes load failed:', e);
   }
 
-  if (S.equipeId && S.membro) {
+  const authed = localStorage.getItem('vfa_authed') === 'true';
+  if (S.equipeId && S.membro && authed) {
     document.getElementById('equipe-badge').textContent = S.equipeNome || S.membro;
     loadOSList(); // carrega em background; updateHomeCounts() é chamado ao final
     if (isPrimeiroAcessoSemana()) {
@@ -767,6 +882,11 @@ async function boot() {
   } else {
     hideLoading();
   }
+}
+
+function trocarEquipe() {
+  localStorage.removeItem('vfa_authed');
+  showScreen('screen-login');
 }
 
 function renderEquipes() {
@@ -802,26 +922,105 @@ function renderMembros(equipeId) {
   });
 }
 
-function doLogin() {
+function toggleSenhaVis(inputId, btnId) {
+  const inp = document.getElementById(inputId);
+  const btn = document.getElementById(btnId);
+  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
+  else { inp.type = 'password'; btn.textContent = '👁'; }
+}
+
+async function doLogin() {
   const equipeId = document.getElementById('sel-equipe').value;
   const membro   = document.getElementById('sel-membro').value;
+  const senha    = document.getElementById('inp-senha').value;
   const errEl    = document.getElementById('login-error');
   if (!equipeId) { errEl.textContent = 'Selecione a equipe'; errEl.style.display = ''; return; }
   if (!membro)   { errEl.textContent = 'Selecione seu nome'; errEl.style.display = ''; return; }
+  if (!senha)    { errEl.textContent = 'Digite a senha';     errEl.style.display = ''; return; }
   errEl.style.display = 'none';
 
-  const eq = S.equipes.find(e => (e._id || e.id) === equipeId);
-  S.equipeId   = equipeId;
-  S.equipeNome = eq?.nome || '';
-  S.membro     = membro;
-  saveSession();
+  showLoading('Verificando senha...');
+  try {
+    const r = await fetch(`${API}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ equipeId, senha }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      hideLoading();
+      errEl.textContent = data.error || 'Senha incorreta';
+      errEl.style.display = '';
+      return;
+    }
 
-  document.getElementById('equipe-badge').textContent = eq?.nome || membro;
-  loadOSList(); // em background
-  if (isPrimeiroAcessoSemana()) {
-    showScreen('screen-lancamento-semanal');
-  } else {
-    irParaHome();
+    const eq = S.equipes.find(e => (e._id || e.id) === equipeId);
+    S.equipeId   = equipeId;
+    S.equipeNome = eq?.nome || '';
+    S.membro     = membro;
+    saveSession();
+    document.getElementById('equipe-badge').textContent = eq?.nome || membro;
+
+    if (data.senhaInicial) {
+      hideLoading();
+      // Preenche o campo senha atual para facilitar
+      document.getElementById('inp-senha-atual').value = senha;
+      showScreen('screen-trocar-senha');
+      return;
+    }
+
+    localStorage.setItem('vfa_authed', 'true');
+    loadOSList(); // em background
+    if (isPrimeiroAcessoSemana()) {
+      showScreen('screen-lancamento-semanal');
+    } else {
+      irParaHome();
+    }
+  } catch (e) {
+    hideLoading();
+    errEl.textContent = 'Erro de conexão. Tente novamente.';
+    errEl.style.display = '';
+  }
+}
+
+async function trocarSenha() {
+  const senhaAtual  = document.getElementById('inp-senha-atual').value;
+  const novaSenha   = document.getElementById('inp-nova-senha').value;
+  const confSenha   = document.getElementById('inp-conf-senha').value;
+  const errEl       = document.getElementById('trocar-senha-error');
+  errEl.style.display = 'none';
+
+  if (!senhaAtual)  { errEl.textContent = 'Informe a senha atual'; errEl.style.display = ''; return; }
+  if (!novaSenha)   { errEl.textContent = 'Informe a nova senha';  errEl.style.display = ''; return; }
+  if (novaSenha.length < 6) { errEl.textContent = 'A nova senha deve ter pelo menos 6 caracteres'; errEl.style.display = ''; return; }
+  if (novaSenha !== confSenha) { errEl.textContent = 'As senhas não coincidem'; errEl.style.display = ''; return; }
+
+  showLoading('Salvando nova senha...');
+  try {
+    const r = await fetch(`${API}/auth/change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ equipeId: S.equipeId, senhaAtual, novaSenha }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      hideLoading();
+      errEl.textContent = data.error || 'Erro ao trocar senha';
+      errEl.style.display = '';
+      return;
+    }
+
+    localStorage.setItem('vfa_authed', 'true');
+    loadOSList();
+    if (isPrimeiroAcessoSemana()) {
+      showScreen('screen-lancamento-semanal');
+    } else {
+      irParaHome();
+    }
+  } catch (e) {
+    hideLoading();
+    errEl.textContent = 'Erro de conexão. Tente novamente.';
+    errEl.style.display = '';
   }
 }
 
@@ -2048,6 +2247,73 @@ async function confirmarFecharDia() {
   } catch (e) {
     hideLoading();
     showToast('⚠️ Erro de conexão');
+  }
+}
+
+// ─── Tela de Produto ──────────────────────────────────────────────────────────
+async function abrirTelaProduto() {
+  showScreen('screen-produto');
+  document.getElementById('produto-spinner').style.display = '';
+  document.getElementById('produto-content').style.display = 'none';
+  document.getElementById('prod-add-litros').value = '';
+  document.getElementById('prod-add-error').style.display = 'none';
+  try {
+    const res = await fetch(`${API}/estoque-summary?equipeId=${encodeURIComponent(S.equipeId)}`);
+    const d = await res.json();
+    document.getElementById('produto-spinner').style.display = 'none';
+    if (!res.ok) { showToast('⚠️ Erro ao carregar estoque'); showScreen('screen-home'); return; }
+    // Semana
+    document.getElementById('produto-semana-chave').textContent = d.semana.chave;
+    document.getElementById('ps-recebido').textContent = d.semana.recebido;
+    document.getElementById('ps-gasto').textContent = d.semana.gasto;
+    document.getElementById('ps-saldo').textContent = d.semana.saldo;
+    // barra de consumo semanal
+    const pct = d.semana.recebido > 0 ? Math.min(100, Math.round(d.semana.gasto / d.semana.recebido * 100)) : 0;
+    const barra = document.getElementById('ps-barra');
+    barra.style.width = pct + '%';
+    barra.className = 'progress-fill' + (pct >= 90 ? ' done' : '');
+    barra.style.background = pct >= 90 ? '#dc2626' : pct >= 70 ? '#d97706' : '#16a34a';
+    document.getElementById('ps-barra-pct').textContent = pct + '% usado';
+    document.getElementById('ps-barra-max').textContent = d.semana.recebido + 'L';
+    // Mês
+    const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    const [ano, mesNum] = d.mes.chave.split('-');
+    document.getElementById('produto-mes-chave').textContent = `${meses[parseInt(mesNum)-1]}/${ano}`;
+    document.getElementById('pm-recebido').textContent = d.mes.recebido;
+    document.getElementById('pm-gasto').textContent = d.mes.gasto;
+    document.getElementById('pm-saldo').textContent = d.mes.saldo;
+    // Atualiza contador na HOME
+    document.getElementById('home-count-produto').textContent = d.semana.saldo + 'L';
+    document.getElementById('produto-content').style.display = '';
+  } catch(e) {
+    document.getElementById('produto-spinner').style.display = 'none';
+    showToast('⚠️ Erro de conexão');
+    irParaHome();
+  }
+}
+
+async function confirmarAdicionarProduto() {
+  const litros = parseFloat(document.getElementById('prod-add-litros').value);
+  const errEl = document.getElementById('prod-add-error');
+  if (!litros || litros <= 0) { errEl.textContent = 'Informe uma quantidade válida em litros'; errEl.style.display = ''; return; }
+  errEl.style.display = 'none';
+  showLoading('Registrando produto...');
+  try {
+    const res = await fetch(`${API}/estoque-recebido`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ equipeId: S.equipeId, litros })
+    });
+    const data = await res.json();
+    hideLoading();
+    if (!res.ok) { errEl.textContent = data.error || 'Erro ao registrar'; errEl.style.display = ''; return; }
+    showToast(`📦 +${litros}L adicionados! Semana: ${data.recebido}L`);
+    // Recarrega a tela com os novos dados
+    abrirTelaProduto();
+  } catch (e) {
+    hideLoading();
+    errEl.textContent = 'Erro de conexão';
+    errEl.style.display = '';
   }
 }
 
