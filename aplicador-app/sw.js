@@ -1,5 +1,5 @@
 // Vedafácil Aplicador — Service Worker (minimal, network-first)
-const CACHE = 'vfa-v24';
+const CACHE = 'vfa-v25';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))));

@@ -175,6 +175,29 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
 .croqui-tool{background:white;border:1.5px solid #d1d5db;border-radius:6px;width:32px;height:32px;font-size:15px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all 0.15s}
 .croqui-tool.active{background:#e87722;border-color:#e87722;color:white}
 .croqui-tool:active{opacity:0.8}
+
+/* ── HOME SCREEN ──────────────────────────────────────────────────────────── */
+.home-screen-bg{background:linear-gradient(180deg,#c45d12 0%,#e87722 100%);min-height:100vh}
+.home-greeting{padding:20px 18px 16px;color:white}
+.home-greeting .hg-dia{font-size:13px;opacity:0.85;font-weight:500;text-transform:capitalize}
+.home-greeting .hg-nome{font-size:22px;font-weight:800;margin-top:2px;line-height:1.2}
+.home-greeting .hg-equipe{font-size:13px;opacity:0.8;margin-top:3px}
+.home-cards{background:#f0f4f8;border-radius:24px 24px 0 0;padding:20px 16px;flex:1}
+.home-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hb{border:none;border-radius:16px;padding:20px 12px 18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;box-shadow:0 3px 14px rgba(0,0,0,0.13);min-height:140px;width:100%;text-align:center;background:white}
+.hb:active{transform:scale(0.95);box-shadow:0 1px 6px rgba(0,0,0,0.12)}
+.hb .hb-icon{font-size:42px;line-height:1}
+.hb .hb-lbl{font-size:14px;font-weight:700;color:#374151;margin-top:2px}
+.hb .hb-count{font-size:28px;font-weight:900;line-height:1}
+.hb .hb-sub{font-size:11px;color:#9ca3af;font-weight:500}
+.hb-andamento{border-top:4px solid #e87722}.hb-andamento .hb-count{color:#e87722}
+.hb-agendadas{border-top:4px solid #2563eb}.hb-agendadas .hb-count{color:#2563eb}
+.hb-concluidas{border-top:4px solid #16a34a}.hb-concluidas .hb-count{color:#16a34a}
+.hb-produto{border-top:4px solid #7c3aed}.hb-produto .hb-count{color:#7c3aed}
+/* HOME button na lista */
+.btn-home-nav{background:rgba(255,255,255,0.22);border:none;color:white;padding:5px 10px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;letter-spacing:0.2px}
+/* Lancamento semanal */
+.lancamento-hero{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;text-align:center;background:linear-gradient(180deg,#c45d12,#e87722);color:white;border-radius:0 0 28px 28px;margin-bottom:0}
 </style>
 </head>
 <body>
@@ -213,12 +236,71 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
   </div>
 </div>
 
+<!-- ── SCREEN: HOME ──────────────────────────────────────────────────────── -->
+<div id="screen-home" class="screen home-screen-bg">
+  <div class="home-greeting">
+    <div class="hg-dia" id="home-dia-semana">—</div>
+    <div class="hg-nome" id="home-saudacao">Olá! 👋</div>
+    <div class="hg-equipe" id="home-equipe-label">—</div>
+  </div>
+  <div class="home-cards">
+    <div class="home-grid">
+      <button class="hb hb-andamento" onclick="irParaLista('andamento')">
+        <span class="hb-icon">🔧</span>
+        <span class="hb-lbl">Em Andamento</span>
+        <span class="hb-count" id="home-count-andamento">—</span>
+        <span class="hb-sub">obras ativas</span>
+      </button>
+      <button class="hb hb-agendadas" onclick="irParaLista('agendadas')">
+        <span class="hb-icon">📅</span>
+        <span class="hb-lbl">Agendadas</span>
+        <span class="hb-count" id="home-count-agendadas">—</span>
+        <span class="hb-sub">próximas obras</span>
+      </button>
+      <button class="hb hb-concluidas" onclick="irParaLista('concluidas')">
+        <span class="hb-icon">✅</span>
+        <span class="hb-lbl">Concluídas</span>
+        <span class="hb-count" id="home-count-concluidas">—</span>
+        <span class="hb-sub">este mês</span>
+      </button>
+      <button class="hb hb-produto" onclick="abrirEstoqueModal()">
+        <span class="hb-icon">📦</span>
+        <span class="hb-lbl">Produto</span>
+        <span class="hb-count" id="home-count-produto" style="font-size:18px">—L</span>
+        <span class="hb-sub">GVF Seal recebido</span>
+      </button>
+    </div>
+    <div style="margin-top:16px;text-align:center">
+      <button onclick="showScreen('screen-login')" style="background:none;border:none;font-size:12px;color:#9ca3af;cursor:pointer;padding:8px">↩ Trocar equipe</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── SCREEN: LANÇAMENTO SEMANAL ───────────────────────────────────────── -->
+<div id="screen-lancamento-semanal" class="screen">
+  <div class="lancamento-hero">
+    <div style="font-size:64px;margin-bottom:12px">📦</div>
+    <h2 style="font-size:22px;font-weight:800;margin-bottom:6px">Início de Semana!</h2>
+    <p style="font-size:14px;opacity:0.9;line-height:1.5">Registre quanto <strong>GVF Seal</strong> sua equipe está levando para trabalhar esta semana.</p>
+  </div>
+  <div style="padding:24px 18px">
+    <div class="card">
+      <label class="label">Quantidade recebida (litros) *</label>
+      <input id="lanc-litros" class="input" type="number" min="0.1" step="0.1" placeholder="Ex: 50" style="margin-bottom:6px;font-size:20px;text-align:center;font-weight:700">
+      <p style="font-size:12px;color:#9ca3af;margin-bottom:18px;text-align:center">Informe o total que a equipe levou hoje</p>
+      <div id="lanc-error" class="alert alert-error" style="display:none;margin-bottom:12px"></div>
+      <button class="btn btn-primary" style="font-size:17px;padding:16px" onclick="confirmarLancamentoSemanal()">✅ Registrar e Continuar</button>
+      <button class="btn btn-outline" style="margin-top:10px" onclick="pularLancamentoSemanal()">Pular por agora →</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── SCREEN: OS LIST ───────────────────────────────────────────────────── -->
 <div id="screen-os-list" class="screen">
   <div class="header">
-    <h1>Vedafácil</h1>
+    <button class="btn-home-nav" onclick="irParaHome()">🏠 HOME</button>
+    <h1 style="flex:1;text-align:center">Vedafácil</h1>
     <span id="equipe-badge" class="badge"></span>
-    <button class="back-btn" onclick="abrirEstoqueModal()" title="Lançar estoque recebido" style="background:#fff3e0;color:#e87722;border-radius:8px;padding:4px 10px;font-size:13px;font-weight:700;margin-right:4px">📦</button>
     <button class="back-btn" onclick="showScreen('screen-login')" title="Trocar equipe">↩</button>
   </div>
   <div class="content" style="padding-top:12px;padding-bottom:80px">
@@ -602,6 +684,57 @@ function saveSession() {
   }));
 }
 
+// ─── Semana / HOME helpers ────────────────────────────────────────────────────
+function getISOWeekKey() {
+  const d = new Date();
+  const day = d.getDay() === 0 ? 7 : d.getDay(); // domingo=7
+  const monday = new Date(d); monday.setDate(d.getDate() - day + 1);
+  return monday.toISOString().slice(0, 10); // ex: "2026-05-25"
+}
+
+function isPrimeiroAcessoSemana() {
+  const key = `vfa_semana_${S.equipeId}_${S.membro}`;
+  return localStorage.getItem(key) !== getISOWeekKey();
+}
+
+function marcarAcessoSemana() {
+  const key = `vfa_semana_${S.equipeId}_${S.membro}`;
+  localStorage.setItem(key, getISOWeekKey());
+}
+
+function atualizarHomeGreeting() {
+  const dias = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'];
+  const meses = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+  const now = new Date();
+  const h = now.getHours();
+  const saud = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+  const diaSemana = dias[now.getDay()];
+  const dataStr = `${diaSemana}, ${now.getDate()} de ${meses[now.getMonth()]}`;
+  document.getElementById('home-dia-semana').textContent = dataStr;
+  document.getElementById('home-saudacao').textContent = `${saud}, ${S.membro}! 👋`;
+  document.getElementById('home-equipe-label').textContent = `Equipe ${S.equipeNome || '—'}`;
+}
+
+function updateHomeCounts() {
+  const andamento = S_osTabs.ativas.filter(o => o.status === 'em_andamento' || o.status === 'aguardando_assinatura').length;
+  const agendadas = S_osTabs.ativas.filter(o => o.status === 'agendada').length;
+  const concluidas = S_osTabs.concluidas.length;
+  document.getElementById('home-count-andamento').textContent = andamento;
+  document.getElementById('home-count-agendadas').textContent  = agendadas;
+  document.getElementById('home-count-concluidas').textContent = concluidas;
+}
+
+function irParaHome() {
+  atualizarHomeGreeting();
+  showScreen('screen-home');
+}
+
+function irParaLista(tab) {
+  document.getElementById('equipe-badge').textContent = S.equipeNome || S.membro;
+  showScreen('screen-os-list');
+  switchOSTab(tab);
+}
+
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 async function boot() {
   // Restore session
@@ -621,8 +754,12 @@ async function boot() {
 
   if (S.equipeId && S.membro) {
     document.getElementById('equipe-badge').textContent = S.equipeNome || S.membro;
-    showScreen('screen-os-list');
-    loadOSList();
+    loadOSList(); // carrega em background; updateHomeCounts() é chamado ao final
+    if (isPrimeiroAcessoSemana()) {
+      showScreen('screen-lancamento-semanal');
+    } else {
+      irParaHome();
+    }
   } else {
     hideLoading();
   }
@@ -676,8 +813,12 @@ function doLogin() {
   saveSession();
 
   document.getElementById('equipe-badge').textContent = eq?.nome || membro;
-  showScreen('screen-os-list');
-  loadOSList();
+  loadOSList(); // em background
+  if (isPrimeiroAcessoSemana()) {
+    showScreen('screen-lancamento-semanal');
+  } else {
+    irParaHome();
+  }
 }
 
 // ─── OS List (Painel) ─────────────────────────────────────────────────────────
@@ -835,11 +976,46 @@ async function loadOSList() {
 
     spinner.style.display = 'none';
     renderOSListTab();
+    updateHomeCounts(); // atualiza contadores da tela HOME
   } catch (e) {
     spinner.style.display = 'none';
     content.innerHTML = `<div class="alert alert-error">Erro: ${e.message}<br><button class="btn btn-outline" style="margin-top:10px" onclick="loadOSList()">Tentar novamente</button></div>`;
     content.style.display = '';
   }
+}
+
+// ─── Lançamento Semanal ───────────────────────────────────────────────────────
+async function confirmarLancamentoSemanal() {
+  const litros = parseFloat(document.getElementById('lanc-litros').value);
+  const errEl = document.getElementById('lanc-error');
+  if (!litros || litros <= 0) { errEl.textContent = 'Informe uma quantidade válida em litros'; errEl.style.display = ''; return; }
+  errEl.style.display = 'none';
+  marcarAcessoSemana();
+  showLoading('Lançando estoque...');
+  try {
+    const res = await fetch(`${API}/estoque-recebido`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ equipeId: S.equipeId, litros })
+    });
+    const data = await res.json();
+    hideLoading();
+    if (!res.ok) { showToast('⚠️ ' + (data.error || 'Erro ao lançar estoque')); }
+    else {
+      // Atualiza contador de produto na HOME
+      document.getElementById('home-count-produto').textContent = (data.recebido || litros) + 'L';
+      showToast(`📦 ${litros}L registrado! Total da semana: ${data.recebido || litros}L`);
+    }
+  } catch (e) {
+    hideLoading();
+    showToast('⚠️ Sem conexão — registrado localmente');
+  }
+  irParaHome();
+}
+
+function pularLancamentoSemanal() {
+  marcarAcessoSemana();
+  irParaHome();
 }
 
 function voltarParaLista() {
