@@ -290,7 +290,7 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
       <p style="font-size:12px;color:#9ca3af;margin-bottom:18px;text-align:center">Informe o total que a equipe levou hoje</p>
       <div id="lanc-error" class="alert alert-error" style="display:none;margin-bottom:12px"></div>
       <button class="btn btn-primary" style="font-size:17px;padding:16px" onclick="confirmarLancamentoSemanal()">✅ Registrar e Continuar</button>
-      <button class="btn btn-outline" style="margin-top:10px" onclick="pularLancamentoSemanal()">Pular por agora →</button>
+      <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:10px">⚠️ Obrigatório — necessário para continuar</p>
     </div>
   </div>
 </div>
@@ -1013,10 +1013,6 @@ async function confirmarLancamentoSemanal() {
   irParaHome();
 }
 
-function pularLancamentoSemanal() {
-  marcarAcessoSemana();
-  irParaHome();
-}
 
 function voltarParaLista() {
   showScreen('screen-os-list');
