@@ -21,6 +21,7 @@ import UsersPage from './pages/UsersPage.jsx'
 import AgendaPage from './pages/AgendaPage.jsx'
 import PerfilPage from './pages/PerfilPage.jsx'
 import ProdutosPage from './pages/ProdutosPage.jsx'
+import NovaOSManualPage from './pages/NovaOSManualPage.jsx'
 
 // ─── Push Notification Setup ──────────────────────────────────────────────────
 function urlBase64ToUint8Array(base64String) {
@@ -179,6 +180,7 @@ export default function App() {
                   <Route path="/garantias" element={<GarantiasPage />} />
                   <Route path="/equipes" element={<EquipesPage />} />
                   <Route path="/ordens-servico" element={<OrdensServicoPage />} />
+                  <Route path="/ordens-servico/nova-manual" element={<NovaOSManualPage />} />
                   <Route path="/ordens-servico/:id" element={<OSDetailPage />} />
                   <Route path="/agenda" element={<AgendaPage />} />
                   <Route path="/reparos" element={<ReparosPage />} />

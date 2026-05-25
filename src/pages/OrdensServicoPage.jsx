@@ -447,6 +447,12 @@ export default function OrdensServicoPage() {
           >
             🔍 Filtros {temFiltroAtivo && <span className="bg-primary text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">!</span>}
           </button>
+          <button
+            onClick={() => navigate('/ordens-servico/nova-manual')}
+            className="btn-secondary flex items-center gap-1"
+          >
+            📝 OS Manual
+          </button>
           <button onClick={() => setModalOpen(true)} className="btn-primary">
             + Nova OS
           </button>
