@@ -4067,6 +4067,20 @@ app.put('/api/equipes/:id', auth, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Reset senha de uma equipe para 123456 + senhaInicial: true (admin only)
+app.post('/api/equipes/:id/reset-senha', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const hash = await bcrypt.hash('123456', 10);
+    if (isConnected) {
+      const e = await Equipe.findByIdAndUpdate(req.params.id, { senhaHash: hash, senhaInicial: true }, { new: true });
+      if (!e) return res.status(404).json({ error: 'Equipe não encontrada' });
+      return res.json({ ok: true, equipe: e.nome });
+    }
+    return res.status(503).json({ error: 'DB offline' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.delete('/api/equipes/:id', auth, adminOnly, async (req, res) => {
   try {
     await connectDB();
