@@ -5107,10 +5107,12 @@ app.get('/api/ordens-servico/:id/pdf', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Seed equipes padrão A/B/C/D se ainda não existirem
+// Seed equipes padrão A/B/C/D e adiciona senha a equipes sem senha
 async function seedEquipesPadrao() {
   const SENHA_PADRAO = '123456';
   const hash = await bcrypt.hash(SENHA_PADRAO, 10);
+
+  // Cria Equipes A/B/C/D se não existirem
   const defaults = [
     { nome: 'Equipe A', cor: '#e87722', membros: [] },
     { nome: 'Equipe B', cor: '#1a5c9a', membros: [] },
@@ -5123,6 +5125,16 @@ async function seedEquipesPadrao() {
       await Equipe.create({ ...d, senhaHash: hash, senhaInicial: true, ativa: true });
       log('info', `Equipe padrão criada: ${d.nome}`);
     }
+  }
+
+  // Garante senha em todas as equipes que ainda não têm senhaHash
+  const semSenha = await Equipe.countDocuments({ $or: [{ senhaHash: { $exists: false } }, { senhaHash: null }, { senhaHash: '' }] });
+  if (semSenha > 0) {
+    await Equipe.updateMany(
+      { $or: [{ senhaHash: { $exists: false } }, { senhaHash: null }, { senhaHash: '' }] },
+      { $set: { senhaHash: hash, senhaInicial: true } }
+    );
+    log('info', `${semSenha} equipe(s) sem senha receberam senha padrão`);
   }
 }
 
