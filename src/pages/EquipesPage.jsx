@@ -1,7 +1,20 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { api } from '../api/client.js'
 
-const CORES = ['#1a5c9a', '#e87722', '#16a34a', '#dc2626', '#7c3aed', '#0891b2', '#d97706']
+const CORES = [
+  // Azuis
+  '#1a5c9a', '#2563eb', '#0891b2', '#0e7490', '#1d4ed8',
+  // Verdes
+  '#16a34a', '#15803d', '#059669', '#4ade80',
+  // Laranjas / Amarelos
+  '#e87722', '#d97706', '#f59e0b', '#ca8a04',
+  // Vermelhos / Rosas
+  '#dc2626', '#b91c1c', '#e11d48', '#db2777',
+  // Roxos
+  '#7c3aed', '#6d28d9', '#9333ea', '#a855f7',
+  // Outros
+  '#0f766e', '#92400e', '#374151', '#6b7280',
+]
 
 /* ────────────────────────── helpers ──────────────────────────────────────── */
 function fmtDate(ts) {
@@ -104,11 +117,12 @@ function EquipeModal({ equipe, onClose, onSave }) {
 
           <div>
             <label className="label">Cor</label>
-            <div className="flex gap-2 mt-1">
+            <div className="flex flex-wrap gap-2 mt-1">
               {CORES.map(cor => (
                 <button key={cor} type="button"
                   onClick={() => setForm(f => ({ ...f, cor }))}
-                  className={`w-7 h-7 rounded-full border-2 transition-all ${form.cor === cor ? 'border-gray-800 scale-110' : 'border-transparent'}`}
+                  title={cor}
+                  className={`w-7 h-7 rounded-full border-2 transition-all hover:scale-110 ${form.cor === cor ? 'border-gray-800 scale-110 ring-2 ring-offset-1 ring-gray-500' : 'border-transparent hover:border-gray-400'}`}
                   style={{ backgroundColor: cor }}
                 />
               ))}
