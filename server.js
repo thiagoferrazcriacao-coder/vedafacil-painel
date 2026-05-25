@@ -266,6 +266,8 @@ const equipeSchema = new mongoose.Schema({
   membros: [String],
   cor: { type: String, default: '#1a5c9a' },
   ativa: { type: Boolean, default: true },
+  senhaHash: String,
+  senhaInicial: { type: Boolean, default: true },
   createdAt: { type: Number, default: Date.now },
 }, { _id: false });
 
@@ -5105,12 +5107,70 @@ app.get('/api/ordens-servico/:id/pdf', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Seed equipes padrão A/B/C/D se ainda não existirem
+async function seedEquipesPadrao() {
+  const SENHA_PADRAO = '123456';
+  const hash = await bcrypt.hash(SENHA_PADRAO, 10);
+  const defaults = [
+    { nome: 'Equipe A', cor: '#e87722', membros: [] },
+    { nome: 'Equipe B', cor: '#1a5c9a', membros: [] },
+    { nome: 'Equipe C', cor: '#16a34a', membros: [] },
+    { nome: 'Equipe D', cor: '#7c3aed', membros: [] },
+  ];
+  for (const d of defaults) {
+    const existe = await Equipe.findOne({ nome: d.nome });
+    if (!existe) {
+      await Equipe.create({ ...d, senhaHash: hash, senhaInicial: true, ativa: true });
+      log('info', `Equipe padrão criada: ${d.nome}`);
+    }
+  }
+}
+
 // API publica para o aplicador (sem auth JWT — usa equipeId + membro como identificacao)
 app.get('/api/aplicador/equipes', async (req, res) => {
   try {
     await connectDB();
-    if (isConnected) return res.json(await Equipe.find({ ativa: true }).select('_id nome membros emailGmail cor'));
+    if (isConnected) {
+      await seedEquipesPadrao();
+      return res.json(await Equipe.find({ ativa: true }).select('_id nome membros emailGmail cor'));
+    }
     res.json(memStore.equipes.filter(e => e.ativa !== false));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Login do aplicador com senha
+app.post('/api/aplicador/auth/login', async (req, res) => {
+  try {
+    await connectDB();
+    const { equipeId, senha } = req.body || {};
+    if (!equipeId || !senha) return res.status(400).json({ error: 'equipeId e senha obrigatórios' });
+    let equipe;
+    if (isConnected) equipe = await Equipe.findById(equipeId);
+    else equipe = memStore.equipes.find(e => e._id === equipeId);
+    if (!equipe) return res.status(404).json({ error: 'Equipe não encontrada' });
+    if (!equipe.senhaHash) return res.status(401).json({ error: 'Equipe sem senha configurada' });
+    const ok = await bcrypt.compare(senha, equipe.senhaHash);
+    if (!ok) return res.status(401).json({ error: 'Senha incorreta' });
+    res.json({ ok: true, senhaInicial: !!equipe.senhaInicial });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Troca de senha do aplicador
+app.post('/api/aplicador/auth/change-password', async (req, res) => {
+  try {
+    await connectDB();
+    const { equipeId, senhaAtual, novaSenha } = req.body || {};
+    if (!equipeId || !senhaAtual || !novaSenha) return res.status(400).json({ error: 'Dados incompletos' });
+    if (novaSenha.length < 6) return res.status(400).json({ error: 'A nova senha deve ter pelo menos 6 caracteres' });
+    if (!isConnected) return res.status(503).json({ error: 'Sem conexão com banco de dados' });
+    const equipe = await Equipe.findById(equipeId);
+    if (!equipe) return res.status(404).json({ error: 'Equipe não encontrada' });
+    const ok = await bcrypt.compare(senhaAtual, equipe.senhaHash);
+    if (!ok) return res.status(401).json({ error: 'Senha atual incorreta' });
+    equipe.senhaHash = await bcrypt.hash(novaSenha, 10);
+    equipe.senhaInicial = false;
+    await equipe.save();
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -6297,6 +6357,54 @@ app.put('/api/estoque-equipes/:equipeId', auth, async (req, res) => {
       { upsert: true, new: true }
     );
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Resumo de estoque por equipe (semana + mês) ───────────────────────────────
+app.get('/api/aplicador/estoque-summary', async (req, res) => {
+  try {
+    await connectDB();
+    const { equipeId } = req.query;
+    if (!equipeId) return res.status(400).json({ error: 'equipeId obrigatório' });
+
+    const now = new Date();
+    const semanaStr  = getISOWeekStr(now);
+    const anoMes     = now.toISOString().slice(0, 7);           // "2026-05"
+    const mesStart   = `${anoMes}-01`;
+    const mesEnd     = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    const { start: weekStart, end: weekEnd } = getWeekDateRange(semanaStr);
+
+    // Recebido — semana atual
+    const estSemana = await EstoqueEquipeSemana.findOne({ equipeId, semana: semanaStr }).lean();
+    const recebidoSemana = estSemana?.recebido || 0;
+
+    // Recebido — mês atual (soma semanas com sobreposição)
+    const anoStr = anoMes.slice(0, 4);
+    const todasSemanas = await EstoqueEquipeSemana.find({ equipeId, semana: { $regex: `^${anoStr}-W` } }).lean();
+    const recebidoMes = todasSemanas.reduce((sum, doc) => {
+      const { start, end } = getWeekDateRange(doc.semana);
+      if (end >= mesStart && start <= mesEnd) return sum + (doc.recebido || 0);
+      return sum;
+    }, 0);
+
+    // Consumido — busca fechamentos de OS desta equipe
+    let gastoSemana = 0, gastoMes = 0;
+    if (isConnected) {
+      const osList = await OS.find({ equipeId }, 'fechamentosDia').lean();
+      for (const os of osList) {
+        for (const f of (os.fechamentosDia || [])) {
+          const data = (f.data || '').slice(0, 10);
+          if (data >= weekStart && data <= weekEnd) gastoSemana += (f.litros || 0);
+          if (data >= mesStart  && data <= mesEnd)  gastoMes    += (f.litros || 0);
+        }
+      }
+    }
+
+    const r = v => Math.round(v * 10) / 10;
+    res.json({
+      semana: { chave: semanaStr, recebido: r(recebidoSemana), gasto: r(gastoSemana), saldo: r(recebidoSemana - gastoSemana) },
+      mes:    { chave: anoMes,    recebido: r(recebidoMes),    gasto: r(gastoMes),    saldo: r(recebidoMes - gastoMes) },
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

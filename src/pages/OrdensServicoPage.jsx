@@ -13,10 +13,11 @@ const STATUS_CONFIG = {
 }
 
 function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
+  const navigate = useNavigate()
   const [contratos, setContratos] = useState([])
   const [equipes, setEquipes] = useState([])
   const [tecnicos, setTecnicos] = useState([])
-  const [modo, setModo] = useState('existente') // 'existente' | 'manual'
+  const [modo, setModo] = useState('existente') // 'existente' | 'manual' | 'completa'
   const [form, setForm] = useState({
     contratoId: contratoIdInicial || '', equipeId: '', equipeNome: '', dataInicio: '', dataTermino: '', diasAtivos: [], obs: '', tecnicoResponsavel: '',
     // campos modo manual
@@ -135,6 +136,11 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
               onClick={() => { setModo('manual'); setError('') }}>
               ✍️ Contrato manual
             </button>
+            <button
+              className={`flex-1 py-2 transition-colors border-l border-gray-200 ${modo === 'completa' ? 'bg-violet-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              onClick={() => { setModo('completa'); setError('') }}>
+              📝 OS Manual
+            </button>
           </div>
 
           {/* ── MODO: Contrato existente ── */}
@@ -230,68 +236,88 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
             </div>
           )}
 
-          {/* ── Campos comuns ── */}
-          <div>
-            <label className="label">Equipe</label>
-            <select className="input" value={form.equipeId} onChange={e => {
-              const eq = equipes.find(x => (x.id || x._id) === e.target.value)
-              setForm(f => ({ ...f, equipeId: e.target.value, equipeNome: eq?.nome || '' }))
-            }}>
-              <option value="">Sem equipe atribuída</option>
-              {equipes.filter(e => e.ativa !== false).map(eq => (
-                <option key={eq.id || eq._id} value={eq.id || eq._id}>{eq.nome}</option>
-              ))}
-            </select>
-            {form.equipeId && (() => {
-              const eq = equipes.find(x => (x.id || x._id) === form.equipeId)
-              return eq?.membros?.length > 0 ? (
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {eq.membros.map((m, i) => (
-                    <span key={i} className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full">👤 {m}</span>
-                  ))}
-                </div>
-              ) : null
-            })()}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
+          {/* ── Campos comuns (apenas modos existente e manual) ── */}
+          {modo !== 'completa' && (<>
             <div>
-              <label className="label">Data de Início *</label>
-              <input type="date" className="input" value={form.dataInicio}
-                onChange={e => setForm(f => ({ ...f, dataInicio: e.target.value, diasAtivos: [] }))} />
+              <label className="label">Equipe</label>
+              <select className="input" value={form.equipeId} onChange={e => {
+                const eq = equipes.find(x => (x.id || x._id) === e.target.value)
+                setForm(f => ({ ...f, equipeId: e.target.value, equipeNome: eq?.nome || '' }))
+              }}>
+                <option value="">Sem equipe atribuída</option>
+                {equipes.filter(e => e.ativa !== false).map(eq => (
+                  <option key={eq.id || eq._id} value={eq.id || eq._id}>{eq.nome}</option>
+                ))}
+              </select>
+              {form.equipeId && (() => {
+                const eq = equipes.find(x => (x.id || x._id) === form.equipeId)
+                return eq?.membros?.length > 0 ? (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {eq.membros.map((m, i) => (
+                      <span key={i} className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full">👤 {m}</span>
+                    ))}
+                  </div>
+                ) : null
+              })()}
             </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Data de Início *</label>
+                <input type="date" className="input" value={form.dataInicio}
+                  onChange={e => setForm(f => ({ ...f, dataInicio: e.target.value, diasAtivos: [] }))} />
+              </div>
+              <div>
+                <label className="label">Data Prevista de Término</label>
+                <input type="date" className="input" value={form.dataTermino}
+                  onChange={e => setForm(f => ({ ...f, dataTermino: e.target.value, diasAtivos: [] }))} />
+              </div>
+            </div>
+
+            <WorkdayPicker
+              dataInicio={form.dataInicio}
+              dataTermino={form.dataTermino}
+              diasAtivos={form.diasAtivos}
+              onChange={dias => setForm(f => ({ ...f, diasAtivos: dias }))}
+            />
+
             <div>
-              <label className="label">Data Prevista de Término</label>
-              <input type="date" className="input" value={form.dataTermino}
-                onChange={e => setForm(f => ({ ...f, dataTermino: e.target.value, diasAtivos: [] }))} />
+              <label className="label">Técnico Responsável</label>
+              <select className="input" value={form.tecnicoResponsavel} onChange={e => setForm(f => ({ ...f, tecnicoResponsavel: e.target.value }))}>
+                <option value="">Sem técnico designado</option>
+                {tecnicos.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
             </div>
-          </div>
 
-          <WorkdayPicker
-            dataInicio={form.dataInicio}
-            dataTermino={form.dataTermino}
-            diasAtivos={form.diasAtivos}
-            onChange={dias => setForm(f => ({ ...f, diasAtivos: dias }))}
-          />
+            <div>
+              <label className="label">Observações</label>
+              <textarea className="input resize-none" rows={3} value={form.obs} onChange={e => setForm(f => ({ ...f, obs: e.target.value }))} placeholder="Instruções especiais, acesso, portaria..." />
+            </div>
+          </>)}
 
-          <div>
-            <label className="label">Técnico Responsável</label>
-            <select className="input" value={form.tecnicoResponsavel} onChange={e => setForm(f => ({ ...f, tecnicoResponsavel: e.target.value }))}>
-              <option value="">Sem técnico designado</option>
-              {tecnicos.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-
-          <div>
-            <label className="label">Observações</label>
-            <textarea className="input resize-none" rows={3} value={form.obs} onChange={e => setForm(f => ({ ...f, obs: e.target.value }))} placeholder="Instruções especiais, acesso, portaria..." />
-          </div>
+          {/* ── MODO: OS Manual completa ── */}
+          {modo === 'completa' && (
+            <div className="space-y-4">
+              <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-sm text-violet-800">
+                <p className="font-bold text-base mb-1">📝 OS Manual — dados completos</p>
+                <p className="text-violet-600 leading-relaxed">Crie uma OS do zero com todos os dados do medidor: locais, medições, andares, fotos e mapa de serviço completo.</p>
+                <p className="text-violet-500 mt-2 text-xs">Use para lançar obras do período de transição (contratos físicos antigos) com todos os detalhes.</p>
+              </div>
+              <button
+                onClick={() => { onClose(); navigate('/ordens-servico/nova-manual') }}
+                className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm transition-colors">
+                Ir para OS Manual completa →
+              </button>
+            </div>
+          )}
         </div>
         <div className="p-5 border-t flex gap-3 justify-end">
           <button onClick={onClose} className="btn-secondary" disabled={saving}>Cancelar</button>
-          <button onClick={handleSubmit} className="btn-primary" disabled={saving}>
-            {saving ? 'Criando...' : '✅ Criar OS'}
-          </button>
+          {modo !== 'completa' && (
+            <button onClick={handleSubmit} className="btn-primary" disabled={saving}>
+              {saving ? 'Criando...' : '✅ Criar OS'}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -446,12 +472,6 @@ export default function OrdensServicoPage() {
             className={`btn-secondary flex items-center gap-2 ${temFiltroAtivo ? 'ring-2 ring-primary text-primary' : ''}`}
           >
             🔍 Filtros {temFiltroAtivo && <span className="bg-primary text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">!</span>}
-          </button>
-          <button
-            onClick={() => navigate('/ordens-servico/nova-manual')}
-            className="btn-secondary flex items-center gap-1"
-          >
-            📝 OS Manual
           </button>
           <button onClick={() => setModalOpen(true)} className="btn-primary">
             + Nova OS
