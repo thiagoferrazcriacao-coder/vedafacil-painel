@@ -218,6 +218,7 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
   <div class="header">
     <h1>Vedafácil</h1>
     <span id="equipe-badge" class="badge"></span>
+    <button class="back-btn" onclick="abrirEstoqueModal()" title="Lançar estoque recebido" style="background:#fff3e0;color:#e87722;border-radius:8px;padding:4px 10px;font-size:13px;font-weight:700;margin-right:4px">📦</button>
     <button class="back-btn" onclick="showScreen('screen-login')" title="Trocar equipe">↩</button>
   </div>
   <div class="content" style="padding-top:12px;padding-bottom:80px">
@@ -324,6 +325,10 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
     <button class="btn btn-outline" style="margin-top:10px" onclick="limparAssinatura()">🗑️ Limpar</button>
     <button class="btn btn-success" style="margin-top:10px" onclick="confirmarAssinatura()">✅ Confirmar Assinatura</button>
     <div id="sig-error" class="alert alert-error" style="display:none;margin-top:10px"></div>
+    <div style="border-top:1px solid #e5e7eb;margin-top:18px;padding-top:14px;text-align:center">
+      <p style="font-size:12px;color:#9ca3af;margin-bottom:10px">Responsável não está disponível para assinar?</p>
+      <button class="btn btn-outline" style="font-size:13px;color:#6b7280" onclick="finalizarSemAssinatura()">Finalizar sem assinatura →</button>
+    </div>
   </div>
 </div>
 
@@ -335,40 +340,91 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
   <div class="header">
     <button class="back-btn" id="croqui-back-btn">←</button>
     <h1 id="croqui-title">Croqui</h1>
-    <button onclick="otimizarCroqui()" style="background:rgba(255,255,255,0.2);border:none;color:white;padding:4px 10px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-left:auto">✨ IA</button>
+    <span id="croqui-etapa-badge" style="background:rgba(255,255,255,0.25);color:white;font-size:11px;font-weight:700;padding:3px 8px;border-radius:12px;margin-left:auto">Etapa 1 de 2</span>
   </div>
-  <div style="background:#f8f8f8;border-bottom:1px solid #e5e7eb;padding:8px 12px;display:flex;align-items:center;gap:6px;overflow-x:auto;scrollbar-width:none">
-    <!-- Tools -->
-    <button id="tool-pencil"  class="croqui-tool active" onclick="setTool('pencil')"  title="Lápis">✏️</button>
-    <button id="tool-line"    class="croqui-tool"        onclick="setTool('line')"    title="Linha">╱</button>
-    <button id="tool-rect"    class="croqui-tool"        onclick="setTool('rect')"    title="Retângulo">▭</button>
-    <button id="tool-text"    class="croqui-tool"        onclick="setTool('text')"    title="Texto">T</button>
-    <button id="tool-eraser"  class="croqui-tool"        onclick="setTool('eraser')"  title="Borracha">⌫</button>
-    <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 2px"></div>
-    <!-- Color picker -->
-    <input type="color" id="croqui-color" value="#000000" style="width:28px;height:28px;border:none;border-radius:50%;padding:2px;cursor:pointer;flex-shrink:0" title="Cor">
-    <!-- Line thickness -->
-    <select id="croqui-size" style="font-size:12px;padding:4px 6px;border:1.5px solid #d1d5db;border-radius:6px;background:white;min-width:54px">
-      <option value="2">Fino</option>
-      <option value="4" selected>Médio</option>
-      <option value="8">Grosso</option>
-    </select>
-    <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 2px"></div>
-    <button onclick="undoCroqui()" style="background:white;border:1.5px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer" title="Desfazer">↩</button>
-    <button onclick="limparCroqui()" style="background:white;border:1.5px solid #fca5a5;color:#dc2626;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer" title="Limpar tudo">🗑</button>
-    <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 2px"></div>
-    <button onclick="document.getElementById('croqui-foto-input').click()" style="background:white;border:1.5px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer" title="Importar foto como fundo">📷</button>
-    <input id="croqui-foto-input" type="file" accept="image/*" style="display:none" onchange="importarFotoFundo(this)">
+
+  <!-- ── TOOLBAR ETAPA 1: ferramentas de desenho ──────────────────────────── -->
+  <div id="croqui-toolbar-desenho" style="background:#f8f8f8;border-bottom:1px solid #e5e7eb;padding:5px 8px;display:flex;flex-direction:column;gap:5px">
+    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+      <button id="tool-pencil"  class="croqui-tool active" onclick="setTool('pencil')"  title="Lápis">✏️</button>
+      <button id="tool-line"    class="croqui-tool"        onclick="setTool('line')"    title="Linha">╱</button>
+      <button id="tool-rect"    class="croqui-tool"        onclick="setTool('rect')"    title="Retângulo">▭</button>
+      <button id="tool-eraser"  class="croqui-tool"        onclick="setTool('eraser')"  title="Borracha">⌫</button>
+      <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 1px"></div>
+      <input type="color" id="croqui-color" value="#000000" style="width:28px;height:28px;border:none;border-radius:50%;padding:2px;cursor:pointer;flex-shrink:0" title="Cor">
+      <select id="croqui-size" style="font-size:12px;padding:4px 6px;border:1.5px solid #d1d5db;border-radius:6px;background:white;min-width:54px">
+        <option value="2">Fino</option>
+        <option value="4" selected>Médio</option>
+        <option value="8">Grosso</option>
+      </select>
+      <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 1px"></div>
+      <button onclick="undoCroqui()" style="background:white;border:1.5px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer" title="Desfazer">↩</button>
+      <button onclick="limparCroqui()" style="background:white;border:1.5px solid #fca5a5;color:#dc2626;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer" title="Limpar tudo">🗑</button>
+      <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 1px"></div>
+      <button onclick="document.getElementById('croqui-foto-input').click()" style="background:white;border:1.5px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer" title="Importar foto como fundo">🖼 Fundo</button>
+      <input id="croqui-foto-input" type="file" accept="image/*" style="display:none" onchange="importarFotoFundo(this)">
+    </div>
   </div>
+
+  <!-- ── TOOLBAR ETAPA 2: símbolos de impermeabilização e anotações ──────── -->
+  <div id="croqui-toolbar-anotacao" style="background:#fff7ed;border-bottom:2px solid #e87722;padding:5px 8px;display:none;flex-direction:column;gap:5px">
+    <!-- Indicador de etapa -->
+    <div style="font-size:11px;color:#92400e;font-weight:600;padding:1px 0 3px">🗺️ Marque o que foi executado neste local:</div>
+    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+      <!-- Símbolos de impermeabilização -->
+      <button id="tool-ralo"       class="croqui-tool" onclick="setTool('ralo')"       title="Ralo — toque para inserir"          style="color:#dc2626;font-size:16px;padding:2px 7px">⬤</button>
+      <button id="tool-trinca"     class="croqui-tool" onclick="setTool('trinca')"     title="Trinca — arraste para desenhar"     style="color:#dc2626;font-weight:900;letter-spacing:-1px">─</button>
+      <button id="tool-juntafria"  class="croqui-tool" onclick="setTool('juntafria')"  title="Junta Fria — arraste para desenhar" style="color:#dc2626;letter-spacing:-1px">╌</button>
+      <button id="tool-juntadilat" class="croqui-tool" onclick="setTool('juntadilat')" title="Junta de Dilatação — arraste"       style="color:#dc2626;font-size:16px;padding:2px 6px">━</button>
+      <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 1px"></div>
+      <!-- Texto -->
+      <button id="tool-text" class="croqui-tool" onclick="setTool('text')" title="Texto">T</button>
+      <!-- Tamanho do texto (visível só quando ferramenta texto está ativa) -->
+      <select id="croqui-text-size" style="display:none;font-size:11px;padding:3px 5px;border:1.5px solid #93c5fd;border-radius:6px;background:#eff6ff;min-width:70px" title="Tamanho do texto">
+        <option value="12">Pequeno</option>
+        <option value="16" selected>Médio</option>
+        <option value="22">Grande</option>
+        <option value="30">Extra</option>
+      </select>
+      <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 1px"></div>
+      <button onclick="inserirLegenda()" style="background:#fef2f2;border:1.5px solid #fca5a5;color:#dc2626;border-radius:6px;padding:3px 7px;font-size:10px;cursor:pointer;font-weight:700;white-space:nowrap;flex-shrink:0" title="Inserir legenda padrão no croqui">📋 Legenda</button>
+      <button onclick="undoCroqui()" style="background:white;border:1.5px solid #d1d5db;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;margin-left:auto" title="Desfazer">↩</button>
+    </div>
+  </div>
+
   <div style="flex:1;overflow:hidden;position:relative;background:#fff">
     <canvas id="croqui-canvas" style="display:block;touch-action:none;cursor:crosshair"></canvas>
-    <!-- Text input overlay (hidden by default) -->
-    <input id="croqui-text-input" type="text" placeholder="Digite o texto..."
-      style="display:none;position:absolute;border:2px dashed #e87722;background:rgba(255,255,255,0.9);padding:4px 8px;font-size:14px;border-radius:4px;outline:none;min-width:120px;z-index:10">
+    <!-- Overlay de texto: arrastável + rotacionável -->
+    <div id="croqui-text-overlay" style="display:none;position:absolute;z-index:30;user-select:none;-webkit-user-select:none;touch-action:none">
+      <!-- Handle de rotação (acima da caixa) -->
+      <div id="text-rotate-handle" style="position:absolute;top:-42px;left:50%;transform:translateX(-50%);width:28px;height:28px;background:#e87722;border-radius:50%;cursor:grab;display:flex;align-items:center;justify-content:center;color:white;font-size:16px;box-shadow:0 2px 6px rgba(0,0,0,0.35);touch-action:none">↻</div>
+      <!-- Linha conectora -->
+      <div style="position:absolute;top:-14px;left:50%;width:2px;height:14px;background:#e87722;transform:translateX(-50%);pointer-events:none"></div>
+      <!-- Caixa de texto -->
+      <div style="border:2px dashed #e87722;border-radius:8px;overflow:hidden;box-shadow:0 3px 12px rgba(0,0,0,0.2);background:white;min-width:130px">
+        <div id="text-drag-handle" style="background:#e87722;color:white;padding:4px 10px;font-size:11px;font-weight:700;cursor:move;text-align:center;letter-spacing:1px;touch-action:none">⠿ ARRASTAR</div>
+        <input id="croqui-text-input" type="text" placeholder="Digite o texto..." autocomplete="off" spellcheck="false"
+          style="border:none;outline:none;background:white;padding:7px 10px;font-family:Arial,sans-serif;font-size:16px;width:100%;box-sizing:border-box;touch-action:auto;display:block;min-width:130px">
+        <div style="display:flex;border-top:1px solid #f0f0f0">
+          <button id="text-ok-btn" style="flex:1;background:#e87722;color:white;border:none;padding:7px;font-size:14px;cursor:pointer;font-weight:700">✓</button>
+          <button id="text-cancel-btn" style="flex:1;background:#9ca3af;color:white;border:none;padding:7px;font-size:14px;cursor:pointer">✕</button>
+        </div>
+      </div>
+    </div>
   </div>
-  <div style="background:white;border-top:1px solid #e5e7eb;padding:10px 12px;display:flex;gap:8px">
-    <button onclick="salvarCroqui()" class="btn btn-primary" style="flex:2;padding:12px">💾 Salvar Croqui</button>
-    <button onclick="descartarCroqui()" class="btn" style="flex:1;padding:12px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db">Cancelar</button>
+
+  <!-- Botões Etapa 1 -->
+  <div id="croqui-btns-etapa1" style="background:white;border-top:1px solid #e5e7eb;padding:10px 12px;display:flex;gap:8px;flex-wrap:wrap">
+    <button onclick="otimizarCroqui()" class="btn btn-primary" style="flex:2;padding:12px;min-width:140px">✨ Aprimorar com IA →</button>
+    <button onclick="irParaEtapa2()" class="btn btn-outline" style="flex:1;padding:12px;min-width:100px">Pular IA →</button>
+    <button onclick="descartarCroqui()" class="btn" style="flex:0 0 auto;padding:12px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db">✕</button>
+  </div>
+
+  <!-- Botões Etapa 2 -->
+  <div id="croqui-btns-etapa2" style="background:white;border-top:2px solid #e87722;padding:10px 12px;display:none;gap:8px;flex-wrap:wrap">
+    <button onclick="salvarCroqui()" class="btn btn-primary" style="flex:2;padding:12px;min-width:140px">💾 Salvar Croqui</button>
+    <button onclick="voltarParaEtapa1()" class="btn btn-outline" style="flex:1;padding:12px;min-width:100px">← Rascunho</button>
+    <button onclick="descartarCroqui()" class="btn" style="flex:0 0 auto;padding:12px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db">✕</button>
   </div>
   <div id="croqui-ai-status" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center">
     <div style="background:white;border-radius:16px;padding:24px;text-align:center;max-width:280px">
@@ -403,6 +459,19 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
     <div id="fechar-dia-error" class="alert alert-error" style="display:none;margin-bottom:12px"></div>
     <button class="btn btn-orange" onclick="confirmarFecharDia()">✅ Concluir Período</button>
     <button class="btn btn-outline" style="margin-top:10px" onclick="fecharDiaModal()">Cancelar</button>
+  </div>
+</div>
+
+<!-- ── ESTOQUE RECEBIDO MODAL ─────────────────────────────────────────────── -->
+<div id="estoque-modal" class="modal-overlay hidden">
+  <div class="modal-sheet">
+    <h3 style="font-size:18px;font-weight:800;margin-bottom:4px">📦 Receber Estoque</h3>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:16px">Informe quantos litros de <strong>GVF Seal</strong> você recebeu esta semana.</p>
+    <label class="label">Quantidade recebida (litros) *</label>
+    <input id="estoque-litros" class="input" type="number" min="0.1" step="0.1" placeholder="Ex: 50" style="margin-bottom:16px">
+    <div id="estoque-error" class="alert alert-error" style="display:none;margin-bottom:12px"></div>
+    <button class="btn btn-orange" onclick="confirmarEstoqueRecebido()">✅ Confirmar Recebimento</button>
+    <button class="btn btn-outline" style="margin-top:10px" onclick="fecharEstoqueModal()">Cancelar</button>
   </div>
 </div>
 
@@ -1179,9 +1248,11 @@ function renderLocal() {
 
   const canIniciar  = sl === 'pendente' && fotosA.length > 0;
   const isReparo    = (os.tipo || 'normal') === 'reparo';
+  const croquiExiste = !!(p.croquiOtimizado || p.croquiBase64);
   const canConcluir = sl === 'em_andamento'
     && (isReparo ? fotosA.length > 0 : fotosD.length > 0)
-    && (subs.length === 0 || feitos === subs.length);
+    && (subs.length === 0 || feitos === subs.length)
+    && (isReparo || croquiExiste);
 
   document.getElementById('local-title').textContent = p.nome || p.local || `Local ${idx + 1}`;
 
@@ -1279,6 +1350,7 @@ function renderLocal() {
     if (!isReparo && fotosD.length === 0) motivos.push('fotos DEPOIS');
     if (isReparo  && fotosA.length === 0) motivos.push(`foto do Reparo ${numReparo}`);
     if (subs.length > 0 && feitos < subs.length) motivos.push(`${subs.length - feitos} sub-ponto(s)`);
+    if (!isReparo && !croquiExiste) motivos.push('croqui do local');
     html += `<button class="btn ${canConcluir ? 'btn-success' : 'btn-disabled'}" style="margin-top:16px" ${canConcluir ? 'onclick="acaoConcluir()"' : ''}>
       ✅ Concluir Local
     </button>`;
@@ -1689,6 +1761,35 @@ async function confirmarAssinatura() {
   }
 }
 
+async function finalizarSemAssinatura() {
+  if (!confirm('Finalizar OS sem assinatura do responsável?')) return;
+  showLoading('Finalizando OS...');
+  const errEl = document.getElementById('sig-error');
+  try {
+    const res = await fetch(`${API}/os/${S.currentOS._id}/finalizar`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nomeResponsavel:  S.responsavelNome  || '',
+        cargoResponsavel: S.responsavelCargo || '',
+        assinaturaBase64: null,
+      })
+    });
+    const data = await res.json();
+    hideLoading();
+    if (!res.ok) { errEl.textContent = data.error || 'Erro ao finalizar'; errEl.style.display = ''; return; }
+    S.currentOS.status = 'concluida';
+    S.currentOS.progresso = 100;
+    showScreen('screen-os-detail');
+    renderOSDetail();
+    setTimeout(() => mostrarCelebracao(true), 300);
+  } catch (e) {
+    hideLoading();
+    errEl.textContent = 'Erro de conexão: ' + e.message;
+    errEl.style.display = '';
+  }
+}
+
 // ─── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer;
 function showToast(msg) {
@@ -1768,6 +1869,38 @@ async function confirmarFecharDia() {
     renderOSDetail();
     const injetMsg = injetores > 0 ? ` · ${injetores} injetores` : '';
     showToast(`🌅 Dia fechado! ${litros}L${injetMsg}`);
+  } catch (e) {
+    hideLoading();
+    showToast('⚠️ Erro de conexão');
+  }
+}
+
+// ─── Estoque Recebido ─────────────────────────────────────────────────────────
+function abrirEstoqueModal() {
+  document.getElementById('estoque-litros').value = '';
+  document.getElementById('estoque-error').style.display = 'none';
+  document.getElementById('estoque-modal').classList.remove('hidden');
+}
+function fecharEstoqueModal() {
+  document.getElementById('estoque-modal').classList.add('hidden');
+}
+async function confirmarEstoqueRecebido() {
+  const litros = parseFloat(document.getElementById('estoque-litros').value);
+  const errEl = document.getElementById('estoque-error');
+  if (!litros || litros <= 0) { errEl.textContent = 'Informe uma quantidade válida em litros'; errEl.style.display = ''; return; }
+  errEl.style.display = 'none';
+  fecharEstoqueModal();
+  showLoading('Lançando estoque...');
+  try {
+    const res = await fetch(`${API}/estoque-recebido`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ equipeId: S.equipeId, litros })
+    });
+    const data = await res.json();
+    hideLoading();
+    if (!res.ok) { showToast('⚠️ ' + (data.error || 'Erro ao lançar estoque')); return; }
+    showToast(`📦 ${litros}L recebidos registrados! Total da semana: ${data.recebido}L`);
   } catch (e) {
     hideLoading();
     showToast('⚠️ Erro de conexão');
@@ -1861,14 +1994,45 @@ const CQ = {
   history: [], // snapshots for undo
   snapshot: null, // current snapshot for preview (line/rect)
   pontoIdx: null,
+  iaOtimizado: false, // true quando a IA foi usada e o resultado está no canvas
   returnScreen: 'screen-local',
+  etapa: 'desenho', // 'desenho' | 'anotacao'
 };
+
+// ─── Etapas do croqui ─────────────────────────────────────────────────────────
+function atualizarEtapaCroqui() {
+  const isDesenho = CQ.etapa === 'desenho';
+  document.getElementById('croqui-toolbar-desenho').style.display = isDesenho ? 'flex' : 'none';
+  document.getElementById('croqui-toolbar-anotacao').style.display = isDesenho ? 'none' : 'flex';
+  document.getElementById('croqui-btns-etapa1').style.display = isDesenho ? 'flex' : 'none';
+  document.getElementById('croqui-btns-etapa2').style.display = isDesenho ? 'none' : 'flex';
+  document.getElementById('croqui-etapa-badge').textContent = isDesenho ? 'Etapa 1 de 2' : 'Etapa 2 de 2';
+  // Seleciona ferramenta padrão ao mudar etapa
+  if (!isDesenho) setTool('trinca');
+  else setTool('pencil');
+}
+
+function irParaEtapa2() {
+  CQ.etapa = 'anotacao';
+  atualizarEtapaCroqui();
+}
+
+function voltarParaEtapa1() {
+  CQ.etapa = 'desenho';
+  atualizarEtapaCroqui();
+}
 
 function abrirCroqui(pontoIdx, returnScreen) {
   CQ.pontoIdx    = pontoIdx != null ? pontoIdx : S.currentPontoIdx;
   CQ.returnScreen = returnScreen || 'screen-local';
-  document.getElementById('croqui-title').textContent = 'Croqui — ' + ((S.currentOS?.pontos?.[CQ.pontoIdx]?.nome) || `Local ${CQ.pontoIdx + 1}`);
+  CQ.iaOtimizado = false;
+  const nomePonto = (S.currentOS?.pontos?.[CQ.pontoIdx]?.nome) || `Local ${CQ.pontoIdx + 1}`;
+  document.getElementById('croqui-title').textContent = nomePonto;
   document.getElementById('croqui-back-btn').onclick = descartarCroqui;
+  // Se já tem croqui salvo, abre direto na etapa 2 (anotações)
+  const pCheck = S.currentOS?.pontos?.[CQ.pontoIdx];
+  CQ.etapa = (pCheck?.croquiOtimizado || pCheck?.croquiBase64) ? 'anotacao' : 'desenho';
+  atualizarEtapaCroqui();
   showScreen('screen-croqui');
   // Aguarda 1 frame para o layout flex calcular as dimensões antes de iniciar o canvas
   requestAnimationFrame(() => {
@@ -1934,6 +2098,20 @@ function initCroquiCanvas() {
   function onStart(e) {
     e.preventDefault();
     if (CQ.tool === 'text') { handleTextTool(e, canvas); return; }
+    // Ralo: insere um círculo vermelho preenchido no ponto de clique
+    if (CQ.tool === 'ralo') {
+      pushHistory();
+      const {x, y} = getPos(e);
+      const r = getSize() * 2.5 + 6;
+      ctx.save();
+      ctx.fillStyle = '#dc2626';
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#7f1d1d'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+      saveSnapshot();
+      return;
+    }
     pushHistory();
     const {x, y} = getPos(e);
     CQ.drawing = true; CQ.startX = x; CQ.startY = y;
@@ -1957,12 +2135,38 @@ function initCroquiCanvas() {
     } else if (CQ.tool === 'line' || CQ.tool === 'rect') {
       ctx.putImageData(CQ.snapshot, 0, 0);
       ctx.strokeStyle = color; ctx.lineWidth = size; ctx.lineCap = 'round';
+      ctx.setLineDash([]);
       ctx.beginPath();
       if (CQ.tool === 'line') {
         ctx.moveTo(CQ.startX, CQ.startY); ctx.lineTo(x, y); ctx.stroke();
       } else {
         ctx.strokeRect(CQ.startX, CQ.startY, x - CQ.startX, y - CQ.startY);
       }
+    } else if (CQ.tool === 'trinca') {
+      // Trinca: linha vermelha contínua
+      ctx.putImageData(CQ.snapshot, 0, 0);
+      ctx.save();
+      ctx.strokeStyle = '#dc2626'; ctx.lineWidth = Math.max(2, size); ctx.lineCap = 'round';
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(CQ.startX, CQ.startY); ctx.lineTo(x, y); ctx.stroke();
+      ctx.restore();
+    } else if (CQ.tool === 'juntafria') {
+      // Junta Fria: linha vermelha tracejada
+      ctx.putImageData(CQ.snapshot, 0, 0);
+      ctx.save();
+      ctx.strokeStyle = '#dc2626'; ctx.lineWidth = Math.max(2, size); ctx.lineCap = 'round';
+      ctx.setLineDash([10, 7]);
+      ctx.beginPath(); ctx.moveTo(CQ.startX, CQ.startY); ctx.lineTo(x, y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    } else if (CQ.tool === 'juntadilat') {
+      // Junta de Dilatação: linha vermelha muito espessa
+      ctx.putImageData(CQ.snapshot, 0, 0);
+      ctx.save();
+      ctx.strokeStyle = '#dc2626'; ctx.lineWidth = Math.max(4, size * 2.5); ctx.lineCap = 'square';
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(CQ.startX, CQ.startY); ctx.lineTo(x, y); ctx.stroke();
+      ctx.restore();
     }
   }
 
@@ -2008,6 +2212,36 @@ function undoCroqui() {
   const canvas = document.getElementById('croqui-canvas');
   canvas.getContext('2d').putImageData(CQ.history.pop(), 0, 0);
   saveSnapshot();
+}
+
+function capturarFotoCroqui(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const img = new Image();
+    img.onload = () => {
+      pushHistory();
+      const canvas = document.getElementById('croqui-canvas');
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const W = canvas.width / dpr, H = canvas.height / dpr;
+      // Fundo branco
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, W, H);
+      // Desenha foto em escala total, proporcional e centralizada
+      const scale = Math.min(W / img.width, H / img.height);
+      const imgW = img.width * scale, imgH = img.height * scale;
+      const x = (W - imgW) / 2, y = (H - imgH) / 2;
+      ctx.globalAlpha = 1.0;
+      ctx.drawImage(img, x, y, imgW, imgH);
+      saveSnapshot();
+      showToast('📸 Foto do croqui capturada!');
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+  input.value = ''; // reset para permitir nova captura
 }
 
 function importarFotoFundo(input) {
@@ -2059,33 +2293,220 @@ function setTool(tool) {
   document.querySelectorAll('.croqui-tool').forEach(b => b.classList.remove('active'));
   const el = document.getElementById('tool-' + tool);
   if (el) el.classList.add('active');
+  // Mostrar/ocultar seletor de tamanho de texto
+  const textSizeEl = document.getElementById('croqui-text-size');
+  if (textSizeEl) textSizeEl.style.display = (tool === 'text') ? 'block' : 'none';
 }
 
 
-function handleTextTool(e, canvas) {
-  const {x, y} = getCroquiPos(e, canvas);
-  const input = document.getElementById('croqui-text-input');
-  input.style.left = x + 'px';
-  input.style.top  = (y - 16) + 'px';
-  input.style.display = 'block';
-  input.value = '';
-  input.focus();
-  input.onkeydown = (ke) => {
-    if (ke.key === 'Enter' || ke.key === 'Escape') {
-      if (ke.key === 'Enter' && input.value.trim()) {
-        pushHistory();
-        const ctx = canvas.getContext('2d');
-        const color = document.getElementById('croqui-color').value;
-        const size = parseInt(document.getElementById('croqui-size').value, 10);
-        ctx.fillStyle = color;
-        ctx.font = `${Math.max(12, size * 4)}px -apple-system,sans-serif`;
-        ctx.fillText(input.value.trim(), x, y);
-        saveSnapshot();
-      }
-      input.style.display = 'none';
-      input.value = '';
+function inserirLegenda() {
+  const canvas = document.getElementById('croqui-canvas');
+  const ctx = canvas.getContext('2d');
+  const dpr = CQ.dpr || window.devicePixelRatio || 1;
+  const W = canvas.width / dpr, H = canvas.height / dpr;
+  pushHistory();
+
+  const lw = 148, lh = 96;
+  const lx = W - lw - 10, ly = H - lh - 10;
+
+  // Caixa de fundo
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.96)';
+  ctx.strokeStyle = '#9ca3af'; ctx.lineWidth = 1;
+  ctx.fillRect(lx, ly, lw, lh);
+  ctx.strokeRect(lx, ly, lw, lh);
+
+  // Título
+  ctx.fillStyle = '#111'; ctx.font = 'bold 9px Arial';
+  ctx.fillText('LEGENDA', lx + 6, ly + 14);
+
+  const items = [
+    { label: 'Ralo', type: 'circle' },
+    { label: 'Trinca', type: 'solid' },
+    { label: 'Junta Fria', type: 'dashed' },
+    { label: 'Junta Dilatação', type: 'thick' },
+  ];
+
+  items.forEach((item, i) => {
+    const iy = ly + 30 + i * 16;
+    const ix = lx + 8;
+    ctx.strokeStyle = '#dc2626'; ctx.fillStyle = '#dc2626'; ctx.lineCap = 'round';
+
+    if (item.type === 'circle') {
+      ctx.beginPath(); ctx.arc(ix + 7, iy - 3, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#7f1d1d'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(ix + 7, iy - 3, 5, 0, Math.PI * 2); ctx.stroke();
+    } else if (item.type === 'solid') {
+      ctx.lineWidth = 2; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(ix, iy - 3); ctx.lineTo(ix + 18, iy - 3); ctx.stroke();
+    } else if (item.type === 'dashed') {
+      ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(ix, iy - 3); ctx.lineTo(ix + 18, iy - 3); ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (item.type === 'thick') {
+      ctx.lineWidth = 4; ctx.lineCap = 'square'; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(ix, iy - 3); ctx.lineTo(ix + 18, iy - 3); ctx.stroke();
     }
-  };
+
+    ctx.fillStyle = '#222'; ctx.font = '9px Arial';
+    ctx.fillText(item.label, ix + 24, iy);
+  });
+
+  ctx.restore();
+  saveSnapshot();
+  showToast('📋 Legenda inserida!');
+}
+
+// ── Coordenadas CSS relativas ao canvas (compatível com ctx.scale(dpr,dpr)) ─
+function getCroquiPos(e, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const src  = e.touches ? e.touches[0] : e;
+  return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+}
+
+// ── Ferramenta Texto: overlay arrastável + rotacionável ─────────────────────
+const _TXT = { x: 0, y: 0, rot: 0, drag: null, rotating: false };
+
+function handleTextTool(e, canvas) {
+  const { x, y } = getCroquiPos(e, canvas);
+  openTextOverlay(x, y);
+}
+
+function openTextOverlay(cssX, cssY) {
+  const overlay    = document.getElementById('croqui-text-overlay');
+  const input      = document.getElementById('croqui-text-input');
+  const textSizeEl = document.getElementById('croqui-text-size');
+  const fontSize   = textSizeEl ? parseInt(textSizeEl.value, 10) : 16;
+  _TXT.x = cssX; _TXT.y = cssY; _TXT.rot = 0;
+  input.style.fontSize = fontSize + 'px';
+  input.value = '';
+  _applyTxtTransform();
+  overlay.style.display = 'block';
+  setTimeout(() => input.focus(), 80);
+}
+
+function _applyTxtTransform() {
+  const o = document.getElementById('croqui-text-overlay');
+  o.style.left      = _TXT.x + 'px';
+  o.style.top       = _TXT.y + 'px';
+  o.style.transform = `translate(-50%,-50%) rotate(${_TXT.rot}rad)`;
+}
+
+function commitTextToCanvas() {
+  const input = document.getElementById('croqui-text-input');
+  const text  = (input.value || '').trim();
+  if (!text) { cancelTextOverlay(); return; }
+  const canvas = document.getElementById('croqui-canvas');
+  const ctx    = canvas.getContext('2d');
+  const textSizeEl = document.getElementById('croqui-text-size');
+  const fontSize   = textSizeEl ? parseInt(textSizeEl.value, 10) : 16;
+  const color      = document.getElementById('croqui-color').value;
+  pushHistory();
+  ctx.save();
+  ctx.translate(_TXT.x, _TXT.y);
+  ctx.rotate(_TXT.rot);
+  ctx.fillStyle    = color;
+  ctx.font         = `bold ${fontSize}px Arial, sans-serif`;
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+  saveSnapshot();
+  cancelTextOverlay();
+}
+
+function cancelTextOverlay() {
+  document.getElementById('croqui-text-overlay').style.display = 'none';
+  document.getElementById('croqui-text-input').value = '';
+}
+
+// ── Drag ─────────────────────────────────────────────────────────────────────
+function _txtDragStart(e) {
+  e.preventDefault(); e.stopPropagation();
+  const pt = e.touches ? e.touches[0] : e;
+  _TXT.drag = { sx: pt.clientX, sy: pt.clientY, ox: _TXT.x, oy: _TXT.y };
+  document.addEventListener('mousemove', _txtDragMove, { passive: false });
+  document.addEventListener('mouseup',   _txtDragEnd);
+  document.addEventListener('touchmove', _txtDragMove, { passive: false });
+  document.addEventListener('touchend',  _txtDragEnd);
+}
+function _txtDragMove(e) {
+  if (!_TXT.drag) return; e.preventDefault();
+  const pt = e.touches ? e.touches[0] : e;
+  _TXT.x = _TXT.drag.ox + (pt.clientX - _TXT.drag.sx);
+  _TXT.y = _TXT.drag.oy + (pt.clientY - _TXT.drag.sy);
+  _applyTxtTransform();
+}
+function _txtDragEnd() {
+  _TXT.drag = null;
+  document.removeEventListener('mousemove', _txtDragMove);
+  document.removeEventListener('mouseup',   _txtDragEnd);
+  document.removeEventListener('touchmove', _txtDragMove);
+  document.removeEventListener('touchend',  _txtDragEnd);
+}
+
+// ── Rotate ───────────────────────────────────────────────────────────────────
+function _txtRotStart(e) {
+  e.preventDefault(); e.stopPropagation();
+  _TXT.rotating = true;
+  document.addEventListener('mousemove', _txtRotMove, { passive: false });
+  document.addEventListener('mouseup',   _txtRotEnd);
+  document.addEventListener('touchmove', _txtRotMove, { passive: false });
+  document.addEventListener('touchend',  _txtRotEnd);
+}
+function _txtRotMove(e) {
+  if (!_TXT.rotating) return; e.preventDefault();
+  const canvas  = document.getElementById('croqui-canvas');
+  const pRect   = canvas.parentElement.getBoundingClientRect();
+  const pt      = e.touches ? e.touches[0] : e;
+  const mx      = pt.clientX - pRect.left - _TXT.x;
+  const my      = pt.clientY - pRect.top  - _TXT.y;
+  _TXT.rot = Math.atan2(my, mx) + Math.PI / 2;
+  _applyTxtTransform();
+}
+function _txtRotEnd() {
+  _TXT.rotating = false;
+  document.removeEventListener('mousemove', _txtRotMove);
+  document.removeEventListener('mouseup',   _txtRotEnd);
+  document.removeEventListener('touchmove', _txtRotMove);
+  document.removeEventListener('touchend',  _txtRotEnd);
+}
+
+// Wire up ao carregar DOM
+document.addEventListener('DOMContentLoaded', function () {
+  const dh = document.getElementById('text-drag-handle');
+  const rh = document.getElementById('text-rotate-handle');
+  const ok = document.getElementById('text-ok-btn');
+  const cn = document.getElementById('text-cancel-btn');
+  const ti = document.getElementById('croqui-text-input');
+  if (dh) { dh.addEventListener('mousedown',  _txtDragStart); dh.addEventListener('touchstart', _txtDragStart, { passive: false }); }
+  if (rh) { rh.addEventListener('mousedown',  _txtRotStart);  rh.addEventListener('touchstart', _txtRotStart,  { passive: false }); }
+  if (ok) ok.addEventListener('click', commitTextToCanvas);
+  if (cn) cn.addEventListener('click', cancelTextOverlay);
+  if (ti) ti.addEventListener('keydown', (ke) => {
+    if (ke.key === 'Enter') commitTextToCanvas();
+    if (ke.key === 'Escape') cancelTextOverlay();
+  });
+});
+
+// Aprimoramento local: alto contraste + linhas nítidas (sem API externa)
+function aprimorarCroquiLocal(canvas) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const imageData = ctx.getImageData(0, 0, W, H);
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    // Luminância perceptual
+    const lum = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+    // Curva S: pixels escuros (linhas) ficam mais pretos; fundo fica mais branco
+    let out;
+    if (lum < 80)       out = 0;           // linha escura → preto puro
+    else if (lum < 160) out = Math.round(lum * 0.5); // zona de transição — escurece
+    else                out = Math.min(255, Math.round(lum * 1.2 + 15)); // fundo → branco
+    d[i] = d[i+1] = d[i+2] = out;
+    // alpha mantido
+  }
+  ctx.putImageData(imageData, 0, 0);
 }
 
 async function otimizarCroqui() {
@@ -2109,31 +2530,78 @@ async function otimizarCroqui() {
     const res = await fetch(`${API_BASE}/croqui/otimizar`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imagem: base64 })
+      body: JSON.stringify({ imagem: base64, canvasW: tmpAI.width, canvasH: tmpAI.height })
     });
     const data = await res.json();
     aiStatus.style.display = 'none';
+    // Helper: desenha imagem no canvas preservando proporção (contain + centralizado)
+    const _drawOnCanvas = (img) => {
+      pushHistory();
+      const ctx = canvas.getContext('2d');
+      const dpr = CQ.dpr || window.devicePixelRatio || 1;
+      const W   = canvas.width  / dpr;   // dimensões CSS
+      const H   = canvas.height / dpr;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, W, H);
+      // Escala proporcional "contain": cabe dentro de W×H sem distorcer
+      const scale = Math.min(W / img.width, H / img.height);
+      const iW = img.width  * scale;
+      const iH = img.height * scale;
+      const ix = (W - iW) / 2;  // centraliza horizontalmente
+      const iy = (H - iH) / 2;  // centraliza verticalmente
+      ctx.drawImage(img, ix, iy, iW, iH);
+      saveSnapshot();
+    };
+
     if (data.imagemOtimizada) {
+      // ── Resultado real do Gemini (imagem) ────────────────────────────────
       const img = new Image();
       img.onload = () => {
-        pushHistory();
-        const ctx = canvas.getContext('2d');
-        const dpr = window.devicePixelRatio || 1;
-        const W = canvas.width / dpr, H = canvas.height / dpr;
-        ctx.clearRect(0, 0, W, H);
-        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
-        ctx.drawImage(img, 0, 0, W, H);
-        saveSnapshot();
+        _drawOnCanvas(img);
+        CQ.iaOtimizado = true;
         showToast('✨ Croqui otimizado pela IA!');
+        irParaEtapa2();
       };
       const src = data.imagemOtimizada.startsWith('data:') ? data.imagemOtimizada : 'data:image/png;base64,' + data.imagemOtimizada;
       img.src = src;
+    } else if (data.svg) {
+      // ── SVG vetorial: linhas retas, círculos perfeitos ───────────────────
+      let svgStr = data.svg;
+      if (!svgStr.includes('xmlns=')) {
+        svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+      }
+      // data URL base64 — mais confiável que blob URL em mobile
+      const svgB64 = btoa(unescape(encodeURIComponent(svgStr)));
+      const img = new Image();
+      img.onload = () => {
+        _drawOnCanvas(img);
+        CQ.iaOtimizado = true;
+        showToast('✨ Croqui vetorizado!');
+        irParaEtapa2();
+      };
+      img.onerror = () => {
+        pushHistory(); aprimorarCroquiLocal(canvas); saveSnapshot();
+        showToast('⚠️ SVG render falhou, indo para anotações.');
+        irParaEtapa2();
+      };
+      img.src = 'data:image/svg+xml;base64,' + svgB64;
+    } else if (data.fallback) {
+      // ── Fallback local: alto contraste ───────────────────────────────────
+      pushHistory();
+      aprimorarCroquiLocal(canvas);
+      saveSnapshot();
+      CQ.iaOtimizado = false;
+      const motivo = data.aviso ? data.aviso.slice(0, 80) : 'IA indisponível';
+      showToast('⚠️ ' + motivo + ' — indo para anotações.');
+      irParaEtapa2();
     } else {
-      showToast(data.msg || data.aviso || '⚠️ IA indisponível');
+      const msg = data.error || data.aviso || data.msg || 'IA indisponível';
+      showToast('⚠️ ' + msg + ' — indo para anotações.');
+      irParaEtapa2();
     }
   } catch (err) {
     aiStatus.style.display = 'none';
-    showToast('⚠️ Erro ao otimizar: ' + err.message);
+    showToast('⚠️ Erro: ' + err.message);
   }
 }
 
@@ -2144,8 +2612,8 @@ async function salvarCroqui() {
   const dpr  = CQ.dpr || window.devicePixelRatio || 1;
   const cssW = Math.round(canvas.width  / dpr);
   const cssH = Math.round(canvas.height / dpr);
-  // Limita largura máxima a 900 px para evitar arquivos grandes em tablets
-  const maxW  = 900;
+  // Limita largura máxima a 800px para garantir imagens < 400KB
+  const maxW  = 800;
   const scale = cssW > maxW ? maxW / cssW : 1;
   const outW  = Math.round(cssW * scale);
   const outH  = Math.round(cssH * scale);
@@ -2155,8 +2623,11 @@ async function salvarCroqui() {
   const ctx2 = tempCanvas.getContext('2d');
   ctx2.fillStyle = '#FFFFFF'; ctx2.fillRect(0, 0, outW, outH);
   ctx2.drawImage(canvas, 0, 0, outW, outH);
-  // JPEG garante tamanho pequeno (fundo branco já garantido acima)
-  const base64 = tempCanvas.toDataURL('image/jpeg', 0.88);
+  // JPEG — qualidade 0.75 garante imagens bem abaixo do limite de 400KB do servidor
+  let base64 = tempCanvas.toDataURL('image/jpeg', 0.75);
+  // Se ainda estiver grande, reduz qualidade progressivamente
+  if (base64.length * 0.75 > 380 * 1024) base64 = tempCanvas.toDataURL('image/jpeg', 0.55);
+  if (base64.length * 0.75 > 380 * 1024) base64 = tempCanvas.toDataURL('image/jpeg', 0.40);
   const p = S.currentOS?.pontos?.[CQ.pontoIdx];
   if (!p) { showToast('Erro: ponto não encontrado'); return; }
   showLoading('Salvando croqui...');
@@ -2164,7 +2635,7 @@ async function salvarCroqui() {
     const res = await fetch(`${API}/os/${S.currentOS._id}/pontos/${CQ.pontoIdx}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'save_croqui', croquiBase64: base64, membro: S.membro })
+      body: JSON.stringify({ action: 'save_croqui', croquiBase64: base64, otimizado: CQ.iaOtimizado, membro: S.membro })
     });
     const data = await res.json();
     hideLoading();
