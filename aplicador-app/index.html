@@ -138,6 +138,7 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
 .info-link{display:inline-flex;align-items:center;gap:5px;font-size:13px;padding:6px 12px;border-radius:8px;text-decoration:none;font-weight:600;transition:opacity 0.15s}
 .info-link:active{opacity:0.75}
 .link-maps{background:#e8f0fe;color:#1a73e8;border:1px solid #c5d9f8}
+.link-waze{background:#e0f0ff;color:#00aaff;border:1px solid #99d6ff}
 .link-wa{background:#d9f7e4;color:#1a7a40;border:1px solid #a7e8bd}
 
 /* Signature canvas */
@@ -194,6 +195,30 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
 .hb-agendadas{border-top:4px solid #2563eb}.hb-agendadas .hb-count{color:#2563eb}
 .hb-concluidas{border-top:4px solid #16a34a}.hb-concluidas .hb-count{color:#16a34a}
 .hb-produto{border-top:4px solid #7c3aed}.hb-produto .hb-count{color:#7c3aed}
+.hb-compartilhadas{border-top:4px solid #0891b2}.hb-compartilhadas .hb-count{color:#0891b2}
+.hb-agenda{border-top:4px solid #e87722;min-height:90px}
+.hb-agenda .hb-icon{font-size:34px}
+.hb-agenda .hb-lbl{font-size:15px;color:#e87722}
+/* Rodapé com miniaturas dos cards na tela de lista de OS */
+.mini-nav{display:flex;gap:6px;position:fixed;bottom:0;left:0;right:0;background:#f0f4f8;padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:20;box-shadow:0 -2px 10px rgba(0,0,0,0.08);border-top:1px solid #e5e7eb}
+.mini-card{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:white;border:none;border-top:3px solid transparent;border-radius:10px;padding:8px 4px 6px;cursor:pointer;transition:all 0.15s;box-shadow:0 1px 4px rgba(0,0,0,0.08);opacity:0.5}
+.mini-card:active{transform:scale(0.95)}
+.mini-card .mini-icon{font-size:18px;line-height:1}
+.mini-card .mini-count{font-size:14px;font-weight:900;line-height:1;color:#1a202c}
+.mini-card .mini-lbl{font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.3px;margin-top:1px}
+.mini-card.mini-active{opacity:1;box-shadow:0 3px 10px rgba(0,0,0,0.18);transform:translateY(-2px)}
+.mini-card.hb-andamento{border-top-color:#e87722}.mini-card.hb-andamento.mini-active .mini-count{color:#e87722}
+.mini-card.hb-agendadas{border-top-color:#2563eb}.mini-card.hb-agendadas.mini-active .mini-count{color:#2563eb}
+.mini-card.hb-compartilhadas{border-top-color:#0891b2}.mini-card.hb-compartilhadas.mini-active .mini-count{color:#0891b2}
+.mini-card.hb-concluidas{border-top-color:#16a34a}.mini-card.hb-concluidas.mini-active .mini-count{color:#16a34a}
+/* Versão compacta dos cards para navegação no topo da lista */
+.hb-sm{min-height:78px;padding:10px 8px 8px;gap:3px}
+.hb-sm .hb-icon{font-size:26px}
+.hb-sm .hb-lbl{font-size:11px}
+.hb-sm .hb-count{font-size:20px}
+/* Estado ativo/inativo nos cards de nav */
+.hb-nav-ativo{opacity:1;box-shadow:0 4px 16px rgba(0,0,0,0.18)}
+.hb-nav-inativo{opacity:0.45;box-shadow:none}
 /* HOME button na lista */
 .btn-home-nav{background:rgba(255,255,255,0.22);border:none;color:white;padding:5px 10px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;letter-spacing:0.2px}
 /* Lancamento semanal */
@@ -206,6 +231,41 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
 <div id="loading-overlay" class="loading-overlay">
   <div class="spinner" style="margin:0"></div>
   <span id="loading-msg">Aguarde...</span>
+</div>
+
+<!-- ── BANNER MASTER MODE (fixo, aparece somente no modo master) ─────────── -->
+<div id="master-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#1a1a1a;color:#f59340;font-size:12px;font-weight:700;text-align:center;padding:6px 12px;letter-spacing:0.5px">
+  👁 MODO MASTER &nbsp;·&nbsp; <span id="master-banner-equipe"></span>
+  &nbsp;<button onclick="sairMasterMode()" style="background:#e87722;border:none;color:#fff;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;cursor:pointer;margin-left:8px">Sair</button>
+</div>
+
+<!-- ── SCREEN: MASTER LOGIN ──────────────────────────────────────────────── -->
+<div id="screen-master-login" class="screen">
+  <div class="header"><h1>👁 Modo Visualização</h1></div>
+  <div class="content">
+    <div style="text-align:center;padding:24px 0 20px">
+      <div style="font-size:52px;margin-bottom:8px">🔑</div>
+      <h2 style="font-size:20px;font-weight:800;color:#e87722">Acesso Master</h2>
+      <p style="font-size:13px;color:#6b7280;margin-top:4px">Entre com a senha master e escolha a equipe que deseja visualizar</p>
+    </div>
+    <div class="card">
+      <div style="margin-bottom:14px">
+        <label class="label">Senha master</label>
+        <div style="position:relative">
+          <input id="inp-master-senha" class="input" type="password" placeholder="Senha do painel admin" style="padding-right:44px" onkeydown="if(event.key==='Enter')doMasterLogin()">
+          <button type="button" onclick="toggleSenhaVis('inp-master-senha','btn-vis-master')" id="btn-vis-master" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af;padding:0">👁</button>
+        </div>
+      </div>
+      <div style="margin-bottom:18px">
+        <label class="label">Equipe a visualizar</label>
+        <select id="sel-master-equipe" class="input">
+          <option value="">Carregando equipes...</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="doMasterLogin()">👁 Visualizar equipe →</button>
+    </div>
+    <div id="master-login-error" class="alert alert-error" style="display:none"></div>
+  </div>
 </div>
 
 <!-- ── SCREEN: LOGIN ─────────────────────────────────────────────────────── -->
@@ -310,10 +370,32 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
         <span class="hb-count" id="home-count-produto" style="font-size:18px">—L</span>
         <span class="hb-sub">GVF Seal recebido</span>
       </button>
+      <button class="hb hb-agenda" onclick="abrirAgendaEquipe()" style="grid-column:1/-1">
+        <span class="hb-icon">📆</span>
+        <span class="hb-lbl">Agenda da Equipe</span>
+        <span class="hb-sub">visualizar calendário do mês</span>
+      </button>
     </div>
     <div style="margin-top:16px;text-align:center">
       <button onclick="trocarEquipe()" style="background:none;border:none;font-size:12px;color:#9ca3af;cursor:pointer;padding:8px">↩ Trocar equipe</button>
     </div>
+  </div>
+</div>
+
+<!-- ── SCREEN: AGENDA DA EQUIPE ─────────────────────────────────────────── -->
+<div id="screen-agenda" class="screen">
+  <div class="header">
+    <button class="back-btn" onclick="irParaHome()" title="Voltar">←</button>
+    <h1 style="flex:1;text-align:center">📆 Agenda da Equipe</h1>
+    <span style="width:36px"></span>
+  </div>
+  <div class="content" style="padding-top:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between;background:white;border-radius:14px;padding:10px 14px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+      <button onclick="agendaNavMes(-1)" style="background:#fff5ec;border:1px solid #fed7aa;color:#e87722;width:38px;height:38px;border-radius:10px;font-size:18px;font-weight:700;cursor:pointer">‹</button>
+      <div style="font-size:15px;font-weight:800;color:#1a202c;text-transform:capitalize" id="agenda-mes-label">—</div>
+      <button onclick="agendaNavMes(1)" style="background:#fff5ec;border:1px solid #fed7aa;color:#e87722;width:38px;height:38px;border-radius:10px;font-size:18px;font-weight:700;cursor:pointer">›</button>
+    </div>
+    <div id="agenda-content"></div>
   </div>
 </div>
 
@@ -421,26 +503,31 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
     <span id="equipe-badge" class="badge"></span>
     <button class="back-btn" onclick="trocarEquipe()" title="Trocar equipe">↩</button>
   </div>
-  <div class="content" style="padding-top:12px;padding-bottom:80px">
+  <div class="content" style="padding-top:12px;padding-bottom:96px">
     <div id="os-list-spinner" class="spinner"></div>
     <div id="os-list-content" style="display:none"></div>
   </div>
-  <nav class="os-bottom-nav">
-    <button class="os-nav-btn active" id="tab-andamento" onclick="switchOSTab('andamento')">
-      <span class="nav-icon">🔧</span>
-      <span class="nav-lbl">Andamento</span>
+  <!-- Rodapé com miniaturas dos cards (mesma identidade visual da home) -->
+  <nav class="mini-nav">
+    <button class="mini-card hb-andamento mini-active" id="tab-andamento" onclick="switchOSTab('andamento')">
+      <span class="mini-icon">🔧</span>
+      <span class="mini-count" id="nav-count-andamento">—</span>
+      <span class="mini-lbl">Andam.</span>
     </button>
-    <button class="os-nav-btn" id="tab-agendadas" onclick="switchOSTab('agendadas')">
-      <span class="nav-icon">📅</span>
-      <span class="nav-lbl">Agendadas</span>
+    <button class="mini-card hb-agendadas" id="tab-agendadas" onclick="switchOSTab('agendadas')">
+      <span class="mini-icon">📅</span>
+      <span class="mini-count" id="nav-count-agendadas">—</span>
+      <span class="mini-lbl">Agend.</span>
     </button>
-    <button class="os-nav-btn" id="tab-compartilhadas" onclick="switchOSTab('compartilhadas')">
-      <span class="nav-icon">🤝</span>
-      <span class="nav-lbl">Compartilhadas</span>
+    <button class="mini-card hb-compartilhadas" id="tab-compartilhadas" onclick="switchOSTab('compartilhadas')">
+      <span class="mini-icon">🤝</span>
+      <span class="mini-count" id="nav-count-compartilhadas">—</span>
+      <span class="mini-lbl">Compart.</span>
     </button>
-    <button class="os-nav-btn" id="tab-concluidas" onclick="switchOSTab('concluidas')">
-      <span class="nav-icon">✅</span>
-      <span class="nav-lbl">Concluídas</span>
+    <button class="mini-card hb-concluidas" id="tab-concluidas" onclick="switchOSTab('concluidas')">
+      <span class="mini-icon">✅</span>
+      <span class="mini-count" id="nav-count-concluidas">—</span>
+      <span class="mini-lbl">Concl.</span>
     </button>
   </nav>
 </div>
@@ -702,12 +789,33 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
 const API_BASE = 'https://vedafacil-painel.vercel.app/api';
 const API = API_BASE + '/aplicador';
 
+// Wrapper de fetch que inclui automaticamente o JWT da equipe (Authorization: Bearer)
+function getAppToken() { return localStorage.getItem('vfa_token') || ''; }
+function setAppToken(t) {
+  if (t) localStorage.setItem('vfa_token', t);
+  else localStorage.removeItem('vfa_token');
+}
+async function apiFetch(url, options = {}) {
+  const tok = getAppToken();
+  const headers = { ...(options.headers || {}) };
+  if (tok && !headers.Authorization) headers.Authorization = 'Bearer ' + tok;
+  const res = await fetch(url, { ...options, headers });
+  // Se o token expirar / for inválido, joga de volta pra login
+  if (res.status === 401 && tok) {
+    setAppToken(null);
+    localStorage.removeItem('vfa_authed');
+    if (typeof showScreen === 'function') showScreen('screen-login');
+  }
+  return res;
+}
+
 // ─── State ───────────────────────────────────────────────────────────────────
 const S = {
   equipes: [],
   equipeId: '',
   equipeNome: '',
   membro: '',
+  masterMode: false,
   osList: [],
   currentOS: null,
   currentPontoIdx: null,
@@ -834,12 +942,19 @@ function atualizarHomeGreeting() {
 }
 
 function updateHomeCounts() {
-  const andamento = S_osTabs.ativas.filter(o => o.status === 'em_andamento' || o.status === 'aguardando_assinatura').length;
-  const agendadas = S_osTabs.ativas.filter(o => o.status === 'agendada').length;
-  const concluidas = S_osTabs.concluidas.length;
-  document.getElementById('home-count-andamento').textContent = andamento;
+  const andamento      = S_osTabs.ativas.filter(o => o.status === 'em_andamento' || o.status === 'aguardando_assinatura').length;
+  const agendadas      = S_osTabs.ativas.filter(o => o.status === 'agendada').length;
+  const compartilhadas = (S_osTabs.compartilhadas || []).length;
+  const concluidas     = S_osTabs.concluidas.length;
+  // Home screen
+  document.getElementById('home-count-andamento').textContent  = andamento;
   document.getElementById('home-count-agendadas').textContent  = agendadas;
   document.getElementById('home-count-concluidas').textContent = concluidas;
+  // Cards de nav na lista
+  const nc = document.getElementById('nav-count-andamento');      if (nc) nc.textContent = andamento;
+  const na = document.getElementById('nav-count-agendadas');      if (na) na.textContent = agendadas;
+  const nco = document.getElementById('nav-count-compartilhadas'); if (nco) nco.textContent = compartilhadas;
+  const ncl = document.getElementById('nav-count-concluidas');    if (ncl) ncl.textContent = concluidas;
 }
 
 function irParaHome() {
@@ -853,8 +968,193 @@ function irParaLista(tab) {
   switchOSTab(tab);
 }
 
+// ── Agenda da Equipe ─────────────────────────────────────────────────────
+let _agendaMesRef = null; // primeiro dia do mês exibido
+
+function abrirAgendaEquipe() {
+  if (!_agendaMesRef) {
+    const hoje = new Date();
+    _agendaMesRef = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  }
+  showScreen('screen-agenda');
+  renderAgendaEquipe();
+}
+
+function agendaNavMes(delta) {
+  _agendaMesRef = new Date(_agendaMesRef.getFullYear(), _agendaMesRef.getMonth() + delta, 1);
+  renderAgendaEquipe();
+}
+
+function _agendaParseDate(s) {
+  if (!s) return null;
+  const d = new Date(String(s).split('T')[0] + 'T00:00:00');
+  return isNaN(d) ? null : d;
+}
+
+function _agendaWeekStart(d) {
+  const x = new Date(d);
+  const dia = x.getDay();
+  x.setDate(x.getDate() - dia);
+  x.setHours(0,0,0,0);
+  return x;
+}
+
+function _agendaFmtRange(ini, fim) {
+  const fmt = d => String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0');
+  return ini && fim ? `${fmt(ini)} → ${fmt(fim)}` : (ini ? fmt(ini) : '—');
+}
+
+function _agendaSameDay(a, b) {
+  return a && b && a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+}
+
+function _agendaCalDays(mesRef) {
+  // Retorna 42 dias (6 semanas) começando no domingo da primeira semana do mês
+  const primeiro = new Date(mesRef.getFullYear(), mesRef.getMonth(), 1);
+  const inicio   = new Date(primeiro);
+  inicio.setDate(inicio.getDate() - primeiro.getDay()); // recua até o domingo
+  const dias = [];
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(inicio); d.setDate(d.getDate() + i);
+    dias.push({ date: d, thisMonth: d.getMonth() === mesRef.getMonth() });
+  }
+  return dias;
+}
+
+function _agendaStatusFaixa(status) {
+  return {
+    agendada:              '#93c5fd',
+    em_andamento:          '#fcd34d',
+    aguardando_assinatura: '#fdba74',
+    concluida:             '#86efac',
+    cancelada:             '#fca5a5',
+  }[status] || '#cbd5e1';
+}
+
+function renderAgendaEquipe() {
+  const mesRef  = _agendaMesRef;
+  const mesNome = mesRef.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  document.getElementById('agenda-mes-label').textContent = mesNome;
+
+  const todasOS  = [...(S_osTabs.ativas || []), ...(S_osTabs.concluidas || [])];
+  const corEqu   = '#e87722';
+  const hoje     = new Date(); hoje.setHours(0,0,0,0);
+
+  // Mapa data → array de OSes (uma OS pode aparecer em vários dias se dataInicio→dataTermino span)
+  const porDia = {};
+  todasOS.forEach(os => {
+    const di = _agendaParseDate(os.dataInicio);
+    if (!di) return;
+    const df = _agendaParseDate(os.dataTermino) || di;
+    const cur = new Date(di);
+    while (cur <= df) {
+      const key = cur.toISOString().slice(0,10);
+      if (!porDia[key]) porDia[key] = [];
+      porDia[key].push(os);
+      cur.setDate(cur.getDate() + 1);
+    }
+  });
+
+  const dias = _agendaCalDays(mesRef);
+
+  // Cabeçalho dias da semana
+  let html = `<div style="background:white;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);background:#f9fafb;border-bottom:1px solid #e5e7eb">
+      ${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map((d,i) => `
+        <div style="padding:8px 2px;text-align:center;font-size:11px;font-weight:700;color:${i===0||i===6?'#dc2626':'#6b7280'};border-right:1px solid #f3f4f6">${d}</div>
+      `).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr)">`;
+
+  dias.forEach((d, idx) => {
+    const key   = d.date.toISOString().slice(0,10);
+    const osDay = porDia[key] || [];
+    const isToday = _agendaSameDay(d.date, hoje);
+    const isWE  = d.date.getDay()===0 || d.date.getDay()===6;
+    const bg    = !d.thisMonth ? '#f9fafb' : (isWE ? '#fafafa' : 'white');
+    const numColor = !d.thisMonth ? '#d1d5db' : (isToday ? 'white' : '#374151');
+    const numBg    = isToday ? corEqu : 'transparent';
+
+    html += `<div style="min-height:78px;padding:3px;background:${bg};border-right:1px solid #f3f4f6;border-bottom:1px solid #f3f4f6;overflow:hidden">
+      <div style="text-align:center;margin-bottom:2px">
+        <span style="display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;border-radius:50%;font-size:11px;font-weight:800;background:${numBg};color:${numColor}">${d.date.getDate()}</span>
+      </div>`;
+
+    osDay.slice(0, 2).forEach(os => {
+      const isReparo = (os.tipo||'normal') === 'reparo';
+      const status   = os.status || 'agendada';
+      const chipBg   = status === 'cancelada' ? '#9ca3af'
+                    : status === 'concluida' ? '#86efac'
+                    : corEqu;
+      const faixa = _agendaStatusFaixa(status);
+      html += `<div onclick="event.stopPropagation();openOS('${os._id}')" style="cursor:pointer;border-radius:4px;overflow:hidden;background:${chipBg};margin-bottom:2px">
+        <div style="height:2px;background:${faixa}"></div>
+        <div style="padding:1px 3px;font-size:9px;font-weight:800;color:white;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${isReparo?'🔧':''}#${String(os.numero||'').padStart(3,'0')}</div>
+        <div style="padding:0 3px 2px;font-size:8px;color:white;opacity:0.9;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${(os.cliente||'').slice(0,12)}</div>
+      </div>`;
+    });
+    if (osDay.length > 2) {
+      html += `<div style="text-align:center;font-size:9px;color:#9ca3af;font-weight:700">+${osDay.length-2}</div>`;
+    }
+    html += `</div>`;
+  });
+
+  html += `</div>
+    <div style="padding:10px 12px;background:#f9fafb;border-top:1px solid #f3f4f6;display:flex;flex-wrap:wrap;gap:8px;font-size:10px;color:#6b7280">
+      <span style="font-weight:700;color:#9ca3af;text-transform:uppercase">Status:</span>
+      ${[['agendada','Agendada'],['em_andamento','Em Andam.'],['aguardando_assinatura','Aguard. Assin.'],['concluida','Concluída']].map(([k,l]) => `
+        <span style="display:flex;align-items:center;gap:3px"><span style="display:inline-block;width:16px;height:3px;border-radius:2px;background:${_agendaStatusFaixa(k)}"></span>${l}</span>
+      `).join('')}
+    </div>
+  </div>`;
+
+  // Lista de OSes do mês logo abaixo do calendário
+  const inicioMes = new Date(mesRef.getFullYear(), mesRef.getMonth(), 1);
+  const fimMes    = new Date(mesRef.getFullYear(), mesRef.getMonth() + 1, 0, 23, 59, 59);
+  const osDoMes = todasOS.filter(os => {
+    const di = _agendaParseDate(os.dataInicio);
+    const df = _agendaParseDate(os.dataTermino) || di;
+    return di && df >= inicioMes && di <= fimMes;
+  }).sort((a,b) => _agendaParseDate(a.dataInicio) - _agendaParseDate(b.dataInicio));
+
+  if (osDoMes.length) {
+    html += `<div style="margin-top:16px;font-size:12px;font-weight:800;color:#e87722;text-transform:uppercase;letter-spacing:0.5px;padding-left:4px">📋 ${osDoMes.length} OS no mês</div>`;
+    osDoMes.forEach(os => {
+      const dI = _agendaParseDate(os.dataInicio);
+      const dF = _agendaParseDate(os.dataTermino);
+      const pct = calcOSPct(os);
+      const isReparo = (os.tipo || 'normal') === 'reparo';
+      const status = os.status || 'agendada';
+      html += `<div class="os-item ${isReparo?'reparo':status}" onclick="openOS('${os._id}')" style="margin-top:8px">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+          <span class="os-title" style="margin:0;font-size:14px">OS #${String(os.numero||'').padStart(3,'0')}</span>
+          ${isReparo ? `<span class="badge-reparo">🔧 REPARO</span>` : ''}
+          <span class="os-status status-${status}" style="flex-shrink:0">${statusLabel(status)}</span>
+        </div>
+        <div style="font-size:14px;font-weight:700;color:#1a202c">${os.cliente||'—'}</div>
+        ${os.endereco ? `<div class="os-sub">${[os.endereco, os.cidade].filter(Boolean).join(' · ')}</div>` : ''}
+        <div class="os-sub" style="margin-top:3px">📅 ${_agendaFmtRange(dI, dF || dI)}</div>
+      </div>`;
+    });
+  }
+
+  document.getElementById('agenda-content').innerHTML = html;
+}
+
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 async function boot() {
+  // Verifica modo master via URL: ?master
+  if (location.search.includes('master')) {
+    try {
+      const res = await apiFetch(`${API}/equipes`);
+      S.equipes = await res.json();
+      renderEquipesMaster();
+    } catch (e) { console.warn('Equipes load failed:', e); }
+    hideLoading();
+    showScreen('screen-master-login');
+    return;
+  }
+
   // Restore session
   try {
     const saved = JSON.parse(localStorage.getItem('vfa_session') || '{}');
@@ -863,14 +1163,15 @@ async function boot() {
 
   // Load equipes
   try {
-    const res = await fetch(`${API}/equipes`);
+    const res = await apiFetch(`${API}/equipes`);
     S.equipes = await res.json();
     renderEquipes();
   } catch (e) {
     console.warn('Equipes load failed:', e);
   }
 
-  const authed = localStorage.getItem('vfa_authed') === 'true';
+  // Sem token = obrigatório fazer login (não basta o flag 'vfa_authed')
+  const authed = localStorage.getItem('vfa_authed') === 'true' && !!getAppToken();
   if (S.equipeId && S.membro && authed) {
     document.getElementById('equipe-badge').textContent = S.equipeNome || S.membro;
     loadOSList(); // carrega em background; updateHomeCounts() é chamado ao final
@@ -885,8 +1186,79 @@ async function boot() {
 }
 
 function trocarEquipe() {
+  if (S.masterMode) {
+    sairMasterMode();
+    return;
+  }
   localStorage.removeItem('vfa_authed');
+  setAppToken(null);
   showScreen('screen-login');
+}
+
+function renderEquipesMaster() {
+  const sel = document.getElementById('sel-master-equipe');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Selecione a equipe...</option>';
+  S.equipes.forEach(e => {
+    const o = document.createElement('option');
+    o.value = e._id || e.id;
+    o.textContent = e.nome;
+    sel.appendChild(o);
+  });
+}
+
+async function doMasterLogin() {
+  const senha    = document.getElementById('inp-master-senha').value;
+  const equipeId = document.getElementById('sel-master-equipe').value;
+  const errEl    = document.getElementById('master-login-error');
+  if (!senha)    { errEl.textContent = 'Digite a senha master'; errEl.style.display = ''; return; }
+  if (!equipeId) { errEl.textContent = 'Selecione a equipe';    errEl.style.display = ''; return; }
+  errEl.style.display = 'none';
+  showLoading('Verificando...');
+  try {
+    const r = await apiFetch(`${API}/auth/master-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ masterPassword: senha, equipeId }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      hideLoading();
+      errEl.textContent = data.error || 'Senha incorreta';
+      errEl.style.display = '';
+      return;
+    }
+    // Salva JWT master (admin pode visualizar como equipe escolhida)
+    if (data.token) setAppToken(data.token);
+    // Entra como a equipe em modo master (sem salvar no localStorage)
+    S.masterMode = true;
+    S.equipeId   = equipeId;
+    S.equipeNome = data.equipe?.nome || '';
+    S.membro     = 'Master';
+    // Mostra banner master
+    const banner = document.getElementById('master-banner');
+    document.getElementById('master-banner-equipe').textContent = S.equipeNome;
+    banner.style.display = '';
+    // Adiciona padding-top em todas as telas para não ficar sob o banner
+    document.querySelectorAll('.screen').forEach(s => s.style.paddingTop = '32px');
+    document.getElementById('equipe-badge').textContent = S.equipeNome;
+    loadOSList();
+    irParaHome();
+  } catch (e) {
+    hideLoading();
+    errEl.textContent = 'Erro de conexão. Tente novamente.';
+    errEl.style.display = '';
+  }
+}
+
+function sairMasterMode() {
+  S.masterMode = false;
+  S.equipeId = ''; S.equipeNome = ''; S.membro = '';
+  setAppToken(null);
+  document.getElementById('master-banner').style.display = 'none';
+  document.querySelectorAll('.screen').forEach(s => s.style.paddingTop = '');
+  document.getElementById('inp-master-senha').value = '';
+  showScreen('screen-master-login');
 }
 
 function renderEquipes() {
@@ -941,7 +1313,7 @@ async function doLogin() {
 
   showLoading('Verificando senha...');
   try {
-    const r = await fetch(`${API}/auth/login`, {
+    const r = await apiFetch(`${API}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ equipeId, senha }),
@@ -953,6 +1325,9 @@ async function doLogin() {
       errEl.style.display = '';
       return;
     }
+
+    // Salva JWT da equipe — todas as requisições subsequentes vão usar
+    if (data.token) setAppToken(data.token);
 
     const eq = S.equipes.find(e => (e._id || e.id) === equipeId);
     S.equipeId   = equipeId;
@@ -997,7 +1372,7 @@ async function trocarSenha() {
 
   showLoading('Salvando nova senha...');
   try {
-    const r = await fetch(`${API}/auth/change-password`, {
+    const r = await apiFetch(`${API}/auth/change-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ equipeId: S.equipeId, senhaAtual, novaSenha }),
@@ -1010,6 +1385,8 @@ async function trocarSenha() {
       return;
     }
 
+    // Atualiza token após troca de senha
+    if (data.token) setAppToken(data.token);
     localStorage.setItem('vfa_authed', 'true');
     loadOSList();
     if (isPrimeiroAcessoSemana()) {
@@ -1042,6 +1419,7 @@ function renderOSCard(os) {
   const pct      = calcOSPct(os);
   const statusOS = os.status || 'agendada';
   const mapsUrl  = buildMapsUrl(os);
+  const wazeUrl  = buildWazeUrl(os);
   const waUrl    = buildWaUrl(os);
   const isAguard = statusOS === 'aguardando_assinatura';
   const isReparo = (os.tipo || 'normal') === 'reparo';
@@ -1072,8 +1450,9 @@ function renderOSCard(os) {
       </div>
       <div style="font-size:11px;color:#6b7280;margin-top:2px">${concl}/${pontos.length} locais executados · ${pct}%</div>` : ''}
     ${(os.totalConsumoReal > 0) ? `<div style="font-size:11px;color:#6b7280;margin-top:4px">🧪 ${os.totalConsumoReal.toLocaleString('pt-BR',{minimumFractionDigits:1})}L registrado</div>` : ''}
-    ${(mapsUrl || waUrl) ? `<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap" onclick="event.stopPropagation()">
+    ${(mapsUrl || wazeUrl || waUrl) ? `<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap" onclick="event.stopPropagation()">
       ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" class="info-link link-maps" onclick="event.stopPropagation()">🗺️ Maps</a>` : ''}
+      ${wazeUrl ? `<a href="${wazeUrl}" target="_blank" class="info-link link-waze" onclick="event.stopPropagation()">🚗 Waze</a>` : ''}
       ${waUrl   ? `<a href="${waUrl}"   target="_blank" class="info-link link-wa"   onclick="event.stopPropagation()">💬 WhatsApp do Síndico</a>` : ''}
     </div>` : ''}
   </div>`;
@@ -1086,7 +1465,8 @@ function switchOSTab(tab) {
   S_osTabs.tabAtual = tab;
   ['andamento','agendadas','compartilhadas','concluidas'].forEach(t => {
     const el = document.getElementById('tab-' + t);
-    if (el) el.classList.toggle('active', t === tab);
+    if (!el) return;
+    el.classList.toggle('mini-active', t === tab);
   });
   renderOSListTab();
 }
@@ -1168,9 +1548,9 @@ async function loadOSList() {
 
   try {
     const [d1, d2, d3] = await Promise.all([
-      fetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}`).then(r=>r.json()).catch(()=>[]),
-      fetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}&historico=1`).then(r=>r.json()).catch(()=>[]),
-      fetch(`${API}/os/compartilhadas?equipeId=${encodeURIComponent(S.equipeId)}`).then(r=>r.json()).catch(()=>[]),
+      apiFetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}`).then(r=>r.json()).catch(()=>[]),
+      apiFetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}&historico=1`).then(r=>r.json()).catch(()=>[]),
+      apiFetch(`${API}/os/compartilhadas?equipeId=${encodeURIComponent(S.equipeId)}`).then(r=>r.json()).catch(()=>[]),
     ]);
     S_osTabs.ativas         = Array.isArray(d1) ? d1 : [];
     S_osTabs.concluidas     = Array.isArray(d2) ? d2 : [];
@@ -1196,7 +1576,7 @@ async function confirmarLancamentoSemanal() {
   marcarAcessoSemana();
   showLoading('Lançando estoque...');
   try {
-    const res = await fetch(`${API}/estoque-recebido`, {
+    const res = await apiFetch(`${API}/estoque-recebido`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ equipeId: S.equipeId, litros })
@@ -1231,7 +1611,7 @@ async function openOS(osId) {
   S.historicoReparos = [];
 
   try {
-    const res = await fetch(`${API}/os/${osId}`);
+    const res = await apiFetch(`${API}/os/${osId}`);
     const os  = await res.json();
     S.currentOS = os;
     document.getElementById('os-detail-title').textContent = `OS #${String(os.numero||'').padStart(3,'0')}`;
@@ -1240,7 +1620,7 @@ async function openOS(osId) {
 
     // Se é reparo, busca histórico em paralelo e re-renderiza quando chegar
     if ((os.tipo || 'normal') === 'reparo' && os.osOriginalId) {
-      fetch(`${API}/os/historico-reparos?osOriginalId=${encodeURIComponent(os.osOriginalId)}`)
+      apiFetch(`${API}/os/historico-reparos?osOriginalId=${encodeURIComponent(os.osOriginalId)}`)
         .then(r => r.json())
         .then(data => {
           S.historicoReparos = Array.isArray(data) ? data : [];
@@ -1259,6 +1639,12 @@ function buildMapsUrl(os) {
   const addr = [os.endereco, os.cidade].filter(Boolean).join(', ');
   if (!addr) return '';
   return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(addr);
+}
+
+function buildWazeUrl(os) {
+  const addr = [os.endereco, os.cidade].filter(Boolean).join(', ');
+  if (!addr) return '';
+  return 'https://waze.com/ul?q=' + encodeURIComponent(addr) + '&navigate=yes';
 }
 
 function buildWaUrl(os) {
@@ -1336,6 +1722,7 @@ function renderOSDetail() {
   const temFechamento = hojeTemFechamento(os);
 
   const mapsUrl = buildMapsUrl(os);
+  const wazeUrl = buildWazeUrl(os);
   const waUrl   = buildWaUrl(os);
 
   // Último fechamento registrado
@@ -1352,8 +1739,9 @@ function renderOSDetail() {
       ${os.endereco ? `<div style="font-size:13px;color:#6b7280">${os.endereco}${os.cidade?', '+os.cidade:''}</div>` : ''}
       ${os.dataInicio ? `<div style="font-size:13px;color:#6b7280;margin-top:2px">📅 ${formatDate(os.dataInicio)}${os.dataTermino?' → '+formatDate(os.dataTermino):''}</div>` : ''}
       ${os.tecnicoResponsavel ? `<div style="font-size:13px;color:#6b7280;margin-top:2px">👷 Técnico: <strong>${os.tecnicoResponsavel}</strong></div>` : ''}
-      ${(mapsUrl || waUrl) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      ${(mapsUrl || wazeUrl || waUrl) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
         ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" class="info-link link-maps">🗺️ Google Maps</a>` : ''}
+        ${wazeUrl ? `<a href="${wazeUrl}" target="_blank" class="info-link link-waze">🚗 Waze</a>` : ''}
         ${waUrl   ? `<a href="${waUrl}"   target="_blank" class="info-link link-wa">💬 WhatsApp do Síndico</a>`    : ''}
       </div>` : ''}
       ${pontos.length ? `<div class="progress-bar" style="margin-top:10px"><div class="progress-fill${pct===100?' done':''}" style="width:${pct}%"></div></div>
@@ -1361,6 +1749,10 @@ function renderOSDetail() {
       ${(os.totalConsumoReal > 0) ? `<div style="font-size:12px;color:#6b7280;margin-top:6px">🧪 ${os.totalConsumoReal.toLocaleString('pt-BR',{minimumFractionDigits:1})}L de GVF Seal registrado</div>` : ''}
       ${ultFd ? `<div style="font-size:11px;color:#6b7280;margin-top:4px">📅 Último fechamento: ${ultFd.data} — ${ultFd.litros}L</div>` : ''}
     </div>
+    ${pontos.length ? `<button onclick="abrirMapaServicoTotal()" style="width:100%;background:linear-gradient(135deg,#c45d12 0%,#e87722 50%,#f59340 100%);border:none;color:white;padding:14px;border-radius:14px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(232,119,34,0.35);display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:14px">
+      <span style="font-size:22px">🗺️</span>
+      <span>MAPA DE SERVIÇO TOTAL</span>
+    </button>` : ''}
     ${os.obs ? `<div class="alert alert-warning">📝 ${os.obs}</div>` : ''}
 
     ${jaConcluida ? `<div class="alert alert-success" style="margin-bottom:14px;text-align:center;font-weight:700;font-size:15px">✅ OS Concluída!</div>` : ''}
@@ -1576,6 +1968,141 @@ function abrirMapaServico() {
   document.body.insertAdjacentHTML('beforeend', html);
 }
 
+// ── Mapa de Serviço TOTAL: visão consolidada de toda a OS ───────────────────
+function abrirMapaServicoTotal() {
+  const os = S.currentOS;
+  if (!os) return;
+  const pontos = os.pontos || [];
+  const isReparoOS = (os.tipo || 'normal') === 'reparo';
+
+  // Totais agregados
+  let totalSubs = 0, feitosSubs = 0, totalFotosRef = 0, totalFotosAntes = 0, totalFotosDepois = 0;
+  pontos.forEach(p => {
+    const subs = p.subPontos || [];
+    totalSubs  += subs.length;
+    feitosSubs += subs.filter(s => s.feito).length;
+    totalFotosRef    += (p.fotosMedicao || p.fotosRef || p.fotos || []).length;
+    totalFotosAntes  += (p.fotosAntes  || []).length;
+    totalFotosDepois += (p.fotosDepois || []).length;
+  });
+  const pctGeral = totalSubs > 0 ? Math.round(feitosSubs/totalSubs * 100) : 0;
+
+  let html = `<div id="mapa-total-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;overflow-y:auto;padding:0">
+    <div style="background:white;min-height:100vh;max-width:560px;margin:0 auto">
+      <div style="position:sticky;top:0;z-index:5;background:linear-gradient(135deg,#c45d12,#e87722,#f59340);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 8px rgba(0,0,0,0.2)">
+        <div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:1.5px;color:rgba(255,255,255,0.85);text-transform:uppercase">Mapa de Serviço Total</div>
+          <div style="font-size:18px;font-weight:800;color:white;margin-top:2px">OS #${String(os.numero||'').padStart(3,'0')} — ${os.cliente || '—'}</div>
+        </div>
+        <button onclick="fecharMapaTotal()" style="background:rgba(255,255,255,0.2);border:none;border-radius:50%;width:36px;height:36px;font-size:20px;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">×</button>
+      </div>
+      <div style="padding:16px 20px 80px">`;
+
+  // Resumo geral
+  html += `<div style="background:linear-gradient(135deg,#fff7ed,#fed7aa30);border:1px solid #fed7aa;border-radius:12px;padding:14px;margin-bottom:18px">
+    <div style="display:flex;justify-content:space-around;text-align:center;flex-wrap:wrap;gap:10px">
+      <div><div style="font-size:22px;font-weight:900;color:#e87722">${pontos.length}</div><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase">Locais</div></div>
+      <div><div style="font-size:22px;font-weight:900;color:#e87722">${feitosSubs}/${totalSubs}</div><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase">Pontos</div></div>
+      <div><div style="font-size:22px;font-weight:900;color:${pctGeral===100?'#16a34a':'#e87722'}">${pctGeral}%</div><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase">Concluído</div></div>
+      ${totalFotosRef+totalFotosAntes+totalFotosDepois > 0 ? `<div><div style="font-size:22px;font-weight:900;color:#e87722">${totalFotosRef+totalFotosAntes+totalFotosDepois}</div><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase">Fotos</div></div>` : ''}
+    </div>
+    <div style="background:#fef3c7;border-radius:99px;height:8px;overflow:hidden;margin-top:12px">
+      <div style="background:${pctGeral===100?'#16a34a':'#e87722'};height:100%;width:${pctGeral}%;transition:width 0.3s"></div>
+    </div>
+  </div>`;
+
+  // Cada local com seu detalhamento
+  pontos.forEach((p, idx) => {
+    const subs = p.subPontos || [];
+    const feitos = subs.filter(s => s.feito).length;
+    const pct = subs.length > 0 ? Math.round(feitos/subs.length * 100) : 0;
+    const concluidoLocal = (p.statusLocal||p.status) === 'concluido' || (subs.length > 0 && feitos === subs.length);
+    const fotosRef    = p.fotosMedicao || p.fotosRef || p.fotos || [];
+    const fotosAntes  = p.fotosAntes  || [];
+    const fotosDepois = p.fotosDepois || [];
+    const corStatus = concluidoLocal ? '#16a34a' : (feitos > 0 ? '#e87722' : '#9ca3af');
+
+    html += `<div style="background:white;border:2px solid ${concluidoLocal?'#86efac':'#e5e7eb'};border-radius:12px;padding:14px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <div style="width:28px;height:28px;border-radius:50%;background:${corStatus};color:white;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">${idx+1}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:15px;font-weight:800;color:#1a202c;line-height:1.2">${p.nome || p.local || `Local ${idx+1}`}</div>
+          ${p.andar ? `<div style="font-size:11px;color:#6b7280">${p.andar}</div>` : ''}
+        </div>
+        ${concluidoLocal ? `<span style="background:#dcfce7;color:#166534;font-size:10px;font-weight:800;padding:3px 8px;border-radius:99px">✓ FEITO</span>` : ''}
+      </div>`;
+
+    // Progresso de sub-pontos
+    if (subs.length > 0) {
+      html += `<div style="background:#f3f4f6;border-radius:99px;height:6px;overflow:hidden;margin-bottom:10px">
+        <div style="background:${corStatus};height:100%;width:${pct}%"></div>
+      </div>`;
+      html += `<div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280;margin-bottom:8px">
+        <span>${feitos}/${subs.length} executados</span><span style="font-weight:700">${pct}%</span>
+      </div>`;
+      // Lista dos sub-pontos
+      html += subs.map(sp => `<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:6px;background:${sp.feito?'#f0fdf4':'#fafafa'};margin-bottom:4px">
+        <span style="font-size:14px;color:${sp.feito?'#16a34a':'#cbd5e1'};flex-shrink:0;line-height:1">${sp.feito?'☑':'☐'}</span>
+        <span style="font-size:12px;color:${sp.feito?'#16a34a':'#4b5563'};line-height:1.3;${sp.feito?'':'font-weight:500'}">${sp.desc}</span>
+      </div>`).join('');
+    } else {
+      html += `<div style="font-size:12px;color:#9ca3af;font-style:italic;padding:6px 0">Sem sub-pontos cadastrados</div>`;
+    }
+
+    // Fotos (3 categorias)
+    const renderFotosBloco = (titulo, fotos, borderColor) => {
+      if (!fotos.length) return '';
+      let h = `<div style="margin-top:10px"><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">${titulo} (${fotos.length})</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">`;
+      fotos.forEach(f => {
+        const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.thumb || f.full || '') : (f || '');
+        if (!src) return;
+        const safeSrc = src.replace(/'/g, "\\'");
+        h += `<img src="${src}" onclick="abrirLightboxFoto('${safeSrc}')" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1.5px solid ${borderColor};cursor:zoom-in">`;
+      });
+      h += `</div></div>`;
+      return h;
+    };
+    html += renderFotosBloco('📷 Fotos da Medição', fotosRef, '#cbd5e1');
+    html += renderFotosBloco(isReparoOS ? '📷 Foto do Reparo' : '📷 Antes', fotosAntes, '#fca5a5');
+    html += renderFotosBloco('📸 Depois', fotosDepois, '#86efac');
+
+    if (p.obs) {
+      html += `<div style="margin-top:10px;background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:8px 10px">
+        <div style="font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase">📝 Observação</div>
+        <div style="font-size:12px;color:#78350f;margin-top:2px">${p.obs}</div>
+      </div>`;
+    }
+
+    html += `</div>`;
+  });
+
+  html += `</div>
+      <div style="position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid #e5e7eb;padding:12px 20px;box-shadow:0 -2px 10px rgba(0,0,0,0.1);max-width:560px;margin:0 auto">
+        <button onclick="fecharMapaTotal()" style="width:100%;padding:12px;background:#e87722;border:none;border-radius:10px;font-size:15px;font-weight:700;color:white;cursor:pointer">Fechar</button>
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+  document.body.style.overflow = 'hidden';
+}
+
+function fecharMapaTotal() {
+  const m = document.getElementById('mapa-total-modal');
+  if (m) m.remove();
+  document.body.style.overflow = '';
+}
+
+// Lightbox simples para foto em tela cheia
+function abrirLightboxFoto(src) {
+  const html = `<div id="foto-lightbox" onclick="this.remove()" style="position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out">
+    <img src="${src}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 4px 30px rgba(0,0,0,0.5)">
+    <button onclick="event.stopPropagation();document.getElementById('foto-lightbox').remove()" style="position:fixed;top:20px;right:20px;background:rgba(255,255,255,0.2);border:none;border-radius:50%;width:44px;height:44px;font-size:24px;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center">×</button>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
 async function acaoReabrir() {
   if (!confirm('Reabrir este local para edição?')) return;
   if (await patchPonto('reabrir')) {
@@ -1588,7 +2115,7 @@ async function reabrirOS() {
   if (!confirm('Reabrir a OS? Ela voltará ao status "Em Andamento" e precisará ser finalizada novamente.')) return;
   try {
     showLoading('Reabrindo OS...');
-    const res = await fetch(`${API}/os/${S.currentOS._id}/status`, {
+    const res = await apiFetch(`${API}/os/${S.currentOS._id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'em_andamento' })
@@ -1783,7 +2310,7 @@ async function patchPonto(action, extra = {}) {
   const idx = S.currentPontoIdx;
   showLoading('Salvando...');
   try {
-    const res = await fetch(`${API}/os/${os._id}/pontos/${idx}`, {
+    const res = await apiFetch(`${API}/os/${os._id}/pontos/${idx}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, membro: S.membro, ...extra })
@@ -1847,7 +2374,7 @@ async function _syncToggleSubponto(spIdx, expectedFeito, spRef) {
   delete _toggleDebounce[key];
   const anterior = !expectedFeito; // estado antes do toggle local
   try {
-    const res = await fetch(`${API}/os/${S.currentOS._id}/pontos/${S.currentPontoIdx}`, {
+    const res = await apiFetch(`${API}/os/${S.currentOS._id}/pontos/${S.currentPontoIdx}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'toggle_subponto', spIdx, membro: S.membro })
@@ -1981,7 +2508,7 @@ async function finalizarReparoDireto() {
   if (!confirm('Finalizar este reparo? A OS será marcada como concluída.')) return;
   showLoading('Finalizando reparo...');
   try {
-    const res = await fetch(`${API}/os/${S.currentOS._id}/status`, {
+    const res = await apiFetch(`${API}/os/${S.currentOS._id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'concluida' })
@@ -2109,7 +2636,7 @@ async function confirmarAssinatura() {
   const assinaturaBase64 = canvas.toDataURL('image/png');
   showLoading('Finalizando OS...');
   try {
-    const res = await fetch(`${API}/os/${S.currentOS._id}/finalizar`, {
+    const res = await apiFetch(`${API}/os/${S.currentOS._id}/finalizar`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2141,7 +2668,7 @@ async function finalizarSemAssinatura() {
   showLoading('Finalizando OS...');
   const errEl = document.getElementById('sig-error');
   try {
-    const res = await fetch(`${API}/os/${S.currentOS._id}/finalizar`, {
+    const res = await apiFetch(`${API}/os/${S.currentOS._id}/finalizar`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2192,7 +2719,7 @@ async function confirmarConsumo() {
   fecharConsumoModal();
   showLoading('Registrando...');
   try {
-    const res = await fetch(`${API}/os/${S.currentOS._id}/consumo`, {
+    const res = await apiFetch(`${API}/os/${S.currentOS._id}/consumo`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ litros, membro: S.membro })
@@ -2231,7 +2758,7 @@ async function confirmarFecharDia() {
   try {
     const body = { litros, membro: S.membro };
     if (injetores > 0) body.injetores = injetores;
-    const res = await fetch(`${API}/os/${S.currentOS._id}/fechar-dia`, {
+    const res = await apiFetch(`${API}/os/${S.currentOS._id}/fechar-dia`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -2258,7 +2785,7 @@ async function abrirTelaProduto() {
   document.getElementById('prod-add-litros').value = '';
   document.getElementById('prod-add-error').style.display = 'none';
   try {
-    const res = await fetch(`${API}/estoque-summary?equipeId=${encodeURIComponent(S.equipeId)}`);
+    const res = await apiFetch(`${API}/estoque-summary?equipeId=${encodeURIComponent(S.equipeId)}`);
     const d = await res.json();
     document.getElementById('produto-spinner').style.display = 'none';
     if (!res.ok) { showToast('⚠️ Erro ao carregar estoque'); showScreen('screen-home'); return; }
@@ -2299,7 +2826,7 @@ async function confirmarAdicionarProduto() {
   errEl.style.display = 'none';
   showLoading('Registrando produto...');
   try {
-    const res = await fetch(`${API}/estoque-recebido`, {
+    const res = await apiFetch(`${API}/estoque-recebido`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ equipeId: S.equipeId, litros })
@@ -2334,7 +2861,7 @@ async function confirmarEstoqueRecebido() {
   fecharEstoqueModal();
   showLoading('Lançando estoque...');
   try {
-    const res = await fetch(`${API}/estoque-recebido`, {
+    const res = await apiFetch(`${API}/estoque-recebido`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ equipeId: S.equipeId, litros })
@@ -2366,8 +2893,8 @@ async function carregarHistorico() {
   spinner.style.display = ''; content.innerHTML = '';
   try {
     const [rConcl, rAtivas] = await Promise.all([
-      fetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}&historico=1`),
-      fetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}`)
+      apiFetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}&historico=1`),
+      apiFetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}`)
     ]);
     S_historico.concluidas = await rConcl.json();
     S_historico.ativas     = await rAtivas.json();
@@ -3074,7 +3601,7 @@ async function salvarCroqui() {
   if (!p) { showToast('Erro: ponto não encontrado'); return; }
   showLoading('Salvando croqui...');
   try {
-    const res = await fetch(`${API}/os/${S.currentOS._id}/pontos/${CQ.pontoIdx}`, {
+    const res = await apiFetch(`${API}/os/${S.currentOS._id}/pontos/${CQ.pontoIdx}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'save_croqui', croquiBase64: base64, otimizado: CQ.iaOtimizado, membro: S.membro })

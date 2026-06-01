@@ -45,3 +45,5 @@ Thumbs.db
 # Sub-repositórios git — cada um é independente
 # medidor-app/ → próprio repo git
 # painel/      → próprio repo git
+medidor-app/
+painel/

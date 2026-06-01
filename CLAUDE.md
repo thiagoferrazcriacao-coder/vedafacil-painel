@@ -6,20 +6,33 @@
 
 Estas regras são **invioláveis** e se sobrepõem a qualquer outra instrução neste arquivo.
 
-### ❌ NUNCA fazer — sem exceções
+### 🛡️ Camadas de proteção ativas
+
+| Camada | O que protege | Onde fica |
+|--------|--------------|-----------|
+| **1 — Claude settings (projeto)** | Bloqueia comandos destrutivos antes de executar | `.claude/settings.json` |
+| **2 — Claude settings (global)** | Proteção base em qualquer projeto | `~/.claude/settings.json` |
+| **3 — Git hook pre-commit** | Bloqueia commits com credenciais e arquivos grandes | `.git/hooks/pre-commit` |
+| **4 — Git hook pre-push** | Bloqueia force push e avisa push em main | `.git/hooks/pre-push` |
+| **5 — MongoDB usuário restrito** | Usuário do app sem permissão de dropDatabase | MongoDB Atlas *(configurar manualmente)* |
+| **6 — GitHub branch protection** | Impede push direto em main sem revisão | GitHub Settings *(configurar manualmente)* |
+
+### ❌ NUNCA fazer — sem exceções (bloqueado automaticamente pelo settings.json)
 
 | Ação proibida | Motivo |
 |---------------|--------|
-| `git push --force` / `git push -f` | Apaga histórico no repositório remoto, irreversível |
+| `git push --force` / `git push -f` / `--force-with-lease` | Apaga histórico no repositório remoto, irreversível |
 | `git reset --hard` | Descarta commits locais não publicados |
 | `git branch -D main` ou `-d main` | Apaga a branch principal |
-| `git checkout -- .` / `git restore .` | Descarta todas as alterações locais |
-| `git clean -f` | Remove arquivos não rastreados irreversivelmente |
-| `db.dropDatabase()` / `dropDatabase()` | Apaga TODO o banco de produção |
+| `git checkout -- .` / `git restore .` / `git checkout -- *` | Descarta todas as alterações locais |
+| `git clean -f` / `git clean -fd` | Remove arquivos não rastreados irreversivelmente |
+| `git rebase -i` | Reescreve histórico de commits |
+| `db.dropDatabase()` / `dropDatabase()` / `drop()` / `dropCollection()` | Apaga coleção ou banco inteiro |
 | `deleteMany({})` com filtro vazio | Apaga TODOS os documentos de uma coleção |
-| `vercel project rm` / `vercel remove` | Exclui o projeto Vercel (perde env vars e histórico) |
+| `vercel project rm` / `vercel remove` / `vercel alias rm` | Exclui projeto Vercel ou alias de produção |
 | `vercel env rm` / `vercel env remove` | Remove variáveis de ambiente de produção |
-| Apagar arquivos de `painel/src/`, `medidor-app/`, `aplicador-app/` com `rm -rf` | Destrói código-fonte |
+| `rm -rf painel` / `rm -rf medidor-app` / `rm -rf aplicador-app` / `rm -rf .` | Destrói código-fonte |
+| `rd /s /q` em diretórios do projeto (Windows) | Equivalente ao rm -rf no Windows |
 | Alterar `.vercel/project.json` | Redireciona deploy para projeto errado = banco errado |
 
 ### ⚠️ Sempre perguntar antes de executar
@@ -28,7 +41,7 @@ Estas regras são **invioláveis** e se sobrepõem a qualquer outra instrução 
 - Fazer deploy em produção **sem ter rodado os testes** (`npm test`)
 - Alterar variáveis de ambiente no Vercel
 - Criar ou deletar índices no MongoDB
-- Alterar o schema de colações com dados existentes
+- Alterar o schema de coleções com dados existentes
 - Alterar arquivos de configuração: `vercel.json`, `vite.config.js`, `package.json` (deps), `.env`
 
 ### ✅ Fluxo obrigatório para qualquer mudança de código
@@ -53,6 +66,7 @@ Estas regras são **invioláveis** e se sobrepõem a qualquer outra instrução 
 - Nunca exibir valores de env vars completos no chat ou em logs
 - Nunca commitar `.env`, `*_b64.txt`, ou arquivos com tokens
 - O `.gitignore` deve sempre conter: `node_modules/`, `dist/`, `.env`, `*_b64.txt`, `*.local`
+- O hook pre-commit bloqueia automaticamente commits com esses arquivos
 
 ---
 
@@ -68,6 +82,7 @@ Sistema completo para a empresa Vedafácil (impermeabilização de estruturas de
 
 - Razão Social: T. R. FERRAZ TECNOLOGIA EM IMPERMEABILIZACAO EIRELI ME
 - Nome fantasia: Vedafácil
+- **⚠️ Em mensagens WhatsApp, textos do sistema e código novo: escrever sempre `Vedafacil` (SEM acento) — é assim que o cliente quer.**
 - CNPJ: 23.606.470/0001-07
 - Endereço: Rua Professora Margarida Fialho Thompson Leite, 670 — Residencial Cristo Redentor
 - Cidade: Barra Mansa / UF: RJ — CEP: 27323-755
@@ -220,7 +235,8 @@ backgroundImage: {
     photoInput.dataset.loc = idx;
     photoInput.addEventListener('change', handleLocationPhotoSelect); // direto no elemento
     ```
-- Service Worker: versão atual **v16** (`vedafacil-medidor-v16`) — incrementar a cada deploy que altera `index.html` ou `sw.js`
+- Service Worker: versão atual **v17** (`vedafacil-medidor-v17`) — incrementar a cada deploy que altera `index.html` ou `sw.js`
+- Status `reaberta`: medição reaberta pelo painel usa PUT em vez de POST ao reenviar
 
 ### App Aplicador (`aplicador-app/index.html`) — Croqui Canvas
 
@@ -344,7 +360,7 @@ Calculados via `useMemo` a partir dos contratos filtrados.
 - Armazenado em `fechamentosDia[*].injetores`
 - Toast mostra: `🌅 Dia fechado! 12.5L · 48 injetores`
 
-## Status do Projeto (2026-04-30)
+## Status do Projeto (2026-05-13)
 
 ### Painel: Agenda de Obras (`/agenda`)
 
@@ -383,9 +399,61 @@ Calculados via `useMemo` a partir dos contratos filtrados.
 - Equipes: card de obra atual em tempo real (endpoint `/api/equipes/localizacao`)
 - Google OAuth: Client ID + Secret sem trailing newline, `.trim()` no servidor, redirect direto (sem pre-check)
 - Logo Vedafácil na sidebar do painel; gradiente laranja
+- Dívidas técnicas: sanitizeImages() wired, lib/helpers.js extraído, 44 testes Vitest passando
+- Governança: .claude/settings.json, git hooks, backup script, CLAUDE.md, MongoDB user restrito
+- Medidor: `bairro` field, CEP auto-fill com bairro, status `reaberta` + PUT reenvio (SW v17)
+- Painel: PUT /api/medicoes/:id, botão Reabrir na MedicaoDetailPage
+- Painel: OrcamentoFormPage — removido origem/sigla, validade type=number, bairro field, elaboradoPor auto-fill, andaime radio, propostas com valores calculados, seção 5 completa com totais
+- Painel: MedicoesPage — modal Nova Medição Manual + endpoint POST /api/medicoes/manual
+- Painel: OrcamentosPage — botões PDF/Duplicar/Aprovar com ícones e cores
+- Painel: ContratosPage — botões rápidos Pend./Assinado por linha
+- Painel: ContratoFormPage — campo bairro
+- Painel: GarantiasPage — modal de edição completo
+- Painel: Croqui — vista agrupada por OS com botão PDF, toggle galeria/OS
+- Painel: Equipes/Ranking — score melhorado (+10 obra concluída, +3 reparo próprio), métricas Obras Exec. e Reparos Próprios
+- Painel: Roles — operador (sem Config/Users/Lixeira), login com senha, ProtectedRoute adminOnly
+- App Aplicador: lightbox fullscreen de fotos (overlay in-app, prev/next, ESC), SW v8
+- App Aplicador: debounce 400ms no toggleSubponto
+- App Aplicador: reparo — sem croqui, fotos do problema exibidas no local
+- Backend: /api/me endpoint, numMedicao auto-increment, PUT medicoes/:id, manual medicao, ranking melhorado, role operador
+- Aplicador PWA: toolbar de croqui em 2 linhas (sem scroll horizontal), SW v22
+- Aplicador PWA: ferramenta de texto refeita com overlay arrastável + rotacionável (⠿ arrastar + ↻ handle)
+- Aplicador PWA: otimização IA croqui via `gemini-2.5-flash` → SVG vetorial (linhas retas, círculos perfeitos)
+  - viewBox usa dimensões reais do canvas; escala `contain` ao renderizar (sem distorção no celular)
+  - Fallback: alto contraste local se Gemini indisponível
+  - GEMINI_API_KEY configurada no Vercel (Nível 1, faturamento ativo)
+- Aplicador PWA: bug fix `croquiOtimizado` → ao salvar manualmente, campo zerado no server (evita carregar versão IA antiga)
+- Aplicador PWA: bug fix SVG/imagem IA desenhada em coords físicas (canvas.width) em vez de CSS — corrigido para W/H = canvas/dpr
+- Painel: PDF do Contrato inclui o Orçamento vinculado como ANEXO CONTRATUAL nas últimas páginas
+  - Gerado pelo endpoint `/api/contratos/:id/pdf` usando `c.orcamentoId`
+  - Separador laranja "ANEXO CONTRATUAL — Orçamento Nº XXXX" entre contrato e orçamento
+
+### App Aplicador — Ferramenta de Texto (croqui)
+
+- `openTextOverlay(x, y)` abre overlay flutuante no ponto clicado
+- Barra laranja "⠿ ARRASTAR" no topo → arrastar para mover
+- Handle ↻ (círculo laranja acima) → arrastar para girar em qualquer ângulo
+- Botões ✓ OK (confirma + grava no canvas) e ✕ (cancela)
+- Enter = confirmar, Escape = cancelar
+- Rotação: `_TXT.rot = atan2(mouseY - centerY, mouseX - centerX) + π/2`
+- Commit usa `ctx.translate(_TXT.x, _TXT.y)` + `ctx.rotate(_TXT.rot)`
+- `getCroquiPos(e, canvas)` como função global para `handleTextTool`
+
+### App Aplicador — Croqui IA (`gemini-2.5-flash`)
+
+- Modelo único disponível para nova conta: `gemini-2.5-flash` (outros 404)
+- SVG como estratégia primária: texto + visão → prompt CAD agressivo
+- viewBox = `canvasW × canvasH` (proporção real do celular, não 1000×1000 fixo)
+- Cliente envia `canvasW, canvasH` no body da requisição
+- Renderização: `_drawOnCanvas(img)` com contain scaling + centralização
+- `croquiOtimizado` limpo quando salva manualmente (`otimizado: false`)
 
 ### 🔲 Pendente / A verificar
 - Envio de orçamento ("não passa dessa parte") — bug reportado, não investigado completamente
-- Adicionar `GEMINI_API_KEY` ao Vercel (painel) para ativar otimização de croqui com IA
 - OS Compartilhada: registro parcial de consumo quando redirecionado
-- PWA Aplicador: redesign completo — cards maiores com botões de ação diretos visíveis sem abrir a OS
+- MongoDB Atlas: criar usuário `vedafacil_app` com permissão `readWrite` only (manual — sem dropDatabase)
+- 5.3: Rebuild PDF garantia (aguardando leitura do PDF modelo)
+- 3.9: Orçamento Mínimo PDF (aguardando leitura do PDF modelo)
+- 12.3 / 12.4: Melhorias na aba Compartilhadas e layout do Aplicador
+- 12.6: Histórico de execução em reparo
+- 7.1: Mapa completo de sub-itens em ReparosPage

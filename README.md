@@ -35,14 +35,13 @@ vedafacil/
 5. Clique em **"Create Deployment"**
 6. Na tela "Connect", crie um usuário:
    - Username: `vedafacil`
-   - Password: anote bem (ex: `Vedafacil2024!`)
+   - Password: **gere uma senha aleatória forte** (use 1Password / Bitwarden / gerador) — NUNCA use exemplos prontos
    - Clique **"Create Database User"**
 7. Em "Where would you like to connect from?" → escolha **"My Local Environment"** → adicione `0.0.0.0/0` no IP (permite conexão de qualquer lugar)
 8. Clique **"Finish and Close"** → **"Go to Overview"**
-9. Clique em **"Connect"** → **"Drivers"** → copie a string que começa com `mongodb+srv://...`
-   - Substitua `<password>` pela senha que você criou
-   - Ficará algo como: `mongodb+srv://vedafacil:Vedafacil2024!@cluster0.xxxxx.mongodb.net/vedafacil?retryWrites=true&w=majority`
-   - **Guarde essa string** — será usada no Vercel
+9. Clique em **"Connect"** → **"Drivers"** → copie a connection string fornecida pelo Atlas
+   - Substitua `<password>` pela senha que você criou no passo anterior
+   - **Guarde essa string** — será usada no Vercel como variável `MONGODB_URI`
 
 ---
 
