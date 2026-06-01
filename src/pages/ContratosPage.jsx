@@ -112,6 +112,35 @@ export default function ContratosPage() {
     }
   }
 
+  // Admin: alterar o número de um contrato (uso para correção/integração)
+  const handleAlterarNumero = async (e, c) => {
+    e.stopPropagation()
+    const atual = c.numero || ''
+    const entrada = window.prompt(
+      `Alterar número do contrato\n\nCliente: ${c.cliente || '—'}\nNúmero atual: ${atual}\n\nDigite o novo número:`,
+      String(atual)
+    )
+    if (entrada === null) return // cancelou
+    const novo = parseInt(String(entrada).trim(), 10)
+    if (!Number.isFinite(novo) || novo <= 0) {
+      alert('Número inválido. Use um número inteiro positivo.')
+      return
+    }
+    if (novo === c.numero) return // sem mudança
+    // Verifica duplicidade na lista local
+    const dup = contratos.find(x => (x.id || x._id) !== (c.id || c._id) && x.numero === novo)
+    if (dup) {
+      const ok = window.confirm(`⚠️ Já existe outro contrato com o número ${novo} (cliente: ${dup.cliente}).\n\nDeseja continuar mesmo assim?`)
+      if (!ok) return
+    }
+    try {
+      await api.updateContrato(c.id || c._id, { numero: novo })
+      setContratos(prev => prev.map(x => (x.id || x._id) === (c.id || c._id) ? { ...x, numero: novo } : x))
+    } catch (err) {
+      alert('Erro ao alterar número: ' + err.message)
+    }
+  }
+
   useEffect(() => {
     api.getContratos()
       .then(setContratos)
@@ -351,9 +380,19 @@ export default function ContratosPage() {
                       />
                     </div>
                   )}
-                  <span className="font-mono text-xs text-gray-400 w-14 flex-shrink-0">
-                    #{String(c.numero || '').padStart(4, '0')}
-                  </span>
+                  {isAdmin ? (
+                    <button
+                      onClick={e => handleAlterarNumero(e, c)}
+                      title="Clique para alterar o número do contrato"
+                      className="font-mono text-xs text-gray-400 w-14 flex-shrink-0 hover:text-orange-600 hover:bg-orange-50 rounded px-1 py-0.5 transition-colors text-left"
+                    >
+                      #{String(c.numero || '').padStart(4, '0')}
+                    </button>
+                  ) : (
+                    <span className="font-mono text-xs text-gray-400 w-14 flex-shrink-0">
+                      #{String(c.numero || '').padStart(4, '0')}
+                    </span>
+                  )}
                   <span className="text-xs text-gray-500 w-24 flex-shrink-0 whitespace-nowrap">
                     {new Date(c.createdAt).toLocaleDateString('pt-BR')}
                   </span>
@@ -366,9 +405,16 @@ export default function ContratosPage() {
                   <span className="font-semibold text-gray-800 w-28 text-right flex-shrink-0">
                     {fmt(c.totalLiquido)}
                   </span>
-                  <span className={`badge ${st.color} w-32 text-center flex-shrink-0`}>
-                    {st.label}
-                  </span>
+                  <div className="flex flex-col gap-1 w-32 flex-shrink-0 items-center">
+                    <span className={`badge ${st.color} w-full text-center`}>
+                      {st.label}
+                    </span>
+                    {c.origem === 'integracao' && (
+                      <span className="badge bg-orange-500 text-white w-full text-center text-xs font-bold">
+                        🔗 INTEG.
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs text-gray-400 w-24 text-right flex-shrink-0 hidden lg:block">
                     {ultimaData}
                   </span>

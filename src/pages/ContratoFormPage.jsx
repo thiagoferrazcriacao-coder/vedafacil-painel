@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../api/client.js'
+import ContratoEditorModal from '../components/ContratoEditorModal.jsx'
 
 const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
 
@@ -67,6 +68,7 @@ export default function ContratoFormPage() {
   const [saved, setSaved] = useState(false)
   const [uploadingArquivo, setUploadingArquivo] = useState(false)
   const [viewMode, setViewMode] = useState(() => new URLSearchParams(location.search).get('view') === '1')
+  const [showEditor, setShowEditor] = useState(false)
 
   useEffect(() => {
     api.getContrato(id)
@@ -89,7 +91,12 @@ export default function ContratoFormPage() {
     setSaving(true)
     setError('')
     try {
-      const updated = await api.updateContrato(id, c)
+      // IMPORTANTE: não enviar textoPersonalizado/textoPersonalizadoAt pelo form —
+      // esses campos são gerenciados exclusivamente pelo ContratoEditorModal.
+      // Se fossem enviados aqui, um estado desatualizado de `c` poderia sobrescrever
+      // as edições feitas no editor do PDF.
+      const { textoPersonalizado: _tp, textoPersonalizadoAt: _tpa, ...formData } = c
+      const updated = await api.updateContrato(id, formData)
       setC(updated)
       setSaved(true)
     } catch (err) {
@@ -97,6 +104,25 @@ export default function ContratoFormPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  // Salva os dados do formulário e abre o PDF
+  const handleGerarPdf = async () => {
+    setSaving(true)
+    setError('')
+    try {
+      // Não enviar textoPersonalizado/textoPersonalizadoAt — são gerenciados pelo editor de PDF
+      const { textoPersonalizado: _tp, textoPersonalizadoAt: _tpa, ...formData } = c
+      const updated = await api.updateContrato(id, formData)
+      setC(updated)
+      setSaved(true)
+    } catch (err) {
+      setError(err.message)
+      setSaving(false)
+      return
+    }
+    setSaving(false)
+    window.open(api.getContratoPdfUrl(id), '_blank')
   }
 
   const handleUpdateStatus = async (newStatus) => {
@@ -285,11 +311,20 @@ export default function ContratoFormPage() {
             </button>
           )}
           <button
-            onClick={() => window.open(api.getContratoPdfUrl(id), '_blank')}
+            onClick={handleGerarPdf}
+            disabled={saving}
             className="btn-secondary"
           >
-            Gerar PDF
+            {saving ? '💾 Salvando...' : !saved ? '💾 Salvar + PDF' : 'Gerar PDF'}
           </button>
+          {id && id !== 'novo' && (
+            <button
+              onClick={() => setShowEditor(true)}
+              className="flex items-center gap-1.5 bg-purple-50 text-purple-700 border border-purple-300 rounded-lg px-3 py-2 text-sm font-medium hover:bg-purple-100 transition-colors"
+            >
+              ✏️ Editar PDF
+            </button>
+          )}
           <button
             onClick={() => window.open(api.getGarantiaPdfUrl(id), '_blank')}
             className="btn-secondary"
@@ -819,9 +854,17 @@ export default function ContratoFormPage() {
             {saving ? 'Salvando...' : 'Salvar'}
           </button>
         )}
-        <button onClick={() => window.open(api.getContratoPdfUrl(id), '_blank')} className="btn-secondary">
-          Gerar PDF
+        <button onClick={handleGerarPdf} disabled={saving} className="btn-secondary">
+          {saving ? '💾 Salvando...' : !saved ? '💾 Salvar + PDF' : 'Gerar PDF'}
         </button>
+        {id && id !== 'novo' && (
+          <button
+            onClick={() => setShowEditor(true)}
+            className="flex items-center gap-1.5 bg-purple-50 text-purple-700 border border-purple-300 rounded-lg px-4 py-2 text-sm font-medium hover:bg-purple-100 transition-colors"
+          >
+            ✏️ Editar PDF
+          </button>
+        )}
         <button onClick={() => window.open(api.getGarantiaPdfUrl(id), '_blank')} className="btn-secondary">
           Cert. Garantia
         </button>
@@ -835,6 +878,21 @@ export default function ContratoFormPage() {
           📋 OS
         </button>
       </div>
+
+      {/* Modal de edição do texto do PDF */}
+      {showEditor && id && id !== 'novo' && (
+        <ContratoEditorModal
+          contratoId={id}
+          onClose={() => setShowEditor(false)}
+          onSaved={() => {
+            setShowEditor(false)
+            // Recarrega o contrato para que c.textoPersonalizado fique sincronizado.
+            // Sem isso, se o usuário salvar o formulário depois de editar o PDF,
+            // o form enviaria o textoPersonalizado antigo (null) e sobrescreveria a edição.
+            api.getContrato(id).then(setC).catch(console.error)
+          }}
+        />
+      )}
     </div>
   )
 }

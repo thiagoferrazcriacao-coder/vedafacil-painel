@@ -261,6 +261,11 @@ export default function OrcamentosPage() {
                         ✉️ CLIENTE
                       </span>
                     )}
+                    {o.origem === 'integracao' && (
+                      <span className="badge bg-orange-500 text-white w-full text-center text-xs font-bold">
+                        🔗 INTEG.
+                      </span>
+                    )}
                   </div>
                   <span className="text-xs text-gray-400 w-16 text-center flex-shrink-0">
                     {o.medicaoId ? (

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
 import { resolvePhotoSrc } from '../utils/photos.js'
+import { useAuth } from '../App.jsx'
 
 // Comprime imagem para base64 (máx 800px, qualidade 0.65)
 function compressImage(file) {
@@ -28,9 +29,21 @@ function compressImage(file) {
   })
 }
 
+const CAMPOS_MEDIDAS = ['trinca', 'juntaFria', 'ralo', 'juntaDilat', 'ferragem', 'cortina', 'juntaGerber']
+const LABELS_MEDIDAS = {
+  trinca: 'Trincas (m)', juntaFria: 'Juntas Frias (m)', ralo: 'Ralos (unid)',
+  juntaDilat: 'Juntas Dilatação (m)', ferragem: 'Trat. Ferragens (m)', cortina: 'Cortina (m²)',
+  juntaGerber: 'Juntas Gerber (m)'
+}
+
+function initNewLocal() {
+  return { nome: '', andar: '', trinca: 0, juntaFria: 0, ralo: 0, juntaDilat: 0, ferragem: 0, cortina: 0, juntaGerber: 0, fotos: [] }
+}
+
 export default function MedicaoDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [medicao, setMedicao] = useState(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -43,6 +56,12 @@ export default function MedicaoDetailPage() {
   const [processandoAlteracao, setProcessandoAlteracao] = useState(false)
   const [lightbox, setLightbox] = useState(null) // { src, list, idx }
   const fileInputRefs = useRef({})
+
+  // ── Adicionar local ──────────────────────────────────────────────────────────
+  const [addingNewLocal, setAddingNewLocal] = useState(false)
+  const [newLocal, setNewLocal] = useState(null)
+  const [savingNewLocal, setSavingNewLocal] = useState(false)
+  const newLocalFileRef = useRef(null)
 
   useEffect(() => {
     api.getMedicao(id)
@@ -61,6 +80,8 @@ export default function MedicaoDetailPage() {
     setEditData(JSON.parse(JSON.stringify(medicao)))
     setEditing(false)
     setError('')
+    setAddingNewLocal(false)
+    setNewLocal(null)
   }
 
   const handleSave = async () => {
@@ -130,6 +151,39 @@ export default function MedicaoDetailPage() {
       locais[locIdx] = { ...locais[locIdx], fotos }
       return { ...prev, locais }
     })
+  }
+
+  // ── Adicionar Local ──────────────────────────────────────────────────────
+  const handleOpenAddLocal = () => {
+    setNewLocal(initNewLocal())
+    setAddingNewLocal(true)
+  }
+
+  const handleNewLocalFotos = async (files) => {
+    if (!files || files.length === 0) return
+    const compressed = await Promise.all(Array.from(files).map(f => compressImage(f)))
+    const novas = compressed.map(data => ({ id: Date.now() + Math.random(), data }))
+    setNewLocal(prev => ({ ...prev, fotos: [...(prev.fotos || []), ...novas] }))
+  }
+
+  const handleRemoveNewLocalFoto = (idx) => {
+    setNewLocal(prev => ({ ...prev, fotos: prev.fotos.filter((_, i) => i !== idx) }))
+  }
+
+  const handleSaveNewLocal = async () => {
+    if (!newLocal.nome.trim()) { alert('Informe o nome do local.'); return }
+    setSavingNewLocal(true)
+    try {
+      const updated = await api.adicionarLocalMedicao(id, newLocal)
+      setMedicao(updated)
+      setEditData(JSON.parse(JSON.stringify(updated)))
+      setAddingNewLocal(false)
+      setNewLocal(null)
+    } catch (err) {
+      alert('Erro ao adicionar local: ' + err.message)
+    } finally {
+      setSavingNewLocal(false)
+    }
   }
 
   // ── Orçamento ────────────────────────────────────────────────────────────
@@ -254,7 +308,7 @@ export default function MedicaoDetailPage() {
   )
 
   const m = editing ? editData : medicao
-  const CAMPOS_IGNORAR = ['nome', 'local', 'fotos', 'trinca', 'juntaFria', 'ralo', 'juntaDilat', 'ferragem', 'cortina', 'juntaGerber', 'mobilizacao']
+  const CAMPOS_IGNORAR = ['nome', 'local', 'fotos', 'trinca', 'juntaFria', 'ralo', 'juntaDilat', 'ferragem', 'cortina', 'juntaGerber', 'mobilizacao', 'andar', 'adicionadoPor']
   const CAMPOS_QUANTIDADES = ['trinca', 'juntaFria', 'ralo', 'juntaDilat', 'ferragem', 'cortina', 'juntaGerber']
   const LABELS_QTDE = {
     trinca: 'Trincas (m)', juntaFria: 'Juntas Frias (m)', ralo: 'Ralos (unid)',
@@ -541,11 +595,11 @@ export default function MedicaoDetailPage() {
         </div>
 
         {/* Locais */}
-        {Array.isArray(m.locais) && m.locais.length > 0 && (
+        {(Array.isArray(m.locais) && m.locais.length > 0 || editing) && (
           <div className="card md:col-span-2">
             <h2 className="font-semibold mb-3 text-primary">Locais Medidos</h2>
             <div className="grid sm:grid-cols-2 gap-3">
-              {m.locais.map((local, i) => (
+              {(m.locais || []).map((local, i) => (
                 <div key={i} className="bg-gray-50 rounded-lg p-3 text-sm">
                   {editing ? (
                     <div className="mb-2 space-y-2">
@@ -571,7 +625,14 @@ export default function MedicaoDetailPage() {
                   ) : (
                     <div className="font-medium mb-2 text-gray-700">
                       {local.andar && <div className="text-xs text-gray-400 font-normal">🏢 {local.andar}</div>}
-                      {local.nome || local.local || `Local ${i + 1}`}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span>{local.nome || local.local || `Local ${i + 1}`}</span>
+                        {local.adicionadoPor && (
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                            ✏️ adicionado por {local.adicionadoPor}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   )}
                   {CAMPOS_QUANTIDADES.map(campo => {
@@ -606,6 +667,100 @@ export default function MedicaoDetailPage() {
                 </div>
               ))}
             </div>
+
+            {/* ── Adicionar novo local (inline, só no modo edição) ─────────── */}
+            {editing && (
+              <div className="mt-4 border-t pt-4">
+                {!addingNewLocal ? (
+                  <button
+                    type="button"
+                    onClick={handleOpenAddLocal}
+                    className="w-full border-2 border-dashed border-green-300 rounded-lg py-3 text-green-700 hover:border-green-400 hover:bg-green-50 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                  >
+                    ➕ Adicionar novo local
+                  </button>
+                ) : (
+                  <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4 space-y-3">
+                    <h3 className="text-sm font-bold text-green-800 mb-1">Novo Local</h3>
+
+                    {/* Nome e Andar */}
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-gray-500 font-medium uppercase tracking-wide">Nome do Local *</label>
+                        <input className="input py-1 text-sm mt-0.5" placeholder="Ex: Garagem subsolo 2"
+                          value={newLocal?.nome || ''}
+                          onChange={e => setNewLocal(p => ({ ...p, nome: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500 font-medium uppercase tracking-wide">Andar</label>
+                        <input className="input py-1 text-sm mt-0.5" placeholder="ex: Subsolo 1, Térreo, 5º Andar…"
+                          value={newLocal?.andar || ''}
+                          onChange={e => setNewLocal(p => ({ ...p, andar: e.target.value }))} />
+                      </div>
+                    </div>
+
+                    {/* Medidas */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {CAMPOS_MEDIDAS.map(campo => (
+                        <div key={campo}>
+                          <label className="text-xs text-gray-500">{LABELS_MEDIDAS[campo]}</label>
+                          <input type="number" min="0" step="0.01" className="input py-1 text-sm"
+                            value={newLocal?.[campo] || 0}
+                            onChange={e => setNewLocal(p => ({ ...p, [campo]: parseFloat(e.target.value) || 0 }))} />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Fotos */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">
+                          Fotos ({(newLocal?.fotos || []).length})
+                        </span>
+                        <div>
+                          <input type="file" accept="image/*" multiple capture="environment" style={{ display: 'none' }}
+                            ref={newLocalFileRef}
+                            onChange={e => { handleNewLocalFotos(e.target.files); e.target.value = '' }} />
+                          <button type="button" onClick={() => newLocalFileRef.current?.click()}
+                            className="text-xs bg-white text-indigo-700 border border-indigo-200 rounded-lg px-3 py-1 hover:bg-indigo-50 font-medium">
+                            📷 + Adicionar Fotos
+                          </button>
+                        </div>
+                      </div>
+                      {(newLocal?.fotos || []).length > 0 && (
+                        <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5 mt-1">
+                          {newLocal.fotos.map((foto, fi) => (
+                            <div key={fi} className="relative group">
+                              <img src={resolvePhotoSrc(foto.data || foto)} alt={`Foto ${fi+1}`}
+                                className="w-full aspect-square object-cover rounded" />
+                              <button type="button" onClick={() => handleRemoveNewLocalFoto(fi)}
+                                className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity leading-none">
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Botões */}
+                    <div className="flex gap-2 pt-1">
+                      <button type="button"
+                        onClick={() => { setAddingNewLocal(false); setNewLocal(null) }}
+                        className="btn-secondary text-sm py-1.5 px-3" disabled={savingNewLocal}>
+                        Cancelar
+                      </button>
+                      <button type="button"
+                        onClick={handleSaveNewLocal}
+                        disabled={savingNewLocal || !newLocal?.nome?.trim()}
+                        className="btn-primary text-sm py-1.5 px-4 disabled:opacity-50">
+                        {savingNewLocal ? '⏳ Salvando...' : '✅ Adicionar Local'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

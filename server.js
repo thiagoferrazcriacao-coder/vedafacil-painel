@@ -3,6 +3,29 @@ import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+
+// Sanitizador SVG manual (substitui DOMPurify que quebra no runtime Vercel)
+// Remove vetores conhecidos de XSS: <script>, on*= handlers, javascript: URIs, <foreignObject>
+function sanitizeSvg(svg) {
+  if (!svg || typeof svg !== 'string') return null;
+  return svg
+    // Remove <script>...</script> (com qualquer conteúdo, multi-linha)
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<script[^>]*\/?>/gi, '')
+    // Remove <foreignObject> (pode embutir HTML arbitrário)
+    .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '')
+    .replace(/<foreignObject[^>]*\/?>/gi, '')
+    // Remove handlers on*= (onclick, onload, onerror, etc.)
+    .replace(/\s+on[a-z]+\s*=\s*"[^"]*"/gi, '')
+    .replace(/\s+on[a-z]+\s*=\s*'[^']*'/gi, '')
+    .replace(/\s+on[a-z]+\s*=\s*[^\s>]+/gi, '')
+    // Remove javascript: e data: em href/xlink:href
+    .replace(/(?:xlink:)?href\s*=\s*"javascript:[^"]*"/gi, 'href="#"')
+    .replace(/(?:xlink:)?href\s*=\s*'javascript:[^']*'/gi, "href='#'")
+    .replace(/(?:xlink:)?href\s*=\s*"data:text\/html[^"]*"/gi, 'href="#"');
+}
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import mongoose from 'mongoose';
@@ -23,8 +46,10 @@ import {
 } from './lib/storage.js';
 
 let puppeteerLauncher = null;
+let mammothLib = null;
 const require = createRequire(import.meta.url);
 const IS_VERCEL = !!process.env.VERCEL;
+try { mammothLib = require('mammoth'); } catch (e) { console.warn('mammoth not available:', e.message); }
 if (IS_VERCEL) {
   try {
     const chromium = require('@sparticuz/chromium');
@@ -65,6 +90,8 @@ const ASSINATURA_B64 = existsSync(path.join(__dirname, 'assinatura_b64.txt'))
   : '';
 
 const app = express();
+// Necessário no Vercel: confiar no header X-Forwarded-For para rate limiting funcionar
+app.set('trust proxy', 1);
 
 // ── Web Push (VAPID) setup ────────────────────────────────────────────────────
 if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
@@ -121,6 +148,7 @@ const medicaoSchema = new mongoose.Schema({
   locais: [mongoose.Schema.Types.Mixed],
   fotos: [mongoose.Schema.Types.Mixed],
   dadosAlterados: { type: mongoose.Schema.Types.Mixed, default: null }, // payload do reenvio aguardando revisão
+  origem: String, // 'integracao' para registros importados via integração
 }, { _id: false });
 
 const orcamentoSchema = new mongoose.Schema({
@@ -203,7 +231,7 @@ const contratoSchema = new mongoose.Schema({
   issPercent: { type: Number, default: 3 },
   parcelas: { type: Number, default: 1 },
   valorParcela: { type: Number, default: 0 },
-  parcelasContrato: [{ numero: Number, data: String, valor: Number }],
+  parcelasContrato: [mongoose.Schema.Types.Mixed],
   locais: [mongoose.Schema.Types.Mixed],
   itens: [mongoose.Schema.Types.Mixed],
   cronograma: [{ local: String, dataInicio: String, dataFim: String }],
@@ -223,6 +251,7 @@ const contratoSchema = new mongoose.Schema({
   contratoArquivoNome: String,
   textoPersonalizado: String, // HTML editado pelo operador (substitui cláusulas geradas automaticamente)
   textoPersonalizadoAt: Number, // timestamp da última edição
+  origem: String, // 'integracao' para registros importados via integração
 }, { _id: false });
 
 const userSchema = new mongoose.Schema({
@@ -301,6 +330,8 @@ const osSchema = new mongoose.Schema({
   assinaturaResponsavel: String, // base64 da assinatura canvas
   concluidaEm: Number,
   tipo: { type: String, default: 'normal' }, // 'normal' | 'reparo'
+  origem: { type: String, default: '' }, // '' | 'contrato' | 'manual' — origem da OS
+  pendente_equipe: { type: Boolean, default: false }, // OS criada de contrato sem equipe atribuída
   consumosDiarios: [mongoose.Schema.Types.Mixed], // [{ data, litros, membro }]
   totalConsumoReal: { type: Number, default: 0 },
   fechamentosDia: [mongoose.Schema.Types.Mixed], // [{ data:'YYYY-MM-DD', litros, membro, ts }]
@@ -310,6 +341,7 @@ const osSchema = new mongoose.Schema({
   osOriginalId: String,       // ID da OS original (se este é um reparo)
   tipoReparo: String,         // descrição do reparo
   fotosReparo: [mongoose.Schema.Types.Mixed], // fotos do problema no momento do reparo
+  fotosDepoisReparo: [mongoose.Schema.Types.Mixed], // fotos após a conclusão do reparo
   historicoEquipes: [mongoose.Schema.Types.Mixed], // [{ equipeId, equipeNome, de:ts, ate:ts }] — todas equipes que atuaram
   equipeOriginalId: String,   // equipe que executou o serviço original (causou o problema)
   equipeOriginalNome: String, // nome da equipe original
@@ -472,10 +504,97 @@ function buildIdentificacao(tipo, doc) {
 // calcProgressoOS, pushStatusHistorico, extenso, valorExtenso
 // → importados de ./lib/helpers.js
 
+// ── Segurança: constantes obrigatórias ────────────────────────────────────────
+// Se faltarem em produção, o servidor recusa subir (defesa contra deploy quebrado)
+const IS_PROD = process.env.NODE_ENV === 'production';
+const JWT_SECRET = process.env.JWT_SECRET || (IS_PROD ? null : 'dev-secret-only-local');
+const ADMIN_USER = process.env.ADMIN_USER || (IS_PROD ? null : 'admin');
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (IS_PROD ? null : 'change-me-local');
+
+if (IS_PROD) {
+  const missing = [];
+  if (!JWT_SECRET)     missing.push('JWT_SECRET');
+  if (!ADMIN_USER)     missing.push('ADMIN_USER');
+  if (!ADMIN_PASSWORD) missing.push('ADMIN_PASSWORD');
+  if (missing.length) {
+    console.error('❌ FATAL: variáveis obrigatórias ausentes em produção:', missing.join(', '));
+    throw new Error('Missing required env vars: ' + missing.join(', '));
+  }
+}
+
+// Helper para mascarar PII em logs (LGPD)
+function safeLog(obj) {
+  if (obj == null) return obj;
+  if (typeof obj === 'string') {
+    return obj
+      .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, '***.***.***-**')     // CPF
+      .replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, '**.***.***/****-**') // CNPJ
+      .replace(/\b\(?\d{2}\)?\s?9?\d{4}-?\d{4}\b/g, '(**)****-****')      // Telefone BR
+      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}/g, '***@***'); // Email
+  }
+  if (typeof obj === 'object') {
+    try { return JSON.parse(safeLog(JSON.stringify(obj))); } catch { return '[unsafe]'; }
+  }
+  return obj;
+}
+
 // ── Middleware ────────────────────────────────────────────────────────────────
 
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+// Helmet: headers de segurança (CSP, X-Frame, HSTS, etc.)
+app.use(helmet({
+  contentSecurityPolicy: false, // CSP gerenciado pelo Vercel/SPA — ativar depois com cuidado
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
+
+// CORS restrito a domínios conhecidos da Vedafacil
+const ALLOWED_ORIGINS = [
+  'https://vedafacil-painel.vercel.app',
+  'https://vedafacil-medidor.vercel.app',
+  'https://vedafacil-aplicador.vercel.app',
+];
+if (!IS_PROD) {
+  ALLOWED_ORIGINS.push('http://localhost:5173', 'http://localhost:3001', 'http://localhost:5174');
+}
+app.use(cors({
+  origin: (origin, cb) => {
+    // Sem origin = requests server-to-server (curl, Postman) — permitir
+    if (!origin) return cb(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    // Permite *.vercel.app (previews) e Vercel deploys de preview
+    if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)) return cb(null, true);
+    log('warn', 'CORS bloqueado origem:', origin);
+    cb(new Error('CORS bloqueado'));
+  },
+  credentials: true,
+}));
+
+// JSON parser: limite global 1MB; rotas que recebem fotos sobrescrevem com bigJson
+app.use(express.json({ limit: '1mb' }));
+const bigJson = express.json({ limit: '25mb' });
+// Exporta como global para rotas grandes usarem (ver uso em /api/medicao etc.)
+app.locals.bigJson = bigJson;
+
+// Rate limiter para login (10 tentativas por 15 min por IP)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { trustProxy: false, xForwardedForHeader: false }, // já configuramos trust proxy
+  message: { error: 'Muitas tentativas de login. Tente novamente em 15 min.' },
+});
+
+// Rate limiter para endpoints custosos (Gemini, geração PDF)
+const expensiveLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { trustProxy: false, xForwardedForHeader: false },
+  message: { error: 'Muitas requisições. Aguarde 1 minuto.' },
+});
+app.locals.expensiveLimiter = expensiveLimiter;
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -495,16 +614,60 @@ if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'dist')));
 }
 
-// JWT auth middleware
+// JWT auth middleware (admin/operador/medidor — painel)
 function auth(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1] || req.query.token;
   if (!token) return res.status(401).json({ error: 'Token required' });
   try {
-    req.user = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret');
+    req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch {
     res.status(401).json({ error: 'Invalid token' });
   }
+}
+
+// JWT auth middleware (equipe — aplicador). Garante que o token é de equipe,
+// e que a equipeId requisitada bate com a do token (anti-IDOR)
+function authEquipe(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1] || req.query.token;
+  if (!token) return res.status(401).json({ error: 'Token required' });
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (!payload.equipeId && payload.role !== 'admin') {
+      return res.status(401).json({ error: 'Token sem equipeId' });
+    }
+    req.equipe = payload;
+    // Sobrescreve qualquer equipeId vindo do request com o do token (admins-master mantêm acesso amplo via masterMode)
+    if (req.query.equipeId && payload.role !== 'admin' && req.query.equipeId !== payload.equipeId) {
+      return res.status(403).json({ error: 'equipeId não corresponde ao token' });
+    }
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+}
+
+// Audit log — registra ações destrutivas de admins (delete, mass update)
+const auditLogSchema = new mongoose.Schema({
+  ts:       { type: Date, default: Date.now },
+  user:     String,
+  role:     String,
+  action:   String,
+  resource: String,
+  resourceId: String,
+  details:  mongoose.Schema.Types.Mixed,
+}, { collection: 'auditLogs' });
+const AuditLog = mongoose.models?.AuditLog || mongoose.model('AuditLog', auditLogSchema);
+
+async function audit(req, action, resource, resourceId, details) {
+  try {
+    await AuditLog.create({
+      user: req.user?.username || req.user?.email || 'unknown',
+      role: req.user?.role || 'unknown',
+      action, resource, resourceId,
+      details: safeLog(details),
+    });
+  } catch (e) { /* nunca quebra a request por log */ }
 }
 
 // ── Health ────────────────────────────────────────────────────────────────────
@@ -663,33 +826,50 @@ app.use((err, req, res, next) => {
 
 // ── Auth Routes ───────────────────────────────────────────────────────────────
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
-  const validUser = process.env.ADMIN_USER || 'admin';
-  const validPass = process.env.ADMIN_PASSWORD || 'vedafacil2025';
-  const isAdmin = (username === validUser && password === validPass)
-    || (username === 'admin' && password === 'vedafacil2025');
+  // .trim() defensivo: env vars do Vercel podem vir com \n no final
+  const expectedUser = (ADMIN_USER || '').trim();
+  const expectedPass = (ADMIN_PASSWORD || '').trim();
+  const isAdmin = (username || '').trim() === expectedUser && (password || '').trim() === expectedPass;
   if (isAdmin) {
-    const token = jwt.sign({ username, role: 'admin' }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '24h' });
+    const token = jwt.sign({ username, role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
     return res.json({ token, user: { username, role: 'admin' } });
   }
-  // Suporte a operadores: verifica no banco de dados de usuários
+  // Suporte a operadores e admins do banco
   try {
     await connectDB();
     if (isConnected) {
-      const user = await User.findOne({ email: username, role: 'operador' }).lean();
+      // role: admin ou operador (admin do banco também usa esse fluxo)
+      const user = await User.findOne({ email: username, role: { $in: ['operador', 'admin'] } }).lean();
       if (user && user.password) {
-        // bcrypt compare se existir hash, senão testa igualdade simples (temporário)
-        const ok = user.password === password || user.password === require('crypto').createHash('sha256').update(password).digest('hex');
+        let ok = false;
+        // bcrypt hash começa com $2a$ / $2b$ / $2y$
+        if (/^\$2[aby]\$/.test(user.password)) {
+          ok = await bcrypt.compare(password, user.password);
+        } else {
+          // Hash SHA-256 legado ou texto puro — migra na hora para bcrypt
+          const sha = require('crypto').createHash('sha256').update(password).digest('hex');
+          ok = user.password === password || user.password === sha;
+          if (ok) {
+            // Atualiza para bcrypt silenciosamente
+            const newHash = await bcrypt.hash(password, 10);
+            await User.updateOne({ _id: user._id }, { $set: { password: newHash } });
+            log('info', 'Senha migrada para bcrypt', { user: safeLog(username) });
+          }
+        }
         if (ok) {
           const mustChange = user.mustChangePassword === true;
           const pic = user.picture || '';
-          const token = jwt.sign({ username: user.name || username, email: username, role: 'operador', mustChangePassword: mustChange, picture: pic }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '24h' });
-          return res.json({ token, user: { username: user.name || username, email: username, role: 'operador', mustChangePassword: mustChange, picture: pic } });
+          const role = user.role || 'operador';
+          const token = jwt.sign({ username: user.name || username, email: username, role, mustChangePassword: mustChange, picture: pic }, JWT_SECRET, { expiresIn: '24h' });
+          return res.json({ token, user: { username: user.name || username, email: username, role, mustChangePassword: mustChange, picture: pic } });
         }
       }
     }
-  } catch (_) { /* silently ignore DB errors during login */ }
+  } catch (e) {
+    log('error', 'Login DB error', { error: e.message });
+  }
   res.status(401).json({ error: 'Credenciais inválidas' });
 });
 
@@ -767,7 +947,7 @@ async function getConfig() {
 
 // ── Medições Routes ───────────────────────────────────────────────────────────
 
-app.post('/api/medicao', async (req, res) => {
+app.post('/api/medicao', bigJson, async (req, res) => {
   try {
     await connectDB();
     const secret = process.env.WEBHOOK_SECRET;
@@ -832,7 +1012,7 @@ app.get('/api/medicao/:id/ping', async (req, res) => {
 });
 
 // POST /api/medicoes/manual — criar medição manual pelo painel
-app.post('/api/medicoes/manual', auth, async (req, res) => {
+app.post('/api/medicoes/manual', auth, bigJson, async (req, res) => {
   try {
     await connectDB();
     let cfg = await Config.findById('main');
@@ -958,7 +1138,31 @@ app.patch('/api/medicoes/:id/fotos', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.put('/api/medicoes/:id', auth, async (req, res) => {
+// ── Adicionar local manualmente (operador) — sem restrição de orçamento ────────
+app.patch('/api/medicoes/:id/adicionar-local', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const { local } = req.body;
+    if (!local || !local.nome) return res.status(400).json({ error: 'Campo nome é obrigatório.' });
+    const nomeAutor = req.user?.username || req.user?.email || 'operador';
+    const novoLocal = { ...local, adicionadoPor: nomeAutor };
+    if (isConnected) {
+      const m = await Medicao.findById(req.params.id);
+      if (!m) return res.status(404).json({ error: 'Medição não encontrada.' });
+      m.locais = [...(m.locais || []), novoLocal];
+      m.markModified('locais');
+      m.updatedAt = new Date();
+      await m.save();
+      return res.json(m);
+    }
+    const idx = memStore.medicoes.findIndex(x => x._id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Medição não encontrada.' });
+    memStore.medicoes[idx] = { ...memStore.medicoes[idx], locais: [...(memStore.medicoes[idx].locais || []), novoLocal], updatedAt: new Date() };
+    return res.json(memStore.medicoes[idx]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/medicoes/:id', auth, bigJson, async (req, res) => {
   try {
     await connectDB();
     const data = sanitizeImages(req.body, 'medicao-put');
@@ -1113,6 +1317,7 @@ app.post('/api/orcamentos/:id/enviado-cliente', auth, async (req, res) => {
 app.delete('/api/medicoes/:id', auth, adminOnly, async (req, res) => {
   try {
     await connectDB();
+    await audit(req, 'delete', 'medicao', req.params.id);
     if (isConnected) {
       const doc = await Medicao.findOne({ _id: req.params.id });
       if (doc) await salvarNaLixeira('medicao', 'Medição', 'medicoes', doc, req.user?.email || req.user?.username);
@@ -1290,7 +1495,7 @@ app.post('/api/orcamentos/:id/duplicar', auth, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
 
-app.put('/api/orcamentos/:id', auth, async (req, res) => {
+app.put('/api/orcamentos/:id', auth, bigJson, async (req, res) => {
   try {
     await connectDB();
     // Strip immutable/internal fields before update to avoid MongoDB errors
@@ -1315,6 +1520,7 @@ app.put('/api/orcamentos/:id', auth, async (req, res) => {
 });
 
 app.delete('/api/orcamentos/:id', auth, adminOnly, async (req, res) => {
+  await audit(req, 'delete', 'orcamento', req.params.id);
   try {
     await connectDB();
     if (isConnected) {
@@ -1514,18 +1720,21 @@ export function buildOrcamentoPdfHtml(o) {
         </div>`).join('')
       : '<div style="color:#888;font-style:italic;font-size:10.5px;">Nenhum local cadastrado</div>';
 
-    // Foto pages (relatório fotográfico)
+    // Foto pages (relatório fotográfico) — 2 fotos por página A4
     const locaisComFotosM = locaisMin.filter(l => l.fotos && l.fotos.length > 0);
-    const photoPagesM = locaisComFotosM.map((l) =>
-      (l.fotos || []).map(f => `
+    const photoPagesM = locaisComFotosM.map((l) => {
+      const fotos = l.fotos || [];
+      const pairs = [];
+      for (let i = 0; i < fotos.length; i += 2) pairs.push(fotos.slice(i, i + 2));
+      return pairs.map(pair => `
       <div class="pg pb">
-        <div style="font-size:11px;margin-bottom:10px;font-weight:bold;">${l.nome || ''}</div>
-        <div style="border:1px solid #ccc;padding:8px;">
-          <img src="${f.data || f}" style="width:100%;max-height:200mm;object-fit:contain;" alt="">
-          <div style="text-align:center;font-size:9px;color:#555;margin-top:4px;">${l.nome || ''}</div>
-        </div>
-      </div>`).join('')
-    ).join('');
+        ${pair.map(f => `
+        <div style="margin-bottom:6mm;border:1px solid #ccc;padding:6px;break-inside:avoid">
+          <div style="font-size:10px;font-weight:bold;margin-bottom:4px">${l.nome || ''}</div>
+          <img src="${f.data || f}" style="width:100%;max-height:115mm;object-fit:contain;display:block" alt="">
+        </div>`).join('')}
+      </div>`).join('');
+    }).join('');
 
     return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -2256,7 +2465,7 @@ ${photoPages}
 }app.get('/api/orcamentos/:id/pdf', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1] || req.query.token;
   if (!token) return res.status(401).json({ error: 'Token required' });
-  try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); }
+  try { jwt.verify(token, JWT_SECRET); }
   catch { return res.status(401).json({ error: 'Invalid token' }); }
 
   try {
@@ -2299,6 +2508,7 @@ function buildContratoPdfHtml(c) {
   const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
   const fmtDate = (d) => { if (!d) return '___'; const s = String(d); const date = new Date(s.length === 10 && s.includes('-') ? s + 'T12:00:00' : s); return isNaN(date.getTime()) ? s : date.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' }); };
   const fmtDateShort = fmtDate;
+  const fmtDateExtenso = (d) => { if (!d) return '___'; const s = String(d); const date = new Date(s.length === 10 && s.includes('-') ? s + 'T12:00:00' : s); if (isNaN(date.getTime())) return s; const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']; return `${date.getDate()} de ${meses[date.getMonth()]} de ${date.getFullYear()}`; };
 
   const razaoSocial = c.razaoSocial || c.cliente || '___';
   const cnpjCliente = c.cnpjCliente || '___';
@@ -2319,7 +2529,7 @@ function buildContratoPdfHtml(c) {
   const issPercent = c.issPercent || 3;
   const prazo = c.prazoExecucao || 3;
   const foro = c.foro || 'Rio de Janeiro';
-  const dataAssinatura = c.dataAssinatura ? fmtDate(c.dataAssinatura) : '___';
+  const dataAssinatura = c.dataAssinatura ? fmtDateExtenso(c.dataAssinatura) : '___';
   const dataInicio = c.dataInicio ? fmtDate(c.dataInicio) : '';
   const dataTermino = c.dataTermino ? fmtDate(c.dataTermino) : '';
   const nOrc = c.numero ? String(c.numero).padStart(4, '0') : '___';
@@ -2345,8 +2555,7 @@ function buildContratoPdfHtml(c) {
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;font-size:10.5px;color:#222;line-height:1.6}
-/* Conteúdo */
-.pg{padding:12mm 22mm;max-width:210mm;margin:0 auto}
+.pg{padding:6mm 22mm 8mm;max-width:210mm;margin:0 auto}
 h2.clause-title{background:#e87722;color:white;padding:6px 14px;margin:16px 0 9px;font-size:11px;font-weight:bold;border-radius:2px}
 .clause{margin:6px 0;text-align:justify;font-size:10.5px}
 .clause p{margin-bottom:6px;text-indent:20px}
@@ -2362,48 +2571,66 @@ table.pay td{border:1px solid #aaa;padding:5px 10px}
 .crono{width:100%;border-collapse:collapse;margin:8px 0;font-size:10px}
 .crono th{background:#e87722;color:white;padding:5px 6px;text-align:center}
 .crono td{border:1px solid #aaa;padding:4px 6px}
-/* Assinatura — espaço generoso para rubrica manuscrita */
 .sig{display:grid;grid-template-columns:1fr 1fr;gap:0 50px;margin:40px 0 24px;text-align:center;font-size:10px}
 .sig .role{color:#333;font-weight:bold;font-size:10px;margin-bottom:26mm;text-transform:uppercase;letter-spacing:.4px}
 .sig .line{border-top:1.5px solid #222;padding-top:6px;font-size:10px;line-height:1.5}
+/* Rodapé inline — visível só na tela, escondido na impressão (tfoot da tabela cobre) */
 .foot{text-align:center;font-size:8.5px;color:#666;margin-top:16px;padding-top:6px;border-top:1px solid #ccc}
 .download-btn{position:fixed;top:12px;right:12px;z-index:9999;background:#e87722;color:white;border:none;padding:10px 20px;font-size:14px;font-weight:700;border-radius:8px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)}
 .download-btn:hover{background:#d06a1b}
-/* Tela: tabela-documento age como bloco simples — filho direto (>) para não vazar nas tabelas internas */
+/* ── Tela: tabela age como bloco simples ── */
 .doc-tbl{display:block;width:100%;max-width:210mm;margin:0 auto}
 .doc-tbl > thead,.doc-tbl > tfoot{display:none}
 .doc-tbl > tbody,.doc-tbl > tbody > tr,.doc-tbl > tbody > tr > td{display:block}
-/* Impressão: thead/tfoot repetem em TODAS as páginas nativamente */
+/* ── IMPRESSÃO ─────────────────────────────────────────────────────────────
+   Estratégia: UMA tabela que abraça TODO o documento (contrato + anexo).
+   - thead repete o cabeçalho no topo de CADA página impressa (table-header-group)
+   - tfoot repete o rodapé no fim de CADA página impressa (table-footer-group)
+   - O conteúdo flui naturalmente dentro do tbody — nunca sobrepõe nada.
+   - NÃO usar position:fixed: o browser não garante altura exata do elemento fixo.
+   ────────────────────────────────────────────────────────────────────────── */
 @media print{
   body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   @page{size:A4;margin:0}
   .download-btn{display:none!important}
   .contrato-capa{display:none!important}
   .foot{display:none!important}
-  .doc-tbl{display:table;width:100%;border-collapse:collapse;table-layout:fixed}
-  .doc-tbl > thead{display:table-header-group}
-  .doc-tbl > tfoot{display:table-footer-group}
-  .doc-tbl > tbody{display:table-row-group}
-  .doc-tbl > tbody > tr{display:table-row}
-  .doc-tbl > tbody > tr > td,.doc-tbl > thead > tr > th{display:table-cell;padding:0;font-weight:normal}
-  .pg{padding:10mm 22mm!important;max-width:none!important;margin:0!important}
+  .pg-logo-inline{display:none!important}
+  .pg-footer-inline{display:none!important}
+  /* Tabela-documento: thead e tfoot repetem em cada página */
+  .doc-tbl{display:table!important;width:100%!important;border-collapse:collapse!important;table-layout:fixed!important}
+  .doc-tbl > thead{display:table-header-group!important}
+  .doc-tbl > tfoot{display:table-footer-group!important}
+  .doc-tbl > tbody{display:table-row-group!important}
+  .doc-tbl > tbody > tr{display:table-row!important}
+  .doc-tbl > thead > tr > th,
+  .doc-tbl > tfoot > tr > td,
+  .doc-tbl > tbody > tr > td{display:table-cell!important;padding:0!important;font-weight:normal!important;vertical-align:top!important}
+  /* Cada bloco de conteúdo: padding lateral de página */
+  .pg{padding:6mm 22mm 8mm!important;max-width:none!important;margin:0!important}
+  /* Forçar quebra de página antes de um bloco */
+  .pb{break-before:page!important;page-break-before:always!important}
+  /* Planilhas/tabelas nunca cortam ao meio — ficam inteiras na página anterior ou seguinte */
+  table.pt,table.pay,.crono{break-inside:avoid!important;page-break-inside:avoid!important}
+  /* Rodapé fixado no fundo de cada página via tfoot — célula preenche altura disponível */
+  .doc-tbl > tbody > tr > td{height:100%!important}
 }
 </style>
 </head><body>
 <button class="download-btn" onclick="window.print()">⬇ Salvar como PDF</button>
-<!-- Tela: cabeçalho decorativo da capa -->
+<!-- Tela: cabeçalho decorativo da capa (oculto na impressão via .contrato-capa) -->
 <div class="contrato-capa pg" style="text-align:center;padding-top:8mm;padding-bottom:4mm">
   <h1 style="color:#e87722;font-size:16px;margin-bottom:4px">INSTRUMENTO PARTICULAR DE CONTRATO DE PRESTAÇÃO DE SERVIÇOS</h1>
   <div style="font-size:10px;color:#666">Correspondente ao Orçamento Nº ${nOrc}</div>
 </div>
-<!-- Tabela-documento: thead/tfoot repetem em cada página impressa -->
+<!-- Tabela-documento: thead/tfoot repetem em CADA página impressa (Chrome + Puppeteer) -->
 <table class="doc-tbl">
   <thead>
     <tr>
-      <th>
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:6mm 22mm;border-bottom:2px solid #e87722;background:#fff">
-          <div>${LOGO_B64 ? `<img src="data:image/png;base64,${LOGO_B64}" style="height:14mm;width:auto" alt="Vedafácil">` : '<span style="font-size:18px;font-weight:900;color:#e87722">VEDAFÁCIL</span>'}</div>
-          <div style="text-align:right;line-height:1.6">
+      <th style="-webkit-print-color-adjust:exact;print-color-adjust:exact">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:4mm 22mm 4mm;border-bottom:2px solid #e87722;background:#fff">
+          <div>${LOGO_B64 ? `<img src="data:image/png;base64,${LOGO_B64}" style="height:12mm;width:auto" alt="Vedafácil">` : '<span style="font-size:18px;font-weight:900;color:#e87722">VEDAFÁCIL</span>'}</div>
+          <div style="text-align:right;line-height:1.5">
             <div style="font-size:11px;font-weight:700;color:#333;text-transform:uppercase;letter-spacing:.3px">Contrato de Prestação de Serviços</div>
             <div style="font-size:10px;color:#e87722;margin-top:1px">Nº ${nOrc} — ${razaoSocial}</div>
           </div>
@@ -2413,17 +2640,17 @@ table.pay td{border:1px solid #aaa;padding:5px 10px}
   </thead>
   <tfoot>
     <tr>
-      <td>
-        <div style="text-align:center;font-size:8.5px;color:#666;padding:5mm 22mm;border-top:1px solid #ddd;background:#fff;line-height:1.7">
-          <strong style="color:#e87722;font-size:9px">Eliminamos Infiltrações Sem Quebrar!</strong><br>
-          CNPJ: 23.606.470/0001-07 &nbsp;|&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
+      <td style="-webkit-print-color-adjust:exact;print-color-adjust:exact">
+        <div style="text-align:center;font-size:8.5px;color:#666;padding:3mm 22mm;border-top:1px solid #ddd;background:#fff;line-height:1.7">
+          <strong style="color:#e87722">Eliminamos Infiltrações Sem Quebrar!</strong><br>
+          CNPJ: 23.606.470/0001-07 &nbsp;·&nbsp; Tel.: (21) 99984-1127 / (24) 2106-1015
         </div>
       </td>
     </tr>
   </tfoot>
   <tbody>
     <tr>
-      <td>${bodyContent}</td>
+      <td>${bodyContent}<!-- APPEND_HERE --></td>
     </tr>
   </tbody>
 </table>
@@ -2431,7 +2658,13 @@ table.pay td{border:1px solid #aaa;padding:5px 10px}
 
   // ── Se há texto personalizado, usa ele em vez do template ─────────────────
   if (c.textoPersonalizado) {
-    return contratoShell(c.textoPersonalizado);
+    const txt = c.textoPersonalizado.trim();
+    // Garante que o conteúdo esteja envolvido em .pg para ter o padding correto na impressão.
+    // Contratos antigos salvos como <div class="pg-content"> ou sem wrapper ganham o wrapper certo.
+    const bodyTxt = (txt.startsWith('<div class="pg">') || txt.startsWith('<div class="pg '))
+      ? txt
+      : `<div class="pg">${txt}</div>`;
+    return contratoShell(bodyTxt);
   }
 
   return contratoShell(`<div class="pg">
@@ -2587,15 +2820,15 @@ ${cronograma.length > 0 ? `
   </div>
 </div>
 
-<div class="sig" style="margin-top:32px;">
+<div class="sig" style="margin-top:14px;break-before:avoid;page-break-before:avoid;">
   <div>
-    <div class="role">Testemunha 1</div>
+    <div class="role" style="margin-bottom:10mm;">Testemunha 1</div>
     <div class="line">&nbsp;</div>
     <div style="font-size:9px;color:#555;margin-top:6px;text-align:left;">Nome: ___________________________________</div>
     <div style="font-size:9px;color:#555;margin-top:4px;text-align:left;">CPF: ____________________________________</div>
   </div>
   <div>
-    <div class="role">Testemunha 2</div>
+    <div class="role" style="margin-bottom:10mm;">Testemunha 2</div>
     <div class="line">&nbsp;</div>
     <div style="font-size:9px;color:#555;margin-top:6px;text-align:left;">Nome: ___________________________________</div>
     <div style="font-size:9px;color:#555;margin-top:4px;text-align:left;">CPF: ____________________________________</div>
@@ -2626,7 +2859,9 @@ app.get('/api/contratos/:id/texto-html', auth, async (req, res) => {
     let bodyHtml;
     if (pgStart !== -1 && outerClose > pgStart) {
       const innerContent = fullHtml.substring(pgStart + OPEN_TAG.length, outerClose);
-      bodyHtml = `<div class="pg-content">${innerContent}</div>`;
+      // Usa class="pg" para que o editor salve com wrapper correto —
+      // o contratoShell já aplica os estilos .pg na impressão
+      bodyHtml = `<div class="pg">${innerContent}</div>`;
     } else {
       bodyHtml = '<p>Conteúdo não disponível</p>';
     }
@@ -2634,13 +2869,14 @@ app.get('/api/contratos/:id/texto-html', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Extrai body content + estilos de um HTML completo (para uso como anexo)
+// Extrai apenas o conteúdo interno do tbody (sem o wrapper doc-tbl, thead e tfoot)
+// para injeção dentro da tabela-documento do contrato.
 function extractHtmlForAppend(fullHtml) {
   // Remove botão de download e scripts
   const cleaned = fullHtml
     .replace(/<button[^>]*class="download-btn"[^>]*>[\s\S]*?<\/button>/gi, '')
     .replace(/<script[\s\S]*?<\/script>/gi, '');
-  // Coleta estilos do <head> que não existem no contrato
+  // Coleta estilos do <head>
   const headMatch = cleaned.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
   const extraStyles = [];
   if (headMatch) {
@@ -2648,16 +2884,25 @@ function extractHtmlForAppend(fullHtml) {
     let m;
     while ((m = re.exec(headMatch[1])) !== null) extraStyles.push(m[1]);
   }
-  // Extrai conteúdo do <body>
+  // Extrai SOMENTE o conteúdo interno do tbody > tr > td do doc-tbl
+  // (os <div class="pg"> com o conteúdo do orçamento, sem thead/tfoot)
+  // IMPORTANTE: usar regex GREEDY ([\s\S]*) — não non-greedy (*?) — para capturar até o
+  // ÚLTIMO </td></tr></tbody>, que é o fechamento do tbody externo do doc-tbl.
+  // Com non-greedy, o regex parava no primeiro </tbody> de tabela interna (locaisRows,
+  // valuesRows), cortando o conteúdo antes das photoPages (relatório fotográfico).
+  const tbodyMatch = cleaned.match(/<tbody[^>]*>\s*<tr[^>]*>\s*<td[^>]*>([\s\S]*)<\/td>\s*<\/tr>\s*<\/tbody>/i);
+  if (tbodyMatch) {
+    return { extraStyles, body: tbodyMatch[1].trim() };
+  }
+  // Fallback: extrai body inteiro se não houver doc-tbl
   const bodyMatch = cleaned.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  const body = bodyMatch ? bodyMatch[1].trim() : '';
-  return { extraStyles, body };
+  return { extraStyles, body: bodyMatch ? bodyMatch[1].trim() : '' };
 }
 
 app.get('/api/contratos/:id/pdf', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1] || req.query.token;
   if (token) {
-    try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); }
+    try { jwt.verify(token, JWT_SECRET); }
     catch { return res.status(401).json({ error: 'Invalid token' }); }
   }
 
@@ -2665,8 +2910,8 @@ app.get('/api/contratos/:id/pdf', async (req, res) => {
     await connectDB();
     let c, orc = null;
     if (isConnected) {
-      c = await Contrato.findOne({ _id: req.params.id });
-      if (c?.orcamentoId) orc = await Orcamento.findById(c.orcamentoId);
+      c = await Contrato.findOne({ _id: req.params.id }).lean();
+      if (c?.orcamentoId) orc = await Orcamento.findById(c.orcamentoId).lean();
     } else {
       c = memStore.contratos.find(x => x._id === req.params.id);
       if (c?.orcamentoId) orc = memStore.orcamentos.find(x => x._id === c.orcamentoId);
@@ -2687,22 +2932,49 @@ app.get('/api/contratos/:id/pdf', async (req, res) => {
           orcObj.locais = orcObj.locais.map((l, i) => ({ ...l, fotos: med.locais[i]?.fotos || [] }));
         }
       }
+      // Resolve chaves R2 → base64 para o Puppeteer renderizar as fotos inline
+      if (orcObj.locais?.length) {
+        orcObj.locais = await resolveLocaisForPdf(orcObj.locais);
+      }
       const orcHtml = buildOrcamentoPdfHtml(orcObj);
       const { extraStyles, body } = extractHtmlForAppend(orcHtml);
 
-      // Injeta estilos extras antes de </style> (primeiro bloco) e corpo antes de </body>
+      // Injeta estilos extras antes de </style>, filtrando regras que conflitam com o contrato
       if (extraStyles.length) {
-        html = html.replace('</style>', `/* ── Estilos do orçamento anexo ── */\n${extraStyles.join('\n')}\n</style>`);
+        const filtrarCssConflito = (css) => {
+          // Remove @page rules
+          let r = css.replace(/@page\s*\{[^}]*\}/g, '');
+          // Remove @media print blocks (com tratamento de chaves aninhadas)
+          let out = ''; let i = 0;
+          while (i < r.length) {
+            const rest = r.slice(i);
+            const mp = rest.match(/^@media\s+print\s*\{/);
+            if (mp) {
+              let depth = 0, j = i;
+              while (j < r.length) {
+                if (r[j] === '{') depth++;
+                else if (r[j] === '}') { depth--; if (depth === 0) { j++; break; } }
+                j++;
+              }
+              i = j;
+            } else { out += r[i]; i++; }
+          }
+          // Remove regras doc-tbl > tfoot (causa blank pages quando re-injetada)
+          out = out.replace(/\.doc-tbl\s*>\s*tfoot[^{]*\{[^}]*\}/g, '');
+          return out;
+        };
+        const safeStyles = extraStyles.map(filtrarCssConflito);
+        html = html.replace('</style>', `/* ── Estilos do orçamento anexo ── */\n${safeStyles.join('\n')}\n</style>`);
       }
       const nOrcNum = orc.numero ? String(orc.numero).padStart(4, '0') : '';
+      // Separador + conteúdo do orçamento são injetados DENTRO do tbody da tabela-documento
+      // do contrato, via marcador <!-- APPEND_HERE -->. Isso garante que thead/tfoot do
+      // contrato se repitam em TODAS as páginas — incluindo as do anexo.
       const separador = `
-<div style="page-break-before:always;margin:0;padding:0;"></div>
-<div style="font-family:Arial,sans-serif;font-size:11px;text-align:center;padding:8mm 22mm 4mm;background:#fff3e0;border-bottom:2px solid #e87722;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
-  <span style="font-size:13px;font-weight:bold;color:#e87722;">ANEXO CONTRATUAL</span><br>
-  <span style="color:#555;font-size:10px;">Orçamento Nº ${nOrcNum} — parte integrante deste contrato</span>
-</div>
-${body}`;
-      html = html.replace('</body>', `${separador}\n</body>`);
+<div class="pb" style="padding:6mm 22mm 2mm">
+  <p style="font-size:8px;color:#aaa;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 4mm;border-bottom:1px solid #eee;padding-bottom:2mm">Anexo Contratual — Orçamento Nº ${nOrcNum}</p>
+</div>`;
+      html = html.replace('<!-- APPEND_HERE -->', `${separador}\n${body}`);
     }
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -2977,7 +3249,7 @@ app.post('/api/contratos/:id/garantia/marcar-enviada', auth, async (req, res) =>
 app.get('/api/contratos/:id/garantia', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1] || req.query.token;
   if (!token) return res.status(401).json({ error: 'Token required' });
-  try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); }
+  try { jwt.verify(token, JWT_SECRET); }
   catch { return res.status(401).json({ error: 'Invalid token' }); }
   try {
     await connectDB();
@@ -3171,7 +3443,7 @@ table.qty td{border:1px solid #ccc;padding:5px 8px;text-align:center}
 app.get('/api/contratos/:id/art', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1] || req.query.token;
   if (!token) return res.status(401).json({ error: 'Token required' });
-  try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); }
+  try { jwt.verify(token, JWT_SECRET); }
   catch { return res.status(401).json({ error: 'Invalid token' }); }
   try {
     await connectDB();
@@ -3454,14 +3726,27 @@ app.get('/api/contratos/:id', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.put('/api/contratos/:id', auth, async (req, res) => {
+app.put('/api/contratos/:id', auth, bigJson, async (req, res) => {
   try {
     await connectDB();
     const updates = { ...req.body, updatedAt: Date.now() };
     if (isConnected) {
       const docAtual = await Contrato.findOne({ _id: req.params.id }).lean();
+      // Log de auditoria quando o número do contrato é alterado
+      if (docAtual && typeof updates.numero === 'number' && updates.numero !== docAtual.numero) {
+        await audit(req, 'update-numero-contrato', 'contrato', req.params.id, {
+          de: docAtual.numero,
+          para: updates.numero,
+          cliente: docAtual.cliente,
+        });
+      }
       pushStatusHistorico(updates, updates.status, docAtual);
-      const c = await Contrato.findOneAndUpdate({ _id: req.params.id }, updates, { new: true });
+      // Usa $set explícito para garantir que arrays como parcelasContrato (Mixed) sejam salvos corretamente
+      const c = await Contrato.findOneAndUpdate(
+        { _id: req.params.id },
+        { $set: updates },
+        { new: true, strict: false }
+      );
       return res.json(c);
     }
     const idx = memStore.contratos.findIndex(x => x._id === req.params.id);
@@ -3493,6 +3778,7 @@ async function generatePdfBuffer(html) {
       });
     }
     const page = await browser.newPage();
+    await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 1 }); // A4 @ 96dpi — evita texto cortado na direita
     await page.setContent(html, { waitUntil: 'networkidle0' });
     const buffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '0', bottom: '0', left: '0', right: '0' } });
     return buffer;
@@ -3507,26 +3793,113 @@ app.patch('/api/contratos/:id/status', auth, async (req, res) => {
     const { status } = req.body;
     const statusValidos = ['rascunho', 'pendente_assinatura', 'assinado'];
     if (!status || !statusValidos.includes(status)) return res.status(400).json({ error: 'Status inválido' });
+
+    let doc, updated;
     if (isConnected) {
-      const doc = await Contrato.findOne({ _id: req.params.id }).lean();
+      doc = await Contrato.findOne({ _id: req.params.id }).lean();
       if (!doc) return res.status(404).json({ error: 'Not found' });
       const hist = [...(doc.statusHistorico || []), { status, data: Date.now() }];
-      const updated = await Contrato.findOneAndUpdate(
+      updated = await Contrato.findOneAndUpdate(
         { _id: req.params.id },
         { status, statusHistorico: hist, updatedAt: Date.now() },
         { new: true }
       ).lean();
-      return res.json(updated);
+    } else {
+      doc = memStore.contratos.find(x => x._id === req.params.id);
+      if (!doc) return res.status(404).json({ error: 'Not found' });
+      doc.status = status;
+      doc.statusHistorico = [...(doc.statusHistorico || []), { status, data: Date.now() }];
+      updated = doc;
     }
-    const c = memStore.contratos.find(x => x._id === req.params.id);
-    if (!c) return res.status(404).json({ error: 'Not found' });
-    c.status = status;
-    c.statusHistorico = [...(c.statusHistorico || []), { status, data: Date.now() }];
-    res.json(c);
+
+    // ── Ao assinar: cria OS automaticamente (se não existir já) ──────────────
+    let novaOsId = null;
+    if (status === 'assinado' && doc.status !== 'assinado') {
+      try {
+        // Verifica se já existe OS criada para este contrato
+        const osExistente = isConnected
+          ? await OS.findOne({ contratoId: req.params.id, origem: 'contrato' }).lean()
+          : memStore.os?.find(o => o.contratoId === req.params.id && o.origem === 'contrato');
+
+        if (!osExistente) {
+          // Busca o orçamento vinculado para obter os locais
+          let orc = null;
+          if (doc.orcamentoId) {
+            orc = isConnected
+              ? await Orcamento.findById(doc.orcamentoId).lean()
+              : memStore.orcamentos?.find(x => x._id === doc.orcamentoId);
+          }
+
+          // Converte locais do orçamento em pontos da OS
+          const locais = orc?.locais || doc.locais || [];
+          const pontos = locais.map(l => ({
+            nome: l.nome || l.local || 'Local',
+            andar: l.andar || '',
+            trinca: l.trinca || 0,
+            juntaFria: l.juntaFria || 0,
+            ralo: l.ralo || 0,
+            juntaDilat: l.juntaDilat || 0,
+            ferragem: l.ferragem || 0,
+            cortina: l.cortina || 0,
+            statusLocal: 'pendente',
+            subPontos: [],
+            fotosAntes: [],
+            fotosDepois: [],
+          }));
+
+          // Incrementa número da OS
+          const count = isConnected ? await OS.countDocuments() : (memStore.os?.length || 0);
+
+          const novaOS = {
+            _id: uuidv4(),
+            numero: count + 1,
+            tipo: 'normal',
+            origem: 'contrato',
+            pendente_equipe: true,
+            contratoId: req.params.id,
+            cliente: doc.razaoSocial || doc.cliente || '',
+            endereco: doc.endereco || '',
+            cidade: doc.cidade || '',
+            cep: doc.cep || '',
+            celular: doc.celular || '',
+            equipeId: '',
+            equipeNome: '',
+            dataInicio: doc.dataInicio || '',
+            dataTermino: doc.dataTermino || '',
+            diasTrabalho: doc.prazoExecucao || 0,
+            consumoProduto: orc?.consumoProduto || 0,
+            qtdInjetores: orc?.qtdInjetores || 0,
+            pontos,
+            obs: '',
+            progresso: 0,
+            status: 'agendada',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+
+          if (isConnected) {
+            const osDoc = new OS(novaOS);
+            await osDoc.save();
+            novaOsId = novaOS._id;
+          } else {
+            if (!memStore.os) memStore.os = [];
+            memStore.os.push(novaOS);
+            novaOsId = novaOS._id;
+          }
+          log('info', 'OS criada automaticamente ao assinar contrato', { contratoId: req.params.id, osId: novaOsId });
+        }
+      } catch (osErr) {
+        log('warn', 'Erro ao criar OS automática do contrato', { error: osErr.message });
+        // Não falha o request principal
+      }
+    }
+
+    return res.json({ ...updated, _osAutocriadaId: novaOsId });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/contratos/:id', auth, adminOnly, async (req, res) => {
+  await audit(req, 'delete', 'contrato', req.params.id);
   try {
     await connectDB();
     if (isConnected) {
@@ -3702,7 +4075,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
     // Include access_token in JWT so calendar works immediately (no DB lookup needed)
     const token = jwt.sign(
       { email: userInfo.email, name: userInfo.name, picture: userInfo.picture || '', role, googleAccessToken: tokens.access_token },
-      process.env.JWT_SECRET || 'dev-secret',
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -3885,6 +4258,7 @@ app.put('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
 });
 
 app.delete('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
+  await audit(req, 'delete', 'usuario', req.params.email);
   try {
     await connectDB();
     const { email } = req.params;
@@ -3919,19 +4293,23 @@ app.get('/api/notifications/counts', auth, async (req, res) => {
 
     if (isConnected) {
       const medicaoIdsComOrcamento = await Orcamento.distinct('medicaoId', { medicaoId: { $ne: null } });
-      const [medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados] = await Promise.all([
+      const [medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados, osPendentesEquipe, contratosPendentes] = await Promise.all([
         verOrcamento  ? Medicao.countDocuments({ _id: { $nin: medicaoIdsComOrcamento } }) : Promise.resolve(0),
         verOrcamento  ? Orcamento.countDocuments({ enviadoParaCliente: { $ne: true }, status: { $nin: ['aprovado'] } }) : Promise.resolve(0),
         verFinanceiro ? Orcamento.countDocuments({ status: 'aprovado' }) : Promise.resolve(0),
+        OS.countDocuments({ origem: 'contrato', pendente_equipe: true }),
+        verFinanceiro ? Contrato.countDocuments({ status: { $nin: ['pendente_assinatura', 'assinado'] } }) : Promise.resolve(0),
       ]);
-      return res.json({ medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados });
+      return res.json({ medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados, osPendentesEquipe, contratosPendentes });
     }
     // fallback memStore
     const idsComOrc = new Set(memStore.orcamentos.map(o => o.medicaoId).filter(Boolean));
     const medicoesSemOrcamento = verOrcamento  ? memStore.medicoes.filter(m => !idsComOrc.has(m._id || m.id)).length : 0;
     const orcamentosNaoEnviados  = verOrcamento  ? memStore.orcamentos.filter(o => !o.enviadoParaCliente && o.status !== 'aprovado').length : 0;
     const orcamentosAprovados    = verFinanceiro ? memStore.orcamentos.filter(o => o.status === 'aprovado').length : 0;
-    res.json({ medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados });
+    const osPendentesEquipe = (memStore.os || []).filter(o => o.origem === 'contrato' && o.pendente_equipe).length;
+    const contratosPendentes = verFinanceiro ? (memStore.contratos || []).filter(o => !['pendente_assinatura','assinado'].includes(o.status)).length : 0;
+    res.json({ medicoesSemOrcamento, orcamentosNaoEnviados, orcamentosAprovados, osPendentesEquipe, contratosPendentes });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -3991,7 +4369,7 @@ app.patch('/api/auth/change-password', auth, async (req, res) => {
       await User.findByIdAndUpdate(email, { password: novoHash, mustChangePassword: false });
       const pic = user.picture || '';
       // Retorna novo token sem mustChangePassword
-      const token = jwt.sign({ username: user.name || email, email, role: 'operador', mustChangePassword: false, picture: pic }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '24h' });
+      const token = jwt.sign({ username: user.name || email, email, role: 'operador', mustChangePassword: false, picture: pic }, JWT_SECRET, { expiresIn: '24h' });
       return res.json({ success: true, token, user: { username: user.name || email, email, role: 'operador', mustChangePassword: false, picture: pic } });
     }
     // memStore fallback
@@ -4001,7 +4379,7 @@ app.patch('/api/auth/change-password', auth, async (req, res) => {
     const novoHash = crypto.createHash('sha256').update(novaSenha).digest('hex');
     u.password = novoHash; u.mustChangePassword = false;
     const pic = u.picture || '';
-    const token = jwt.sign({ username: u.name || email, email, role: 'operador', mustChangePassword: false, picture: pic }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '24h' });
+    const token = jwt.sign({ username: u.name || email, email, role: 'operador', mustChangePassword: false, picture: pic }, JWT_SECRET, { expiresIn: '24h' });
     res.json({ success: true, token, user: { username: u.name || email, email, role: 'operador', mustChangePassword: false, picture: pic } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -4026,7 +4404,7 @@ app.patch('/api/auth/profile-picture', auth, async (req, res) => {
     }
     // Retorna novo token com picture atualizado
     const payload = { ...req.user, picture: picUrl };
-    const token = jwt.sign(payload, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '24h' });
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
     const userOut = { ...(req.user || {}), picture: picUrl };
     res.json({ success: true, picture: picUrl, token, user: userOut });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -4082,6 +4460,7 @@ app.post('/api/equipes/:id/reset-senha', auth, adminOnly, async (req, res) => {
 });
 
 app.delete('/api/equipes/:id', auth, adminOnly, async (req, res) => {
+  await audit(req, 'delete', 'equipe', req.params.id);
   try {
     await connectDB();
     if (isConnected) { await Equipe.findByIdAndDelete(req.params.id); return res.json({ success: true }); }
@@ -4356,12 +4735,15 @@ app.get('/api/ordens-servico', auth, async (req, res) => {
     await connectDB();
     const { equipeId } = req.query;
     const tipoFilter = req.query.tipo;
+    const osOriginalId = req.query.osOriginalId;
     const filter = equipeId ? { equipeId } : {};
     if (tipoFilter) filter.tipo = tipoFilter;
-    if (isConnected) return res.json(await OS.find(tipoFilter ? { ...filter, tipo: tipoFilter } : filter).sort({ createdAt: -1 }).lean());
+    if (osOriginalId) filter.osOriginalId = osOriginalId;
+    if (isConnected) return res.json(await OS.find(filter).sort({ createdAt: -1 }).lean());
     let list = memStore.ordens;
     if (equipeId) list = list.filter(o => o.equipeId === equipeId);
     if (tipoFilter) list = list.filter(o => (o.tipo || 'normal') === tipoFilter);
+    if (osOriginalId) list = list.filter(o => o.osOriginalId === osOriginalId);
     res.json(list);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -4695,7 +5077,7 @@ ${croquiPages}
 app.get('/api/ordens-servico/:id/garantia', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1] || req.query.token;
   if (!token) return res.status(401).json({ error: 'Token required' });
-  try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); }
+  try { jwt.verify(token, JWT_SECRET); }
   catch { return res.status(401).json({ error: 'Invalid token' }); }
   try {
     await connectDB();
@@ -4741,7 +5123,7 @@ app.get('/api/ordens-servico/:id/garantia', async (req, res) => {
 
 // ── Finalizar OS (aplicador — sem auth JWT) ───────────────────────────────────
 // Recebe: { nomeResponsavel, cargoResponsavel, assinaturaBase64 }
-app.patch('/api/aplicador/os/:id/finalizar', async (req, res) => {
+app.patch('/api/aplicador/os/:id/finalizar', authEquipe, async (req, res) => {
   try {
     await connectDB();
     const { nomeResponsavel, cargoResponsavel, assinaturaBase64 } = req.body;
@@ -4778,7 +5160,7 @@ app.patch('/api/aplicador/os/:id/finalizar', async (req, res) => {
 });
 
 // ── Registrar consumo de produto (aplicador — sem auth JWT) ──────────────────
-app.patch('/api/aplicador/os/:id/consumo', async (req, res) => {
+app.patch('/api/aplicador/os/:id/consumo', authEquipe, async (req, res) => {
   try {
     await connectDB();
     const { litros, membro } = req.body;
@@ -4802,7 +5184,7 @@ app.patch('/api/aplicador/os/:id/consumo', async (req, res) => {
 });
 
 // ── Fechar Dia de Trabalho (aplicador — sem auth JWT) ────────────────────────
-app.patch('/api/aplicador/os/:id/fechar-dia', async (req, res) => {
+app.patch('/api/aplicador/os/:id/fechar-dia', authEquipe, async (req, res) => {
   try {
     await connectDB();
     const { litros, membro, injetores } = req.body;
@@ -4839,8 +5221,31 @@ app.patch('/api/aplicador/os/:id/fechar-dia', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Salvar fotos depois do reparo (aplicador — sem auth JWT) ──────────────────
+app.patch('/api/aplicador/os/:id/fotos-depois-reparo', authEquipe, bigJson, async (req, res) => {
+  try {
+    await connectDB();
+    const { fotos } = req.body; // array of base64 strings
+    if (!Array.isArray(fotos)) return res.status(400).json({ error: 'fotos deve ser array' });
+    const fotosData = fotos.map(f => ({ data: f }));
+    if (isConnected) {
+      const os = await OS.findById(req.params.id);
+      if (!os) return res.status(404).json({ error: 'OS não encontrada' });
+      os.fotosDepoisReparo = [...(os.fotosDepoisReparo || []), ...fotosData];
+      os.updatedAt = Date.now();
+      await os.save();
+      return res.json({ ok: true, total: os.fotosDepoisReparo.length });
+    } else {
+      const idx = memStore.os.findIndex(o => o._id === req.params.id);
+      if (idx === -1) return res.status(404).json({ error: 'OS não encontrada' });
+      memStore.os[idx].fotosDepoisReparo = [...(memStore.os[idx].fotosDepoisReparo || []), ...fotosData];
+      return res.json({ ok: true, total: memStore.os[idx].fotosDepoisReparo.length });
+    }
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Alterar status da OS pelo aplicador (sem auth JWT — reabrir, etc.) ──────────
-app.patch('/api/aplicador/os/:id/status', async (req, res) => {
+app.patch('/api/aplicador/os/:id/status', authEquipe, async (req, res) => {
   try {
     await connectDB();
     const { status } = req.body;
@@ -5101,7 +5506,7 @@ ${depoisPages}
 app.get('/api/ordens-servico/:id/pdf', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1] || req.query.token;
   if (!token) return res.status(401).json({ error: 'Token required' });
-  try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); }
+  try { jwt.verify(token, JWT_SECRET); }
   catch { return res.status(401).json({ error: 'Invalid token' }); }
   try {
     await connectDB();
@@ -5165,7 +5570,39 @@ app.get('/api/aplicador/equipes', async (req, res) => {
 });
 
 // Login do aplicador com senha
-app.post('/api/aplicador/auth/login', async (req, res) => {
+// Reset de todas as senhas para 123456 (admin only)
+app.post('/api/equipes/reset-all-senhas', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    const hash = await bcrypt.hash('123456', 10);
+    const result = await Equipe.updateMany({}, { senhaHash: hash, senhaInicial: true });
+    res.json({ ok: true, atualizadas: result.modifiedCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Login master — admin visualiza como uma equipe específica
+app.post('/api/aplicador/auth/master-login', loginLimiter, async (req, res) => {
+  try {
+    await connectDB();
+    const { masterPassword, equipeId } = req.body || {};
+    if (!masterPassword || !equipeId) return res.status(400).json({ error: 'masterPassword e equipeId obrigatórios' });
+    // Verifica senha master — APENAS a senha do painel (sem fallback hardcoded)
+    // .trim() defensivo: env vars do Vercel podem vir com \n no final
+    const expectedPass = (ADMIN_PASSWORD || '').trim();
+    if ((masterPassword || '').trim() !== expectedPass) return res.status(401).json({ error: 'Senha master incorreta' });
+    // Busca a equipe
+    const equipe = isConnected
+      ? await Equipe.findById(equipeId).lean()
+      : memStore.equipes.find(e => e._id === equipeId);
+    if (!equipe) return res.status(404).json({ error: 'Equipe não encontrada' });
+    // Emite JWT de admin com equipeId selecionada
+    const token = jwt.sign({ role: 'admin', masterMode: true, equipeId: String(equipe._id), equipeNome: equipe.nome, username: 'master' }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ ok: true, masterMode: true, token, equipe: { _id: equipe._id, nome: equipe.nome, cor: equipe.cor } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/aplicador/auth/login', loginLimiter, async (req, res) => {
   try {
     await connectDB();
     const { equipeId, senha } = req.body || {};
@@ -5177,12 +5614,14 @@ app.post('/api/aplicador/auth/login', async (req, res) => {
     if (!equipe.senhaHash) return res.status(401).json({ error: 'Equipe sem senha configurada' });
     const ok = await bcrypt.compare(senha, equipe.senhaHash);
     if (!ok) return res.status(401).json({ error: 'Senha incorreta' });
-    res.json({ ok: true, senhaInicial: !!equipe.senhaInicial });
+    // Emite JWT da equipe
+    const token = jwt.sign({ role: 'equipe', equipeId: String(equipe._id), equipeNome: equipe.nome }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ ok: true, token, senhaInicial: !!equipe.senhaInicial });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Troca de senha do aplicador
-app.post('/api/aplicador/auth/change-password', async (req, res) => {
+app.post('/api/aplicador/auth/change-password', loginLimiter, async (req, res) => {
   try {
     await connectDB();
     const { equipeId, senhaAtual, novaSenha } = req.body || {};
@@ -5196,7 +5635,9 @@ app.post('/api/aplicador/auth/change-password', async (req, res) => {
     equipe.senhaHash = await bcrypt.hash(novaSenha, 10);
     equipe.senhaInicial = false;
     await equipe.save();
-    res.json({ ok: true });
+    // Emite novo token após troca
+    const token = jwt.sign({ role: 'equipe', equipeId: String(equipe._id), equipeNome: equipe.nome }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ ok: true, token });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -5306,7 +5747,7 @@ app.get('/api/croquis', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/aplicador/os', async (req, res) => {
+app.get('/api/aplicador/os', authEquipe, async (req, res) => {
   try {
     await connectDB();
     const { equipeId, historico } = req.query;
@@ -5327,7 +5768,7 @@ app.get('/api/aplicador/os', async (req, res) => {
 
 // ── Listar OS compartilhadas com uma equipe ───────────────────────────────────
 // IMPORTANT: must be before /:id so Express doesn't capture 'compartilhadas' as an id
-app.get('/api/aplicador/os/compartilhadas', async (req, res) => {
+app.get('/api/aplicador/os/compartilhadas', authEquipe, async (req, res) => {
   try {
     await connectDB();
     const { equipeId } = req.query;
@@ -5349,7 +5790,7 @@ app.get('/api/aplicador/os/compartilhadas', async (req, res) => {
 
 // ── Histórico de reparos de uma OS original ────────────────────────────────
 // IMPORTANT: must be before /:id so Express doesn't capture 'historico-reparos' as an id
-app.get('/api/aplicador/os/historico-reparos', async (req, res) => {
+app.get('/api/aplicador/os/historico-reparos', authEquipe, async (req, res) => {
   try {
     await connectDB();
     const { osOriginalId } = req.query;
@@ -5376,7 +5817,7 @@ app.get('/api/aplicador/os/historico-reparos', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/aplicador/os/:id', async (req, res) => {
+app.get('/api/aplicador/os/:id', authEquipe, async (req, res) => {
   try {
     await connectDB();
     let os;
@@ -5391,7 +5832,7 @@ app.get('/api/aplicador/os/:id', async (req, res) => {
 
 // Action-based PATCH for aplicador pontos
 // actions: add_foto_antes | add_foto_depois | remove_foto_antes | remove_foto_depois | toggle_subponto | iniciar | concluir
-app.patch('/api/aplicador/os/:id/pontos/:idx', async (req, res) => {
+app.patch('/api/aplicador/os/:id/pontos/:idx', authEquipe, bigJson, async (req, res) => {
   try {
     await connectDB();
     const idx = Number(req.params.idx);
@@ -5462,6 +5903,9 @@ app.patch('/api/aplicador/os/:id/pontos/:idx', async (req, res) => {
       // Reabre um local concluído para edição
       p.statusLocal = 'em_andamento';
       p.status = 'em_andamento';
+    } else if (action === 'save_obs') {
+      const { obs } = req.body;
+      p.obs = typeof obs === 'string' ? obs : '';
     } else if (action === 'save_croqui') {
       const { croquiBase64, otimizado } = req.body;
       if (!croquiBase64) return res.status(400).json({ error: 'croquiBase64 required' });
@@ -5569,6 +6013,7 @@ app.post('/api/lixeira/:id/restaurar', auth, adminOnly, async (req, res) => {
 });
 
 app.delete('/api/lixeira/:id', auth, adminOnly, async (req, res) => {
+  await audit(req, 'permanent-delete', 'lixeira', req.params.id);
   try {
     await connectDB();
     if (isConnected) {
@@ -5581,7 +6026,7 @@ app.delete('/api/lixeira/:id', auth, adminOnly, async (req, res) => {
 });
 
 // ── Compartilhar pontos de OS com outra equipe ────────────────────────────────
-app.post('/api/aplicador/os/:id/compartilhar', async (req, res) => {
+app.post('/api/aplicador/os/:id/compartilhar', authEquipe, async (req, res) => {
   try {
     await connectDB();
     const { equipeId, equipeNome, pontos } = req.body; // pontos: [Number] — índices dos pontos
@@ -5773,7 +6218,7 @@ app.get('/api/equipes/ranking', auth, async (req, res) => {
 });
 
 // ── Criar reparo a partir de OS existente ─────────────────────────────────────
-app.post('/api/reparos/from-os', auth, async (req, res) => {
+app.post('/api/reparos/from-os', auth, bigJson, async (req, res) => {
   try {
     await connectDB();
     const { osOriginalId, pontoIdx, pontosIdx, itensSelecionados, tipoReparo, equipeId, dataInicio, obs, fotosReparo } = req.body;
@@ -5890,7 +6335,18 @@ app.post('/api/reparos/from-os', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/audit-log — histórico de ações destrutivas de admins (últimas 500)
+app.get('/api/audit-log', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.json([]);
+    const logs = await AuditLog.find().sort({ ts: -1 }).limit(500).lean();
+    res.json(logs);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.delete('/api/ordens-servico/:id', auth, adminOnly, async (req, res) => {
+  await audit(req, 'delete', 'ordem-servico', req.params.id);
   try {
     await connectDB();
     if (isConnected) {
@@ -5908,7 +6364,7 @@ app.delete('/api/ordens-servico/:id', auth, adminOnly, async (req, res) => {
 
 // ── Croqui ────────────────────────────────────────────────────────────────────
 
-app.post('/api/croqui/otimizar', async (req, res) => {
+app.post('/api/croqui/otimizar', expensiveLimiter, bigJson, async (req, res) => {
   try {
     const { imagem, canvasW, canvasH } = req.body;
     if (!imagem) return res.status(400).json({ error: 'imagem required' });
@@ -5936,6 +6392,9 @@ app.post('/api/croqui/otimizar', async (req, res) => {
       if (!svg.includes('xmlns=')) {
         svg = svg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
       }
+      // Sanitiza SVG: remove <script>, on*= handlers, javascript: URIs, etc.
+      svg = sanitizeSvg(svg);
+      if (!svg) return null;
       return svg;
     };
 
@@ -6218,7 +6677,7 @@ app.post('/api/garantias/:id/marcar-enviada', auth, async (req, res) => {
 app.get('/api/garantias/:id/pdf', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1] || req.query.token;
   if (!token) return res.status(401).json({ error: 'Token required' });
-  try { jwt.verify(token, process.env.JWT_SECRET || 'dev-secret'); } catch { return res.status(401).json({ error: 'Invalid token' }); }
+  try { jwt.verify(token, JWT_SECRET); } catch { return res.status(401).json({ error: 'Invalid token' }); }
   try {
     await connectDB();
     const g = isConnected ? await GarantiaDoc.findById(req.params.id).lean() : null;
@@ -6387,7 +6846,7 @@ app.put('/api/estoque-equipes/:equipeId', auth, async (req, res) => {
 });
 
 // ── Resumo de estoque por equipe (semana + mês) ───────────────────────────────
-app.get('/api/aplicador/estoque-summary', async (req, res) => {
+app.get('/api/aplicador/estoque-summary', authEquipe, async (req, res) => {
   try {
     await connectDB();
     const { equipeId } = req.query;
@@ -6435,7 +6894,7 @@ app.get('/api/aplicador/estoque-summary', async (req, res) => {
 });
 
 // ── Lançar estoque recebido (aplicador — sem auth JWT) ────────────────────────
-app.post('/api/aplicador/estoque-recebido', async (req, res) => {
+app.post('/api/aplicador/estoque-recebido', authEquipe, async (req, res) => {
   try {
     await connectDB();
     const { equipeId, litros, semana } = req.body;
@@ -6456,10 +6915,404 @@ app.post('/api/aplicador/estoque-recebido', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Integração de Orçamentos Legados (admin-only) ─────────────────────────────
+
+// Helper: chama Gemini com PDF e retorna JSON parseado robustamente
+async function geminiExtrairPdf(pdfBase64, prompt, maxTokens = 8192) {
+  const GEMINI_KEY = (process.env.GEMINI_API_KEY || '').trim();
+  if (!GEMINI_KEY) throw new Error('GEMINI_API_KEY não configurada');
+
+  const geminiRes = await axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+    {
+      contents: [{ parts: [
+        { text: prompt },
+        { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } }
+      ]}],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: maxTokens,
+      }
+    },
+    { timeout: 90000 }
+  );
+
+  // Coleta texto de todas as partes (thinking models retornam múltiplas partes)
+  const parts = geminiRes.data?.candidates?.[0]?.content?.parts || [];
+  let rawText = parts.map(p => p.text || '').join('');
+
+  // Strip thinking tags e markdown fences
+  rawText = rawText
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
+
+  // Tenta parse direto
+  try { return JSON.parse(rawText); } catch {}
+
+  // Fallback: extrai o primeiro bloco JSON {...}
+  const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try { return JSON.parse(jsonMatch[0]); } catch {}
+  }
+
+  throw new Error(`Gemini não retornou JSON válido. Trecho: "${rawText.slice(0, 400)}"`);
+}
+
+// Extrai dados do PDF de orçamento via Gemini
+app.post('/api/integracao/extrair-orcamento', auth, bigJson, async (req, res) => {
+  try {
+    const { pdf } = req.body;
+    if (!pdf) return res.status(400).json({ error: 'pdf (base64) obrigatório' });
+
+    const pdfBase64 = pdf.replace(/^data:[^;]+;base64,/, '');
+    const prompt = `Analise este PDF de orçamento de impermeabilização e extraia os dados. Retorne um JSON com EXATAMENTE estes campos: { "cliente": string, "endereco": string, "bairro": string, "cidade": string, "cep": string, "ac": string (síndico ou responsável), "celular": string, "garantia": number (15 ou 7), "dataOrcamento": string (formato YYYY-MM-DD) ou null, "locais": [ { "nome": string, "andar": string ou null, "trinca": number (metros), "juntaFria": number (metros), "ralo": number (unidades), "juntaDilat": number (metros), "ferragem": number (metros), "cortina": number (m2) } ], "totalBruto": number }. Use null para campos ausentes. Todos os valores numéricos devem ser números, não strings. Certifique-se que "locais" seja um array.`;
+
+    const dados = await geminiExtrairPdf(pdfBase64, prompt, 8192);
+    res.json({ success: true, dados });
+  } catch (err) {
+    log('error', 'integracao/extrair-orcamento:', err.message);
+    res.status(err.message.includes('não configurada') ? 503 : 422).json({ error: err.message });
+  }
+});
+
+// Extrai fotos e locais do Word (.docx) do relatório fotográfico via mammoth
+app.post('/api/integracao/extrair-relatorio', auth, bigJson, async (req, res) => {
+  try {
+    if (!mammothLib) return res.status(503).json({ error: 'mammoth não disponível — instale a dependência' });
+    const { docx } = req.body;
+    if (!docx) return res.status(400).json({ error: 'docx (base64) obrigatório' });
+
+    const docxBase64 = docx.replace(/^data:[^;]+;base64,/, '');
+    const buffer = Buffer.from(docxBase64, 'base64');
+
+    // Extrai HTML com imagens inline como data URIs
+    const result = await mammothLib.convertToHtml(
+      { buffer },
+      { convertImage: mammothLib.images.inline(img =>
+          img.read('base64').then(b64 => ({ src: `data:${img.contentType};base64,${b64}` }))
+      )}
+    );
+
+    const html = result.value;
+    // Parseia HTML para extrair locais + fotos
+    // Estratégia: blocos de heading/strong antes de img → nome do local
+    const locais = [];
+    let localAtual = null;
+
+    // Extrai sequências de (heading|paragraph) → (img+)
+    const tokenRegex = /<(h[1-6]|p)[^>]*>(.*?)<\/\1>/gi;
+    const imgRegex = /<img[^>]+src="([^"]+)"/gi;
+
+    // Substitui entidades HTML simples
+    const decodHtml = s => s
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ').replace(/&#\d+;/g, '').trim();
+
+    // Tokeniza o HTML em blocos texto + imagem
+    const tokens = [];
+    let lastIdx = 0;
+    const blockRe = /<(?:h[1-6]|p|img)[^>]*>(?:.*?)<\/(?:h[1-6]|p)>|<img[^>]+>/gis;
+    let m;
+    while ((m = blockRe.exec(html)) !== null) {
+      const tag = m[0];
+      if (tag.startsWith('<img')) {
+        const srcM = /src="([^"]+)"/.exec(tag);
+        if (srcM) tokens.push({ type: 'img', src: srcM[1] });
+      } else {
+        const text = decodHtml(tag);
+        if (text.length > 1) tokens.push({ type: 'text', text });
+      }
+    }
+
+    // Agrupa: texto seguido de imagens = local
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      if (tok.type === 'text') {
+        // Verifica se há imagem logo a seguir
+        const nextImgs = [];
+        let j = i + 1;
+        while (j < tokens.length && tokens[j].type === 'img') {
+          nextImgs.push(tokens[j].src);
+          j++;
+        }
+        if (nextImgs.length > 0) {
+          // Inicia novo local ou adiciona ao atual com mesmo nome
+          const nomeNorm = tok.text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+          const existing = locais.find(l => {
+            const en = l.nome.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+            return en === nomeNorm || en.includes(nomeNorm) || nomeNorm.includes(en);
+          });
+          if (existing) {
+            existing.fotos.push(...nextImgs);
+          } else {
+            locais.push({ nome: tok.text, fotos: nextImgs });
+          }
+          i = j - 1; // pula os imgs já consumidos
+        } else if (nextImgs.length === 0 && localAtual) {
+          // texto sem imgs após — não cria local mas atualiza referência
+        }
+      }
+    }
+
+    res.json({ success: true, locais, totalFotos: locais.reduce((s, l) => s + l.fotos.length, 0) });
+  } catch (err) {
+    log('error', 'integracao/extrair-relatorio:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Extrai dados do PDF de contrato via Gemini
+app.post('/api/integracao/extrair-contrato', auth, bigJson, async (req, res) => {
+  try {
+    const { pdf } = req.body;
+    if (!pdf) return res.status(400).json({ error: 'pdf (base64) obrigatório' });
+
+    const pdfBase64 = pdf.replace(/^data:[^;]+;base64,/, '');
+    const prompt = `Analise este PDF de contrato de impermeabilização e extraia os dados. Retorne um JSON com EXATAMENTE estes campos: { "razaoSocial": string, "cnpjCliente": string, "cpfResponsavel": string, "rgResponsavel": string, "sindico": string, "dataAssinatura": string (YYYY-MM-DD) ou null, "dataInicio": string (YYYY-MM-DD) ou null, "dataTermino": string (YYYY-MM-DD) ou null, "prazoExecucao": number (dias úteis) ou null, "garantia": number (15 ou 7), "totalLiquido": number, "parcelas": number (inteiro), "valorParcela": number, "obsGeral": string ou null }. Use null para campos ausentes. Todos os valores numéricos devem ser números, não strings.`;
+
+    const dados = await geminiExtrairPdf(pdfBase64, prompt, 2048);
+    res.json({ success: true, dados });
+  } catch (err) {
+    log('error', 'integracao/extrair-contrato:', err.message);
+    res.status(err.message.includes('não configurada') ? 503 : 422).json({ error: err.message });
+  }
+});
+
+// Cria medição + orçamento + contrato com dados da integração
+app.post('/api/integracao/criar', auth, bigJson, async (req, res) => {
+  try {
+    await connectDB();
+    const { dadosOrcamento, dadosContrato, locaisComFotos } = req.body;
+    if (!dadosOrcamento) return res.status(400).json({ error: 'dadosOrcamento obrigatório' });
+
+    const cfg = await getConfig();
+    const precos = cfg.precos || {};
+
+    // ── 1. Criar Medição ─────────────────────────────────────────────────────
+    let numMedicao = precos.numMedicao;
+    if (!numMedicao) {
+      const count = await Medicao.countDocuments();
+      numMedicao = count + 1;
+    }
+    await Config.findByIdAndUpdate('main', { 'precos.numMedicao': numMedicao + 1 });
+
+    // Mescla fotos do relatório nos locais pelo nome (matching normalizado)
+    const normNome = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+    const locaisComFotosMap = {};
+    (locaisComFotos || []).forEach(l => { locaisComFotosMap[normNome(l.nome)] = l.fotos || []; });
+
+    const locaisMedicao = (dadosOrcamento.locais || []).map(l => {
+      const nNorm = normNome(l.nome);
+      // Tenta match exato, depois parcial
+      let fotos = locaisComFotosMap[nNorm];
+      if (!fotos) {
+        const key = Object.keys(locaisComFotosMap).find(k => k.includes(nNorm) || nNorm.includes(k));
+        fotos = key ? locaisComFotosMap[key] : [];
+      }
+      return {
+        ...l,
+        fotos: (fotos || []).map(f => ({ data: f })),
+      };
+    });
+
+    const createdAt = dadosOrcamento.dataOrcamento
+      ? new Date(dadosOrcamento.dataOrcamento + 'T12:00:00').getTime()
+      : Date.now();
+
+    const medicaoId = uuidv4();
+    const medicao = await Medicao.create({
+      _id: medicaoId,
+      numeroMedicao: numMedicao,
+      status: 'recebida',
+      user: 'integracao',
+      origem: 'integracao',
+      createdAt,
+      cliente: dadosOrcamento.cliente || '',
+      endereco: dadosOrcamento.endereco || '',
+      bairro: dadosOrcamento.bairro || '',
+      cidade: dadosOrcamento.cidade || '',
+      cep: dadosOrcamento.cep || '',
+      ac: dadosOrcamento.ac || '',
+      celular: dadosOrcamento.celular || '',
+      garantia: String(dadosOrcamento.garantia || '15'),
+      dataMedicao: dadosOrcamento.dataOrcamento || null,
+      locais: locaisMedicao,
+    });
+
+    // ── 2. Criar Orçamento ────────────────────────────────────────────────────
+    const numOrcamento = precos.numOrcamento || 1;
+    await Config.findByIdAndUpdate('main', { $inc: { 'precos.numOrcamento': 1 } });
+
+    const totals = { trinca: 0, juntaFria: 0, ralo: 0, juntaDilat: 0, ferragem: 0, cortina: 0 };
+    locaisMedicao.forEach(l => {
+      totals.trinca    += Number(l.trinca)    || 0;
+      totals.juntaFria += Number(l.juntaFria) || 0;
+      totals.ralo      += Number(l.ralo)      || 0;
+      totals.juntaDilat+= Number(l.juntaDilat)|| 0;
+      totals.ferragem  += Number(l.ferragem)  || 0;
+      totals.cortina   += Number(l.cortina)   || 0;
+    });
+
+    const obra = calcObra(totals);
+    const itens = [
+      { tipo: 'trinca',     descricao: 'Trincas',                quantidade: totals.trinca,     unidade: 'm',    valorUnit: precos.trinca     || 950,  subtotal: totals.trinca     * (precos.trinca     || 950)  },
+      { tipo: 'juntaFria',  descricao: 'Juntas Frias',           quantidade: totals.juntaFria,  unidade: 'm',    valorUnit: precos.juntaFria  || 950,  subtotal: totals.juntaFria  * (precos.juntaFria  || 950)  },
+      { tipo: 'ralo',       descricao: 'Ralos',                  quantidade: totals.ralo,       unidade: 'unid', valorUnit: precos.ralo       || 750,  subtotal: totals.ralo       * (precos.ralo       || 750)  },
+      { tipo: 'juntaDilat', descricao: 'Juntas de Dilatação',    quantidade: totals.juntaDilat, unidade: 'm',    valorUnit: precos.juntaDilat || 950,  subtotal: totals.juntaDilat * (precos.juntaDilat || 950)  },
+      { tipo: 'ferragem',   descricao: 'Tratamento de Ferragens',quantidade: totals.ferragem,   unidade: 'm',    valorUnit: precos.ferragem   || 120,  subtotal: totals.ferragem   * (precos.ferragem   || 120)  },
+      { tipo: 'cortina',    descricao: 'Cortinas',               quantidade: totals.cortina,    unidade: 'm²',   valorUnit: precos.cortina    || 1020, subtotal: totals.cortina    * (precos.cortina    || 1020) },
+      { tipo: 'art',        descricao: 'ART Engº',               quantidade: 1,                 unidade: 'unid', valorUnit: precos.art        || 300,  subtotal: precos.art        || 300  },
+      { tipo: 'mobilizacao',descricao: 'Mobilização',            quantidade: 1,                 unidade: 'unid', valorUnit: precos.mobilizacao|| 300,  subtotal: precos.mobilizacao|| 300  },
+    ];
+
+    // Se tiver totalBruto do PDF, usa ele; senão calcula dos itens
+    const totalBrutoCalculado = itens.reduce((s, i) => s + i.subtotal, 0);
+    const totalBruto = dadosOrcamento.totalBruto || totalBrutoCalculado;
+    const totalLiquidoOrc = dadosContrato?.totalLiquido || totalBruto;
+
+    const orcamentoId = uuidv4();
+    const orcamento = await Orcamento.create({
+      _id: orcamentoId,
+      numero: numOrcamento,
+      medicaoId,
+      numeroMedicao: numMedicao,
+      status: 'aprovado',
+      createdAt,
+      updatedAt: Date.now(),
+      origem: 'integracao',
+      cliente: dadosOrcamento.cliente || '',
+      endereco: dadosOrcamento.endereco || '',
+      bairro: dadosOrcamento.bairro || '',
+      cidade: dadosOrcamento.cidade || '',
+      cep: dadosOrcamento.cep || '',
+      ac: dadosOrcamento.ac || '',
+      celular: dadosOrcamento.celular || '',
+      dataOrcamento: dadosOrcamento.dataOrcamento
+        ? new Date(dadosOrcamento.dataOrcamento).toLocaleDateString('pt-BR')
+        : new Date().toLocaleDateString('pt-BR'),
+      garantia: Number(dadosOrcamento.garantia) || 15,
+      itens,
+      totalBruto,
+      desconto: 0,
+      descontoTipo: 'percent',
+      totalLiquido: totalLiquidoOrc,
+      entrada: 0,
+      saldo: totalLiquidoOrc,
+      parcelas: dadosContrato?.parcelas || 1,
+      valorParcela: dadosContrato?.valorParcela || totalLiquidoOrc,
+      locais: locaisMedicao,
+      diasTrabalho: obra.diasTrabalho,
+      consumoProduto: obra.consumoProduto,
+      qtdInjetores: obra.qtdInjetores,
+    });
+
+    // ── 3. Criar Contrato ─────────────────────────────────────────────────────
+    const contratoId = uuidv4();
+    const parcelas = dadosContrato?.parcelas || 1;
+    const valorParcela = dadosContrato?.valorParcela || totalLiquidoOrc / parcelas;
+
+    const contrato = await Contrato.create({
+      _id: contratoId,
+      numero: numOrcamento, // mesmo número do orçamento
+      orcamentoId,
+      status: 'assinado',
+      createdAt,
+      updatedAt: Date.now(),
+      origem: 'integracao',
+      cliente: dadosOrcamento.cliente || '',
+      endereco: dadosOrcamento.endereco || '',
+      bairro: dadosOrcamento.bairro || '',
+      cidade: dadosOrcamento.cidade || '',
+      cep: dadosOrcamento.cep || '',
+      ac: dadosOrcamento.ac || '',
+      celular: dadosOrcamento.celular || '',
+      razaoSocial: dadosContrato?.razaoSocial || dadosOrcamento.cliente || '',
+      cnpjCliente: dadosContrato?.cnpjCliente || '',
+      cpfResponsavel: dadosContrato?.cpfResponsavel || '',
+      rgResponsavel: dadosContrato?.rgResponsavel || '',
+      sindico: dadosContrato?.sindico || dadosOrcamento.ac || '',
+      dataAssinatura: dadosContrato?.dataAssinatura || '',
+      dataInicio: dadosContrato?.dataInicio || '',
+      dataTermino: dadosContrato?.dataTermino || '',
+      foro: 'Rio de Janeiro',
+      garantia: Number(dadosContrato?.garantia || dadosOrcamento.garantia) || 15,
+      prazoExecucao: dadosContrato?.prazoExecucao || 3,
+      totalBruto,
+      totalLiquido: totalLiquidoOrc,
+      desconto: 0,
+      descontoTipo: 'percent',
+      parcelas,
+      valorParcela,
+      parcelasContrato: [],
+      locais: locaisMedicao,
+      itens: itens.filter(i => i.quantidade > 0),
+      cronograma: locaisMedicao.map(l => ({ local: l.nome || '', dataInicio: '', dataFim: '' })),
+      diasTrabalho: obra.diasTrabalho,
+      consumoProduto: obra.consumoProduto,
+      qtdInjetores: obra.qtdInjetores,
+      obsGeral: dadosContrato?.obsGeral || '',
+      statusHistorico: [{ status: 'assinado', data: Date.now() }],
+    });
+
+    log('info', `Integração: criou medição ${numMedicao}, orçamento ${numOrcamento}, contrato ${numOrcamento}`);
+    res.json({
+      success: true,
+      medicaoId,
+      orcamentoId,
+      contratoId,
+      numeroMedicao: numMedicao,
+      numeroOrcamento: numOrcamento,
+    });
+  } catch (err) {
+    log('error', 'integracao/criar:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Adicionar fotos em lote a um local da medição (usado pela integração) ────
+// Permite enviar fotos em chamadas pequenas, evitando o limite de 4.5MB do Vercel
+app.post('/api/integracao/adicionar-fotos', auth, bigJson, async (req, res) => {
+  try {
+    await connectDB();
+    const { medicaoId, nomeLocal, fotos } = req.body || {};
+    if (!medicaoId || !nomeLocal || !Array.isArray(fotos) || fotos.length === 0) {
+      return res.status(400).json({ error: 'medicaoId, nomeLocal e fotos[] obrigatórios' });
+    }
+    const medicao = await Medicao.findById(medicaoId);
+    if (!medicao) return res.status(404).json({ error: 'Medição não encontrada' });
+
+    const normNome = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+    const nNorm = normNome(nomeLocal);
+    let idxLocal = (medicao.locais || []).findIndex(l => normNome(l.nome) === nNorm);
+    if (idxLocal < 0) {
+      idxLocal = (medicao.locais || []).findIndex(l => {
+        const k = normNome(l.nome);
+        return k.includes(nNorm) || nNorm.includes(k);
+      });
+    }
+    if (idxLocal < 0) return res.status(404).json({ error: `Local "${nomeLocal}" não encontrado na medição` });
+
+    const fotosExistentes = medicao.locais[idxLocal].fotos || [];
+    const novasFotos = fotos.map(f => ({ data: f }));
+    medicao.locais[idxLocal].fotos = [...fotosExistentes, ...novasFotos];
+    medicao.markModified('locais');
+    await medicao.save();
+
+    res.json({ ok: true, totalFotos: medicao.locais[idxLocal].fotos.length });
+  } catch (err) {
+    log('error', 'integracao/adicionar-fotos:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── SPA fallback ──────────────────────────────────────────────────────────────
 
 if (process.env.NODE_ENV === 'production') {
-  app.get('*', (req, res) => {
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
   });
 }
@@ -6474,6 +7327,487 @@ app.get('/api/debug-zapsign', (req, res) => {
     token_env: process.env.ZAPSIGN_API_TOKEN ? 'SET' : 'NOT_SET'
   });
 });
+
+// ── Follow-up Agendamento ─────────────────────────────────────────────────────
+
+const followupConexaoSchema = new mongoose.Schema({
+  tecnico:      { type: String, required: true, unique: true },
+  nomeExibicao: String,
+  email:        String,
+}, { timestamps: true });
+const FollowupConexao = mongoose.models?.FollowupConexao
+  || mongoose.model('FollowupConexao', followupConexaoSchema);
+
+// Seed inicial — garante que Edson e Fernando já estão configurados com os emails corretos
+async function seedFollowupConexoes() {
+  const defaults = [
+    { tecnico: 'edson',    nomeExibicao: 'Edson',    email: 'encarregadovedafacil@gmail.com' },
+    { tecnico: 'fernando', nomeExibicao: 'Fernando', email: 'comercialvedafacilrio@gmail.com' },
+  ];
+  for (const d of defaults) {
+    try {
+      // Cria se não existe; se já existe com email vazio, preenche o email
+      await FollowupConexao.findOneAndUpdate(
+        { tecnico: d.tecnico },
+        {
+          $setOnInsert: { tecnico: d.tecnico, nomeExibicao: d.nomeExibicao, email: d.email },
+        },
+        { upsert: true }
+      );
+      // Segunda passagem: garante email preenchido caso registro já existia sem email
+      await FollowupConexao.updateOne(
+        { tecnico: d.tecnico, $or: [{ email: { $exists: false } }, { email: '' }, { email: null }] },
+        { $set: { email: d.email, nomeExibicao: d.nomeExibicao } }
+      );
+    } catch (e) { console.warn('seedFollowupConexoes', d.tecnico, e.message); }
+  }
+}
+
+const followupLogSchema = new mongoose.Schema({
+  eventoId:    String,
+  tecnico:     String,
+  tipo:        String,   // '24h' | '1h'
+  telefone:    String,
+  titulo:      String,
+  eventoInicio: Date,
+  status:      String,   // 'enviado' | 'erro'
+  erro:        String,
+}, { timestamps: true });
+const FollowupLog = mongoose.models?.FollowupLog
+  || mongoose.model('FollowupLog', followupLogSchema);
+
+function extractPhone(text) {
+  if (!text) return null;
+  const m = text.match(/(?:\+?55\s*)?(?:\(?\s*0?\d{2}\s*\)?\s*)?\d{4,5}[\s.\-]?\d{4}/);
+  if (!m) return null;
+  let p = m[0].replace(/\D/g, '');
+  if (p.length === 8)  p = '2199' + p;
+  if (p.length === 9)  p = '21'   + p;
+  if (p.length === 10) p = '55'   + p;
+  if (p.length === 11) p = '55'   + p;
+  if (!p.startsWith('55')) p = '55' + p;
+  return (p.length >= 12 && p.length <= 14) ? p : null;
+}
+
+async function refreshGToken(userDoc) {
+  if (!userDoc.googleRefreshToken) return userDoc.googleAccessToken || null;
+  try {
+    const r = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        refresh_token: userDoc.googleRefreshToken,
+        client_id:     (process.env.GOOGLE_CLIENT_ID     || '').trim(),
+        client_secret: (process.env.GOOGLE_CLIENT_SECRET || '').trim(),
+        grant_type:    'refresh_token',
+      }).toString(),
+    });
+    const d = await r.json();
+    if (d.access_token) {
+      await User.findOneAndUpdate({ _id: userDoc._id }, { $set: { googleAccessToken: d.access_token } });
+      return d.access_token;
+    }
+  } catch (e) { console.warn('refreshGToken error:', e.message); }
+  return userDoc.googleAccessToken || null;
+}
+
+async function fetchCalendarEventsForUser(userDoc, days = 14) {
+  // Sempre tenta renovar o token — access tokens expiram em 1h
+  let token = await refreshGToken(userDoc);
+  if (!token) return [];
+
+  // timeMin = ontem (para pegar eventos de hoje que já passaram)
+  const timeMin = new Date(Date.now() - 86400000);
+  timeMin.setHours(0, 0, 0, 0);
+  const timeMax = new Date(Date.now() + days * 86400000);
+
+  const params = new URLSearchParams({
+    timeMin: timeMin.toISOString(),
+    timeMax: timeMax.toISOString(),
+    maxResults: '100',
+    singleEvents: 'true',
+    orderBy: 'startTime',
+  });
+
+  const r = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!r.ok) {
+    const errText = await r.text().catch(() => '');
+    console.warn('Calendar API error', r.status, errText.slice(0, 300), 'user:', userDoc._id);
+    // Token expirado — tenta forçar refresh e tentar de novo
+    if (r.status === 401) {
+      const newToken = await refreshGToken({ ...userDoc, googleAccessToken: null });
+      if (!newToken || newToken === token) return [];
+      const r2 = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`,
+        { headers: { Authorization: `Bearer ${newToken}` } }
+      );
+      if (!r2.ok) return [];
+      const d2 = await r2.json();
+      return d2.items || [];
+    }
+    return [];
+  }
+  const d = await r.json();
+  return d.items || [];
+}
+
+async function evolutionRequest(path, method = 'GET', body = null) {
+  const base = (process.env.EVOLUTION_API_URL || '').replace(/\/$/, '');
+  const key  = process.env.EVOLUTION_API_KEY  || '';
+  const inst = process.env.EVOLUTION_INSTANCE || 'vedafacil';
+  if (!base || !key) throw new Error('Evolution API nao configurada (EVOLUTION_API_URL / EVOLUTION_API_KEY)');
+  const opts = { method, headers: { 'Content-Type': 'application/json', 'apikey': key } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(`${base}${path.replace(':inst', inst)}`, opts);
+  const text = await r.text();
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+function buildReminderMsg(tipo, nomeExibicao, dataOuDatetime) {
+  const dateStr = String(dataOuDatetime).split('T')[0];
+  const [, m, d] = dateStr.split('-');
+  const dia = `${d}/${m}`;
+  if (tipo === 'vespera' || tipo === '24h') {
+    return `Ola! 😊 Lembramos que *amanha, dia ${dia}*, esta agendada a visita tecnica da *Vedafacil*.\n\nNosso tecnico *${nomeExibicao}* ira ate voce para fazer a sua avaliacao.\nQualquer duvida, estamos a disposicao!`;
+  }
+  if (tipo === '1h') {
+    return `Ola! ⏰ Daqui a pouco, nosso tecnico *${nomeExibicao}* da *Vedafacil* estara ai para a visita agendada (dia ${dia}). Esteja disponivel! 😊\n\nQualquer duvida, entre em contato.`;
+  }
+  // tipo === 'dia'
+  return `Ola! ☀️ *Hoje, dia ${dia}*, nosso tecnico *${nomeExibicao}* da *Vedafacil* tem visita agendada com voce. Esteja disponivel! 😊\n\nQualquer duvida, entre em contato.`;
+}
+
+// helper: retorna YYYY-MM-DD no fuso BRT
+function hojeStr() {
+  return new Date().toLocaleDateString('fr-CA', { timeZone: 'America/Sao_Paulo' }); // fr-CA = YYYY-MM-DD
+}
+function amanhaStr() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toLocaleDateString('fr-CA', { timeZone: 'America/Sao_Paulo' });
+}
+
+// helper: busca OS agendadas/em_andamento nos proximos N dias
+async function fetchOsEventos(dias = 14) {
+  const hoje = hojeStr();
+  const limite = new Date();
+  limite.setDate(limite.getDate() + dias);
+  const limiteStr = limite.toLocaleDateString('fr-CA', { timeZone: 'America/Sao_Paulo' });
+  return OS.find({
+    status: { $in: ['agendada', 'em_andamento'] },
+    dataInicio: { $gte: hoje, $lte: limiteStr },
+    celular: { $exists: true, $ne: '' },
+  }).lean();
+}
+
+// GET /api/followup/conexoes
+app.get('/api/followup/conexoes', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    await seedFollowupConexoes();
+    const conexoes = await FollowupConexao.find().lean();
+    const enriched = await Promise.all(conexoes.map(async c => {
+      const user = c.email ? await User.findById(c.email)
+        .select('name googleAccessToken googleRefreshToken').lean() : null;
+      return { ...c, nomeUsuario: user?.name || null, tokenOk: !!(user?.googleAccessToken || user?.googleRefreshToken) };
+    }));
+    res.json(enriched);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/followup/conexoes
+app.post('/api/followup/conexoes', auth, adminOnly, async (req, res) => {
+  try {
+    const { tecnico, nomeExibicao, email } = req.body || {};
+    if (!tecnico || !nomeExibicao) return res.status(400).json({ error: 'tecnico e nomeExibicao obrigatorios' });
+    await connectDB();
+    const doc = await FollowupConexao.findOneAndUpdate(
+      { tecnico },
+      { $set: { tecnico, nomeExibicao, email: email || '' } },
+      { upsert: true, new: true }
+    );
+    res.json(doc);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/followup/conexoes/:tecnico
+app.delete('/api/followup/conexoes/:tecnico', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    await FollowupConexao.deleteOne({ tecnico: req.params.tecnico });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/followup/usuarios — medidores com token Google (para vincular)
+app.get('/api/followup/usuarios', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const users = await User.find({ googleRefreshToken: { $exists: true, $ne: '' } })
+      .select('_id name email picture').lean();
+    res.json(users);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/followup/eventos — combina OS do sistema + Google Calendar dos técnicos
+app.get('/api/followup/eventos', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const logs = await FollowupLog.find({ eventoInicio: { $gte: new Date(Date.now() - 3 * 86400000) } }).lean();
+    const logMap = {};
+    logs.forEach(l => { logMap[`${l.eventoId}_${l.tipo}`] = l; });
+    const allEvents = [];
+    const seenIds = new Set();
+
+    // --- FONTE 1: OS do sistema Vedafacil ---
+    const osList = await fetchOsEventos(14);
+    for (const os of osList) {
+      if (seenIds.has(os._id)) continue;
+      seenIds.add(os._id);
+      const lVesp = logMap[`${os._id}_vespera`];
+      const lDia  = logMap[`${os._id}_dia`];
+      const telefone = (os.celular || '').replace(/\D/g, '');
+      const fone = telefone.length >= 10 ? (telefone.startsWith('55') ? telefone : '55' + telefone) : null;
+      allEvents.push({
+        id: os._id, fonte: 'os',
+        titulo: os.cliente || '(sem cliente)',
+        inicio: os.dataInicio,
+        local: [os.endereco, os.bairro, os.cidade].filter(Boolean).join(', '),
+        telefone: fone,
+        tecnico: os.tecnicoResponsavel || os.equipeNome || '',
+        nomeExibicao: os.tecnicoResponsavel || os.equipeNome || 'Equipe',
+        osNumero: os.numero,
+        lembreteVespera: lVesp ? { status: lVesp.status, enviadoEm: lVesp.createdAt } : null,
+        lembreteDia:     lDia  ? { status: lDia.status,  enviadoEm: lDia.createdAt  } : null,
+        lembrete24h: lVesp ? { status: lVesp.status, enviadoEm: lVesp.createdAt } : null,
+        lembrete1h:  lDia  ? { status: lDia.status,  enviadoEm: lDia.createdAt  } : null,
+      });
+    }
+
+    // --- FONTE 2: Google Calendar dos técnicos ---
+    const conexoes = await FollowupConexao.find({ email: { $ne: '' } }).lean();
+    for (const c of conexoes) {
+      const user = await User.findById(c.email).lean();
+      if (!user) continue;
+      const gcEvents = await fetchCalendarEventsForUser(user);
+      for (const e of gcEvents) {
+        const inicio = e.start?.dateTime || e.start?.date;
+        if (!inicio) continue;
+        if (seenIds.has(e.id)) continue;
+        seenIds.add(e.id);
+        const telefone = extractPhone(e.description || '');
+        const lVesp = logMap[`${e.id}_vespera`] || logMap[`${e.id}_24h`];
+        const lDia  = logMap[`${e.id}_dia`]     || logMap[`${e.id}_1h`];
+        allEvents.push({
+          id: e.id, fonte: 'google',
+          titulo: e.summary || '(sem titulo)',
+          inicio: inicio.split('T')[0] || inicio,
+          local: e.location || '',
+          descricao: e.description || '',
+          telefone,
+          tecnico: c.tecnico, nomeExibicao: c.nomeExibicao,
+          lembreteVespera: lVesp ? { status: lVesp.status, enviadoEm: lVesp.createdAt } : null,
+          lembreteDia:     lDia  ? { status: lDia.status,  enviadoEm: lDia.createdAt  } : null,
+          lembrete24h: lVesp ? { status: lVesp.status, enviadoEm: lVesp.createdAt } : null,
+          lembrete1h:  lDia  ? { status: lDia.status,  enviadoEm: lDia.createdAt  } : null,
+        });
+      }
+    }
+
+    allEvents.sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)));
+    res.json(allEvents);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/followup/disparar — disparo manual
+app.post('/api/followup/disparar', auth, adminOnly, async (req, res) => {
+  const { eventoId, tipo, telefone, titulo, inicio, tecnico, nomeExibicao } = req.body || {};
+  if (!eventoId || !tipo || !telefone) return res.status(400).json({ error: 'eventoId, tipo, telefone obrigatorios' });
+  await connectDB();
+  try {
+    const tipoReal = tipo === '24h' ? 'vespera' : tipo === '1h' ? 'dia' : tipo;
+    const msg = buildReminderMsg(tipoReal, nomeExibicao || tecnico, inicio);
+    await evolutionRequest('/message/sendText/:inst', 'POST', { number: telefone, text: msg });
+    await FollowupLog.create({ eventoId, tecnico, tipo: tipoReal, telefone, titulo, eventoInicio: new Date(inicio + 'T00:00:00'), status: 'enviado' });
+    res.json({ ok: true });
+  } catch (err) {
+    await FollowupLog.create({ eventoId, tecnico, tipo, telefone, titulo, eventoInicio: new Date(inicio + 'T00:00:00'), status: 'erro', erro: err.message }).catch(() => {});
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/followup/logs
+app.get('/api/followup/logs', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const logs = await FollowupLog.find().sort({ createdAt: -1 }).limit(100).lean();
+    res.json(logs);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/followup/debug — diagnóstico de tokens e calendário
+app.get('/api/followup/debug', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const conexoes = await FollowupConexao.find({ email: { $ne: '' } }).lean();
+    const result = [];
+    for (const c of conexoes) {
+      const user = await User.findById(c.email).lean();
+      if (!user) { result.push({ tecnico: c.tecnico, email: c.email, erro: 'user nao encontrado no banco' }); continue; }
+      const hasAccess = !!user.googleAccessToken;
+      const hasRefresh = !!user.googleRefreshToken;
+      const expiry = user.googleTokenExpiry;
+      const tokenExpirado = expiry ? (expiry - Date.now() < 0) : 'sem expiry';
+      // Tenta buscar events
+      let calStatus = 'ok', calCount = 0, calErro = null;
+      try {
+        const events = await fetchCalendarEventsForUser(user);
+        calCount = events.length;
+      } catch(e) { calStatus = 'erro'; calErro = e.message; }
+      result.push({ tecnico: c.tecnico, email: c.email, hasAccess, hasRefresh, tokenExpirado, calStatus, calCount, calErro });
+    }
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/followup/logs/:id — apaga log individual para reenvio
+app.delete('/api/followup/logs/:id', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    await FollowupLog.findByIdAndDelete(req.params.id);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/followup/evolution/status
+app.get('/api/followup/evolution/status', auth, adminOnly, async (req, res) => {
+  try {
+    const data = await evolutionRequest('/instance/connectionState/:inst');
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/followup/evolution/qr
+app.get('/api/followup/evolution/qr', auth, adminOnly, async (req, res) => {
+  try {
+    const data = await evolutionRequest('/instance/connect/:inst');
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET + POST /api/cron/followup — disparos automáticos (cron-job.org a cada 15min)
+// Lógica: lê OS agendadas do sistema e envia:
+//   tipo 'vespera' → no dia anterior à OS (dataInicio = amanhã)
+//   tipo 'dia'     → no dia da OS (dataInicio = hoje)
+async function handleCronFollowup(req, res) {
+  // Aceita secret via header (preferido) ou query (legado, será descontinuado)
+  const secret = req.headers['x-cron-secret'] || req.query.secret;
+  if (!process.env.CRON_SECRET) return res.status(503).json({ error: 'CRON_SECRET not configured' });
+  if (secret !== process.env.CRON_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+  // Avisa se ainda usa query (para migrar cron-job.org)
+  if (req.query.secret && !req.headers['x-cron-secret']) {
+    log('warn', 'Cron usando secret via query (DEPRECATED). Migre para header X-Cron-Secret.');
+  }
+  await connectDB();
+  try {
+    const agora  = new Date();
+    const hoje   = hojeStr();
+    const amanha = amanhaStr();
+    let enviados = 0, erros = 0;
+
+    // ── 1. OS do sistema: lembrete véspera (dia anterior) e dia da visita ───────
+    const osList = await OS.find({
+      status: { $in: ['agendada', 'em_andamento'] },
+      dataInicio: { $in: [hoje, amanha] },
+      celular: { $exists: true, $ne: '' },
+    }).lean();
+
+    for (const os of osList) {
+      const tipo = os.dataInicio === amanha ? 'vespera' : 'dia';
+      const telefone = (os.celular || '').replace(/\D/g, '');
+      if (telefone.length < 10) continue;
+      const fone = telefone.startsWith('55') ? telefone : '55' + telefone;
+
+      const jaEnviou = await FollowupLog.findOne({ eventoId: String(os._id), tipo, status: 'enviado' });
+      if (jaEnviou) continue;
+
+      const nomeTecnico = os.tecnicoResponsavel || os.equipeNome || 'Equipe';
+      try {
+        const msg = buildReminderMsg(tipo, nomeTecnico, os.dataInicio);
+        await evolutionRequest('/message/sendText/:inst', 'POST', { number: fone, text: msg });
+        await FollowupLog.create({ eventoId: String(os._id), tecnico: nomeTecnico, tipo, telefone: fone, titulo: os.cliente || '', eventoInicio: new Date(os.dataInicio + 'T00:00:00'), status: 'enviado' });
+        enviados++;
+      } catch (err) {
+        await FollowupLog.create({ eventoId: String(os._id), tecnico: nomeTecnico, tipo, telefone: fone, titulo: os.cliente || '', eventoInicio: new Date(os.dataInicio + 'T00:00:00'), status: 'erro', erro: err.message });
+        erros++;
+      }
+    }
+
+    // ── 2. Google Calendar: 24h antes e 1h antes do evento ──────────────────────
+    // Cron roda a cada 15min → janelas maiores que 15min garantem que nenhum evento é perdido.
+    // O log de dedup evita envio duplo mesmo que o evento caia em duas rodadas.
+    //
+    //   24h → evento começa entre agora+23h e agora+25h  (janela de 2h)
+    //   1h  → evento começa entre agora+45min e agora+75min (janela de 30min)
+    const MS = { h23: 23*3600000, h25: 25*3600000, m45: 45*60000, m75: 75*60000 };
+
+    const conexoes = await FollowupConexao.find({ email: { $ne: '' } }).lean();
+    for (const c of conexoes) {
+      const user = await User.findById(c.email).lean();
+      if (!user) continue;
+
+      let events = [];
+      try { events = await fetchCalendarEventsForUser(user, 3); }
+      catch (e) { console.warn('Calendar fetch error:', c.email, e.message); continue; }
+
+      for (const ev of events) {
+        // Ignora eventos de dia inteiro (sem horário definido)
+        const startRaw = ev.start?.dateTime;
+        if (!startRaw) continue;
+
+        const eventStart = new Date(startRaw);
+        const diff = eventStart.getTime() - agora.getTime();
+
+        let tipo = null;
+        if (diff >= MS.h23 && diff < MS.h25) tipo = '24h';
+        else if (diff >= MS.m45 && diff < MS.m75) tipo = '1h';
+        if (!tipo) continue;
+
+        // Telefone obrigatório na descrição do evento
+        const fone = extractPhone(ev.description || '');
+        if (!fone) continue;
+
+        // Dedup: não manda duas vezes para o mesmo evento+tipo
+        const jaEnviou = await FollowupLog.findOne({ eventoId: ev.id, tipo, status: 'enviado' });
+        if (jaEnviou) continue;
+
+        const nomeTecnico = c.nomeExibicao || c.tecnico;
+        const titulo = ev.summary || '';
+
+        try {
+          const msg = buildReminderMsg(tipo, nomeTecnico, startRaw);
+          await evolutionRequest('/message/sendText/:inst', 'POST', { number: fone, text: msg });
+          await FollowupLog.create({ eventoId: ev.id, tecnico: nomeTecnico, tipo, telefone: fone, titulo, eventoInicio: eventStart, status: 'enviado' });
+          enviados++;
+        } catch (err) {
+          await FollowupLog.create({ eventoId: ev.id, tecnico: nomeTecnico, tipo, telefone: fone, titulo, eventoInicio: eventStart, status: 'erro', erro: err.message });
+          erros++;
+        }
+      }
+    }
+
+    res.json({ ok: true, enviados, erros, checkedAt: agora.toISOString(), hoje, amanha });
+  } catch (err) {
+    console.error('Cron followup error:', err);
+    res.status(500).json({ error: err.message });
+  }
+}
+// Aceita GET e POST (cron-job.org usa GET por padrão)
+app.get('/api/cron/followup', handleCronFollowup);
+app.post('/api/cron/followup', handleCronFollowup);
 
 // ── Start server (local dev) ──────────────────────────────────────────────────
 

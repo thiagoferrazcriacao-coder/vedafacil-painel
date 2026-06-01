@@ -47,6 +47,7 @@ export const api = {
   updateMedicaoStatus: (id, status) => request('PATCH', `/medicoes/${id}/status`, { status }),
   updateMedicao: (id, data) => request('PUT', `/medicoes/${id}`, data),
   updateMedicaoFotos: (id, locais) => request('PATCH', `/medicoes/${id}/fotos`, { locais }),
+  adicionarLocalMedicao: (id, local) => request('PATCH', `/medicoes/${id}/adicionar-local`, { local }),
   createMedicaoManual: (data) => request('POST', '/medicoes/manual', data),
 
   // Orcamentos
@@ -74,7 +75,7 @@ export const api = {
   updateContratoStatus: (id, status) => request('PATCH', `/contratos/${id}/status`, { status }),
   sendToZapSign: (id, email, nomeSigner) => request('POST', `/zapsign-send`, { contratoId: id, email, nomeSigner }),
   otimizarCroqui: (imagem) => request('POST', '/croqui/otimizar', { imagem }),
-  getContratoPdfUrl: (id) => `${BASE}/contratos/${id}/pdf?token=${encodeURIComponent(getToken() || '')}`,
+  getContratoPdfUrl: (id) => `${BASE}/contratos/${id}/pdf?token=${encodeURIComponent(getToken() || '')}&t=${Date.now()}`,
   getGarantiaPdfUrl: (id) => `${BASE}/contratos/${id}/garantia?token=${encodeURIComponent(getToken() || '')}`,
   getArtPdfUrl: (id) => `${BASE}/contratos/${id}/art?token=${encodeURIComponent(getToken() || '')}`,
   marcarGarantiaEnviada: (id) => request('POST', `/contratos/${id}/garantia/marcar-enviada`),
@@ -162,4 +163,15 @@ export const api = {
   getPushVapidKey: () => request('GET', '/push/vapid-public-key'),
   pushSubscribe: (subscription) => request('POST', '/push/subscribe', { subscription }),
   pushUnsubscribe: () => request('DELETE', '/push/unsubscribe'),
+
+  // Follow-up Agendamento
+  getFollowupConexoes: () => request('GET', '/followup/conexoes'),
+  saveFollowupConexao: (data) => request('POST', '/followup/conexoes', data),
+  deleteFollowupConexao: (tecnico) => request('DELETE', `/followup/conexoes/${tecnico}`),
+  getFollowupUsuarios: () => request('GET', '/followup/usuarios'),
+  getFollowupEventos: () => request('GET', '/followup/eventos'),
+  dispararFollowup: (data) => request('POST', '/followup/disparar', data),
+  getFollowupLogs: () => request('GET', '/followup/logs'),
+  getEvolutionStatus: () => request('GET', '/followup/evolution/status'),
+  getEvolutionQr: () => request('GET', '/followup/evolution/qr'),
 }

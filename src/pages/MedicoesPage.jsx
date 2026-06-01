@@ -870,6 +870,11 @@ export default function MedicoesPage() {
                               📋 Orçamento #{String(m.numeroOrcamento || '').padStart(4, '0')}
                             </span>
                           )}
+                          {(m.origem === 'integracao' || m.user === 'integracao') && (
+                            <span className="text-xs bg-orange-500 text-white px-2 py-0.5 rounded-full font-semibold w-fit">
+                              🔗 Integração
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3">

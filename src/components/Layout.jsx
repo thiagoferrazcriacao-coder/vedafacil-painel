@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth, setupPush } from '../App.jsx'
 
 // ── Badges Context ────────────────────────────────────────────────────────────
-const BadgesContext = createContext({ medicoesSemOrcamento: 0, orcamentosNaoEnviados: 0, orcamentosAprovados: 0, refreshBadges: () => {} })
+const BadgesContext = createContext({ medicoesSemOrcamento: 0, orcamentosNaoEnviados: 0, orcamentosAprovados: 0, osPendentesEquipe: 0, refreshBadges: () => {} })
 
 export function useBadges() {
   return useContext(BadgesContext)
@@ -45,7 +45,7 @@ const navItems = [
   {
     to: '/contratos',
     label: 'Contratos',
-    badgeKey: 'orcamentosAprovados',
+    badgeKey: 'contratosPendentes',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -66,6 +66,7 @@ const navItems = [
   {
     to: '/ordens-servico',
     label: 'Ordens de Serviço',
+    badgeKey: 'osPendentesEquipe',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -123,6 +124,26 @@ const navItems = [
       </svg>
     )
   },
+  {
+    to: '/followup',
+    label: 'Follow-up',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-3 3v-3z" />
+      </svg>
+    )
+  },
+  {
+    to: '/integracao',
+    label: 'Integração',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+      </svg>
+    )
+  },
 ]
 
 const adminNavItems = [
@@ -176,7 +197,7 @@ export default function Layout({ children }) {
   const { user, logout, isAdmin } = useAuth()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [badges, setBadges] = useState({ medicoesSemOrcamento: 0, orcamentosNaoEnviados: 0, orcamentosAprovados: 0 })
+  const [badges, setBadges] = useState({ medicoesSemOrcamento: 0, orcamentosNaoEnviados: 0, orcamentosAprovados: 0, osPendentesEquipe: 0, contratosPendentes: 0 })
   const [pushStatus, setPushStatus] = useState(() => {
     if (!('Notification' in window)) return 'unsupported'
     return Notification.permission // 'default' | 'granted' | 'denied'
@@ -200,7 +221,7 @@ export default function Layout({ children }) {
       })
       if (!res.ok) return
       const data = await res.json()
-      setBadges({ medicoesSemOrcamento: data.medicoesSemOrcamento || 0, orcamentosNaoEnviados: data.orcamentosNaoEnviados || 0, orcamentosAprovados: data.orcamentosAprovados || 0 })
+      setBadges({ medicoesSemOrcamento: data.medicoesSemOrcamento || 0, orcamentosNaoEnviados: data.orcamentosNaoEnviados || 0, orcamentosAprovados: data.orcamentosAprovados || 0, osPendentesEquipe: data.osPendentesEquipe || 0, contratosPendentes: data.contratosPendentes || 0 })
     } catch { /* silently ignore */ }
   }
 

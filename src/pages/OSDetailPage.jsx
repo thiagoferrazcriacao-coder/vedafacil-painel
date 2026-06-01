@@ -198,6 +198,30 @@ function LocalCard({ ponto, idx }) {
               </div>
             )}
           </div>
+
+          {/* Croqui do local */}
+          {(ponto.croquiOtimizado || ponto.croquiBase64) && (
+            <div>
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                📐 Croqui {ponto.croquiOtimizado ? <span className="text-purple-600 font-normal">🤖 IA</span> : ''}
+              </div>
+              {ponto.croquiOtimizado ? (
+                <div
+                  className="border border-gray-200 rounded-lg overflow-hidden bg-white"
+                  dangerouslySetInnerHTML={{ __html: ponto.croquiOtimizado }}
+                  style={{ maxWidth: '100%' }}
+                />
+              ) : (
+                <a href={ponto.croquiBase64} target="_blank" rel="noreferrer">
+                  <img
+                    src={ponto.croquiBase64}
+                    alt="Croqui do local"
+                    className="w-full rounded-lg border border-gray-200 hover:opacity-80 transition-opacity cursor-pointer"
+                  />
+                </a>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -223,12 +247,27 @@ export default function OSDetailPage() {
   const [compEquipeId, setCompEquipeId] = useState('')
   const [compPontos, setCompPontos] = useState([])
   const [compartilhando, setCompartilhando] = useState(false)
+  const [reparosVinculados, setReparosVinculados] = useState([])
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
 
   useEffect(() => {
     Promise.all([api.getOrdemServico(id), api.getEquipes(), api.getPrecos()])
-      .then(([o, e, p]) => { setOs(o); setEditData(o); setEquipes(e); setTecnicos(p?.tecnicos || ['Alan', 'Fernando', 'Thiago', 'Daniel']) })
+      .then(([o, e, p]) => {
+        setOs(o)
+        setEditData(o)
+        setEquipes(e)
+        setTecnicos(p?.tecnicos || ['Alan', 'Fernando', 'Thiago', 'Daniel'])
+        // Busca reparos vinculados se for OS original (não reparo)
+        if (!o.osOriginalId && o.tipo !== 'reparo') {
+          fetch(`/api/ordens-servico?osOriginalId=${encodeURIComponent(id)}`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('vf_token')}` }
+          })
+            .then(r => r.ok ? r.json() : [])
+            .then(reps => setReparosVinculados(Array.isArray(reps) ? reps : []))
+            .catch(() => {})
+        }
+      })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [id])
@@ -430,6 +469,28 @@ export default function OSDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Banner: OS gerada pelo contrato sem equipe atribuída */}
+      {os.origem === 'contrato' && (!os.equipeId || os.equipeId === '') && os.status !== 'cancelada' && os.status !== 'concluida' && (
+        <div className="mb-5 rounded-2xl overflow-hidden border-2 border-red-500 shadow-md">
+          <div className="bg-red-600 px-5 py-4 flex items-center gap-3">
+            <span className="text-3xl">🚨</span>
+            <div className="flex-1">
+              <div className="text-white font-extrabold text-lg tracking-wide">PENDENTE DE ATRIBUIR EQUIPE</div>
+              <div className="text-red-200 text-sm">Esta OS foi gerada automaticamente a partir do contrato assinado. Atribua uma equipe para iniciar a obra.</div>
+            </div>
+          </div>
+          {!editing && (
+            <div className="bg-red-50 px-5 py-3 flex items-center gap-3">
+              <span className="text-sm text-red-700 font-medium">Clique em ✏️ Editar para atribuir uma equipe a esta OS.</span>
+              <button onClick={() => { setEditData({ ...os }); setEditing(true) }}
+                className="ml-auto bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-700 transition-colors">
+                ✏️ Atribuir Equipe
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {error && <div className="bg-red-50 text-red-700 border border-red-200 rounded-lg p-3 mb-4 text-sm">{error}</div>}
 
@@ -641,6 +702,28 @@ export default function OSDetailPage() {
                 {(os.fotosReparo || []).map((f, i) => (
                   <a key={i} href={f.data || f} target="_blank" rel="noopener noreferrer">
                     <img src={f.data || f} alt={`Foto ${i+1}`}
+                      className="w-full aspect-square object-cover rounded-lg border border-gray-200 hover:opacity-80 transition-opacity" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Fotos Depois do Reparo */}
+          {(os.fotosDepoisReparo || []).length > 0 && (
+            <div className="mt-4">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                📸 Fotos Depois do Reparo
+                {os.concluidaEm && (
+                  <span className="ml-2 text-green-600 font-normal">
+                    ✅ {new Date(os.concluidaEm).toLocaleDateString('pt-BR')}
+                  </span>
+                )}
+              </h3>
+              <div className="grid grid-cols-3 gap-2">
+                {(os.fotosDepoisReparo || []).map((f, i) => (
+                  <a key={i} href={f.data || f} target="_blank" rel="noopener noreferrer">
+                    <img src={f.data || f} alt={`Depois ${i+1}`}
                       className="w-full aspect-square object-cover rounded-lg border border-gray-200 hover:opacity-80 transition-opacity" />
                   </a>
                 ))}
@@ -871,6 +954,51 @@ export default function OSDetailPage() {
                   />
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Reparos Vinculados (apenas OS original, não reparo) */}
+        {reparosVinculados.length > 0 && (
+          <div className="card md:col-span-2">
+            <h2 className="font-semibold mb-3 text-red-700">🔧 Reparos Vinculados ({reparosVinculados.length})</h2>
+            <div className="space-y-3">
+              {reparosVinculados.map((r, ri) => {
+                const pontoNomes = (r.pontos || []).map(p => p.nome || p.local).filter(Boolean)
+                const dataConc = r.concluidaEm ? new Date(r.concluidaEm).toLocaleDateString('pt-BR') : null
+                const dataInicio = r.dataInicio ? new Date(r.dataInicio + 'T12:00:00').toLocaleDateString('pt-BR') : null
+                return (
+                  <div key={ri} className={`border rounded-lg p-3 cursor-pointer hover:shadow-sm transition-shadow ${r.status === 'concluida' ? 'border-green-200 bg-green-50' : 'border-orange-200 bg-orange-50'}`}
+                    onClick={() => navigate(`/ordens-servico/${r._id || r.id}`)}>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm text-gray-800">Reparo #{ri + 1} — OS #{String(r.numero || '').padStart(3, '0')}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.status === 'concluida' ? 'bg-green-100 text-green-700' : r.status === 'em_andamento' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>
+                          {r.status === 'concluida' ? '✓ Concluído' : r.status === 'em_andamento' ? '⏳ Em andamento' : 'Agendado'}
+                        </span>
+                      </div>
+                      <span className="text-gray-400 text-sm">›</span>
+                    </div>
+                    {/* Locais específicos que tiveram reparo */}
+                    {pontoNomes.length > 0 && (
+                      <div className="text-xs text-red-700 font-medium mb-1">
+                        📍 {pontoNomes.join(' · ')}
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-3 text-xs text-gray-500">
+                      {r.tipoReparo && <span className="italic">{r.tipoReparo}</span>}
+                      {r.equipeNome && <span>👷 {r.equipeNome}</span>}
+                      {dataInicio && <span>📅 {dataInicio}{dataConc ? ` → ✅ ${dataConc}` : ''}</span>}
+                    </div>
+                    {/* Observações dos pontos */}
+                    {(r.pontos || []).some(p => p.obs) && (
+                      <div className="mt-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                        📝 {(r.pontos || []).filter(p => p.obs).map(p => `${p.nome || 'Local'}: ${p.obs}`).join(' | ')}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}

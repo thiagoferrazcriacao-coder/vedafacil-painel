@@ -38,8 +38,10 @@ export default function WorkdayPicker({ dataInicio, dataTermino, diasAtivos = []
   )
   const inclSabRef = useRef(inclSab)
 
-  // selected: Set<string> de datas ativas
-  const [selected, setSelected] = useState(() => new Set(diasAtivos || []))
+  // selected: Set<string> de datas ativas — filtra domingos na inicialização
+  const [selected, setSelected] = useState(() =>
+    new Set((diasAtivos || []).filter(d => new Date(d + 'T12:00:00').getDay() !== 0))
+  )
 
   // Ref das datas anteriores para detectar mudança
   const prevRange = useRef({ dataInicio, dataTermino })
@@ -138,9 +140,9 @@ export default function WorkdayPicker({ dataInicio, dataTermino, diasAtivos = []
 
       {/* Grade de dias */}
       <div className="space-y-1">
-        {/* Header de dias da semana */}
+        {/* Header de dias da semana — Dom oculto (não trabalhamos) */}
         <div className="flex gap-1 mb-1">
-          {['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map(d => (
+          {['Seg','Ter','Qua','Qui','Sex','Sáb'].map(d => (
             <div key={d} className="w-9 text-center text-[9px] font-semibold text-indigo-400 uppercase tracking-wide">
               {d}
             </div>
@@ -148,30 +150,27 @@ export default function WorkdayPicker({ dataInicio, dataTermino, diasAtivos = []
         </div>
 
         {weeks.map((week, wi) => {
-          // Calcula padding inicial para a primeira semana (alinha ao dia correto)
-          const padStart = wi === 0 ? week[0].dow : 0
+          // Grid de Seg→Sáb (6 colunas, domingo nunca mostrado)
+          // dow: 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb → coluna = dow - 1
+          // Para a primeira semana, calcula o offset do primeiro dia
+          const firstDow = week.find(d => d.dow !== 0)?.dow ?? 1
+          const padStart = wi === 0 ? (firstDow >= 1 ? firstDow - 1 : 0) : 0
           return (
             <div key={wi} className="flex gap-1">
-              {/* Padding vazio antes do primeiro dia */}
               {Array.from({ length: padStart }).map((_, pi) => (
                 <div key={`pad-${pi}`} className="w-9" />
               ))}
-              {week.map(({ str, dow, d, m }) => {
-                const isSun = dow === 0
+              {week.filter(({ dow }) => dow !== 0).map(({ str, dow, d, m }) => {
                 const isSat = dow === 6
                 const on = selected.has(str)
-
                 return (
                   <button
                     key={str}
                     type="button"
-                    disabled={isSun}
                     onClick={() => toggleDay(str, dow)}
                     title={`${DOW_SHORT[dow]} ${d}/${m + 1} — ${str}`}
                     className={`flex flex-col items-center w-9 py-1 rounded-lg text-xs font-medium transition-all select-none ${
-                      isSun
-                        ? 'opacity-25 cursor-not-allowed bg-red-100 text-red-400'
-                        : on
+                      on
                         ? isSat
                           ? 'bg-amber-400 text-white shadow-sm ring-1 ring-amber-500'
                           : 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-700'
@@ -189,7 +188,7 @@ export default function WorkdayPicker({ dataInicio, dataTermino, diasAtivos = []
       </div>
 
       <p className="text-[10px] text-indigo-400 mt-2">
-        Clique nos dias para ativar/desativar · Dom sempre excluído · Sáb é opcional
+        Clique nos dias para ativar/desativar · Dom não trabalhamos · Sáb é opcional
       </p>
     </div>
   )

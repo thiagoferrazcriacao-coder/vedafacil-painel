@@ -577,6 +577,54 @@ export default function OrdensServicoPage() {
         ))}
       </div>
 
+      {/* ── OSes pendentes de equipe (auto-criadas pelo contrato) ── */}
+      {(() => {
+        const pendentes = ordens.filter(o => o.origem === 'contrato' && (!o.equipeId || o.equipeId === '') && o.status !== 'cancelada' && o.status !== 'concluida')
+        if (pendentes.length === 0) return null
+        return (
+          <div className="mb-6 border-2 border-red-400 rounded-2xl overflow-hidden shadow-lg">
+            <div className="bg-red-600 px-5 py-3 flex items-center gap-3">
+              <span className="text-2xl">🚨</span>
+              <div>
+                <div className="text-white font-extrabold text-base tracking-wide">PENDENTE DE ATRIBUIR EQUIPE</div>
+                <div className="text-red-200 text-xs">{pendentes.length} OS aguardando alocação de equipe</div>
+              </div>
+            </div>
+            <div className="divide-y divide-red-100 bg-red-50">
+              {pendentes.map(os => {
+                const id = os.id || os._id
+                return (
+                  <div key={id}
+                    className="flex items-center gap-3 px-5 py-4 hover:bg-red-100 cursor-pointer transition-colors"
+                    onClick={() => navigate(`/ordens-servico/${id}`)}>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-red-700">OS #{String(os.numero || '').padStart(3, '0')}</span>
+                        <span className="text-xs bg-red-200 text-red-800 px-2 py-0.5 rounded-full font-semibold">📋 Via Contrato</span>
+                        <span className="text-xs bg-orange-100 text-orange-700 border border-orange-300 px-2 py-0.5 rounded-full font-bold animate-pulse">⚠️ SEM EQUIPE</span>
+                      </div>
+                      <p className="font-semibold text-gray-800 truncate mt-0.5">{os.cliente}</p>
+                      {os.endereco && <p className="text-sm text-gray-500 truncate">{os.endereco}</p>}
+                      {os.dataInicio && (
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          📅 {new Date(os.dataInicio + 'T12:00:00').toLocaleDateString('pt-BR')}
+                          {os.dataTermino && ` → ${new Date(os.dataTermino + 'T12:00:00').toLocaleDateString('pt-BR')}`}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex-shrink-0">
+                      <span className="text-xs bg-red-600 text-white px-3 py-1.5 rounded-lg font-semibold">
+                        Atribuir →
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Barra de seleção múltipla */}
       {isAdmin && ordensFiltradas.length > 0 && (
         <div className="flex items-center gap-3 mb-3">
@@ -658,6 +706,11 @@ export default function OrdensServicoPage() {
                       {os.contratoManual && (
                         <span className="text-xs bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded-full font-semibold">
                           📁 Contrato Manual
+                        </span>
+                      )}
+                      {os.origem === 'contrato' && (!os.equipeId || os.equipeId === '') && os.status !== 'cancelada' && os.status !== 'concluida' && (
+                        <span className="text-xs bg-red-100 text-red-700 border border-red-400 px-2 py-0.5 rounded-full font-bold animate-pulse">
+                          🚨 Pend. Equipe
                         </span>
                       )}
                       {pendenteCroqui && (

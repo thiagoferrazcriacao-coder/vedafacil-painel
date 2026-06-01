@@ -4,6 +4,10 @@ node_modules/
 data/*.json
 
 .vercel
-
-.vercel
 .env*.local
+
+# Imagens/assinaturas em base64 (sensíveis)
+*_b64.txt
+
+# Backups locais de env vars
+.env.backup*

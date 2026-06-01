@@ -52,6 +52,10 @@
     { "source": "/api/fotos/:path*", "destination": "/api/index.js" },
     { "source": "/api/fotos", "destination": "/api/index.js" },
     { "source": "/api/cron/:path*", "destination": "/api/index.js" },
+    { "source": "/api/followup/:path*", "destination": "/api/index.js" },
+    { "source": "/api/followup", "destination": "/api/index.js" },
+    { "source": "/api/integracao/:path*", "destination": "/api/index.js" },
+    { "source": "/api/integracao", "destination": "/api/index.js" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "crons": [
