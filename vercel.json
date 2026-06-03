@@ -56,9 +56,16 @@
     { "source": "/api/followup", "destination": "/api/index.js" },
     { "source": "/api/integracao/:path*", "destination": "/api/index.js" },
     { "source": "/api/integracao", "destination": "/api/index.js" },
+    { "source": "/api/visitas/:path*", "destination": "/api/index.js" },
+    { "source": "/api/visitas", "destination": "/api/index.js" },
+    { "source": "/api/medidor/:path*", "destination": "/api/index.js" },
+    { "source": "/api/medidor", "destination": "/api/index.js" },
+    { "source": "/api/health", "destination": "/api/index.js" },
+    { "source": "/api/admin/:path*", "destination": "/api/index.js" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "crons": [
-    { "path": "/api/cron/backup", "schedule": "0 6 * * *" }
+    { "path": "/api/cron/backup", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/healthcheck", "schedule": "0 8 * * *" }
   ]
 }

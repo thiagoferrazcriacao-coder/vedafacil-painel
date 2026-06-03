@@ -123,6 +123,10 @@ export const api = {
   // Croquis
   getCroquis: () => request('GET', '/croquis'),
 
+  // Status / health
+  getStatus: () => request('GET', '/admin/status'),
+  getHealth: () => request('GET', '/health'),
+
   // Lixeira
   getLixeira: () => request('GET', '/lixeira'),
   restaurarItem: (id) => request('POST', `/lixeira/${id}/restaurar`),
@@ -148,9 +152,14 @@ export const api = {
   // Estoque por Equipe / Semana
   getEstoqueEquipes: (semana) => request('GET', `/estoque-equipes${semana ? '?semana=' + encodeURIComponent(semana) : ''}`),
   setEstoqueEquipe: (equipeId, semana, recebido) => request('PUT', `/estoque-equipes/${equipeId}`, { semana, recebido }),
+  addLancamentoManual: (equipeId, data) => request('POST', `/estoque-equipes/${equipeId}/lancamento-manual`, data),
+  deleteLancamento: (equipeId, idx, semana, descontarTotal) =>
+    request('DELETE', `/estoque-equipes/${equipeId}/lancamento/${idx}?semana=${encodeURIComponent(semana)}${descontarTotal ? '&descontarTotal=true' : ''}`),
 
   // Usuários
   getUsuarios: () => request('GET', '/usuarios'),
+  getAlmocoMedidor: (email) => request('GET', `/usuarios/${encodeURIComponent(email)}/almoco`),
+  setAlmocoMedidor: (email, almocoInicio) => request('PUT', `/usuarios/${encodeURIComponent(email)}/almoco`, { almocoInicio }),
   createUsuario: (data) => request('POST', '/usuarios', data),
   updateUsuario: (email, data) => request('PUT', `/usuarios/${encodeURIComponent(email)}`, data),
   deleteUsuario: (email) => request('DELETE', `/usuarios/${encodeURIComponent(email)}`),
@@ -174,4 +183,15 @@ export const api = {
   getFollowupLogs: () => request('GET', '/followup/logs'),
   getEvolutionStatus: () => request('GET', '/followup/evolution/status'),
   getEvolutionQr: () => request('GET', '/followup/evolution/qr'),
+  getFollowupPauseStatus: () => request('GET', '/followup/status'),
+  setFollowupPaused: (pausado) => request('POST', '/followup/pausar', { pausado }),
+
+  // Agenda de Visitas
+  getVisitas: (params) => request('GET', '/visitas' + (params ? '?' + new URLSearchParams(params).toString() : '')),
+  createVisita: (data) => request('POST', '/visitas', data),
+  updateVisita: (id, data) => request('PUT', `/visitas/${id}`, data),
+  confirmarVisita: (id, status = 'confirmado') => request('PATCH', `/visitas/${id}/confirmar`, { status }),
+  deleteVisita: (id) => request('DELETE', `/visitas/${id}`),
+  getAgendaMode: () => request('GET', '/config/agenda-mode'),
+  setAgendaMode: (agendaMode) => request('POST', '/config/agenda-mode', { agendaMode }),
 }

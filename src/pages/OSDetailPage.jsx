@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
 import { useAuth } from '../App.jsx'
 import WorkdayPicker from '../components/WorkdayPicker.jsx'
+import NovoReparoModal from '../components/NovoReparoModal.jsx'
+import { fmtNumeroOS } from '../lib/osNumero.js'
 
 const STATUS_OPTIONS = [
   { value: 'agendada',              label: 'Agendada',              color: 'bg-blue-100 text-blue-700' },
@@ -16,6 +18,20 @@ const LABELS_QTDE = {
   trinca: 'Trincas (m)', juntaFria: 'Juntas Frias (m)', ralo: 'Ralos (un)',
   juntaDilat: 'Juntas Dilatação (m)', ferragem: 'Ferragens (m)',
   cortina: 'Cortina (m²)',
+}
+
+// Lightbox de foto em tela cheia (overlay no body) — clique pra fechar
+function abrirLightboxFoto(src) {
+  if (!src) return
+  const overlay = document.createElement('div')
+  overlay.id = 'os-detail-lightbox'
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out'
+  overlay.innerHTML = `
+    <img src="${String(src).replace(/"/g, '&quot;')}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 4px 30px rgba(0,0,0,0.5)" />
+    <button style="position:fixed;top:20px;right:20px;background:rgba(255,255,255,0.2);border:none;border-radius:50%;width:44px;height:44px;font-size:24px;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center">×</button>
+  `
+  overlay.onclick = () => overlay.remove()
+  document.body.appendChild(overlay)
 }
 
 function LocalCard({ ponto, idx }) {
@@ -74,9 +90,9 @@ function LocalCard({ ponto, idx }) {
                     const src = typeof f === 'object' && f !== null ? (f.thumb || f.full || f.data || '') : (typeof f === 'string' ? f : '')
                     if (!src) return null
                     return (
-                      <a key={fi} href={src} target="_blank" rel="noreferrer">
-                        <img src={src} alt={`ref ${fi + 1}`} className="w-full aspect-square object-cover rounded border border-gray-200 hover:opacity-80 transition-opacity" />
-                      </a>
+                      <button key={fi} onClick={() => abrirLightboxFoto(src)} className="block w-full p-0 border-0 bg-transparent">
+                        <img src={src} alt={`ref ${fi + 1}`} className="w-full aspect-square object-cover rounded border border-gray-200 hover:opacity-80 transition-opacity cursor-pointer" />
+                      </button>
                     )
                   })}
                   {fotosRef.length > 6 && (
@@ -152,8 +168,8 @@ function LocalCard({ ponto, idx }) {
                         key={fi}
                         src={srcThumb}
                         alt={`antes ${fi + 1}`}
-                        className="w-14 h-14 object-cover rounded border border-gray-200 cursor-pointer"
-                        onClick={() => window.open(srcFull, '_blank')}
+                        className="w-14 h-14 object-cover rounded border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => abrirLightboxFoto(srcFull)}
                         onError={e => { e.target.style.display='none'; e.target.nextSibling && (e.target.nextSibling.style.display='flex') }}
                       />
                     )
@@ -183,8 +199,8 @@ function LocalCard({ ponto, idx }) {
                         key={fi}
                         src={srcThumb}
                         alt={`depois ${fi + 1}`}
-                        className="w-14 h-14 object-cover rounded border border-gray-200 cursor-pointer"
-                        onClick={() => window.open(srcFull, '_blank')}
+                        className="w-14 h-14 object-cover rounded border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => abrirLightboxFoto(srcFull)}
                         onError={e => { e.target.style.display='none'; e.target.nextSibling && (e.target.nextSibling.style.display='flex') }}
                       />
                     )
@@ -200,28 +216,47 @@ function LocalCard({ ponto, idx }) {
           </div>
 
           {/* Croqui do local */}
-          {(ponto.croquiOtimizado || ponto.croquiBase64) && (
-            <div>
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                📐 Croqui {ponto.croquiOtimizado ? <span className="text-purple-600 font-normal">🤖 IA</span> : ''}
-              </div>
-              {ponto.croquiOtimizado ? (
-                <div
-                  className="border border-gray-200 rounded-lg overflow-hidden bg-white"
-                  dangerouslySetInnerHTML={{ __html: ponto.croquiOtimizado }}
-                  style={{ maxWidth: '100%' }}
-                />
-              ) : (
-                <a href={ponto.croquiBase64} target="_blank" rel="noreferrer">
-                  <img
-                    src={ponto.croquiBase64}
-                    alt="Croqui do local"
-                    className="w-full rounded-lg border border-gray-200 hover:opacity-80 transition-opacity cursor-pointer"
+          {(ponto.croquiOtimizado || ponto.croquiBase64) && (() => {
+            // croquiOtimizado pode vir como:
+            //  (1) SVG inline → renderizar via dangerouslySetInnerHTML
+            //  (2) data URL de imagem (data:image/...) → renderizar como <img>
+            //  (3) base64 puro (sem prefixo) → renderizar como <img> com prefixo
+            const otim = ponto.croquiOtimizado || ''
+            const isSvgInline = typeof otim === 'string' && otim.trim().toLowerCase().startsWith('<svg')
+            const isDataUrl   = typeof otim === 'string' && otim.startsWith('data:image/')
+            const isBase64    = typeof otim === 'string' && otim.length > 100 && !isSvgInline && !isDataUrl
+            const otimSrc = isDataUrl ? otim : (isBase64 ? `data:image/jpeg;base64,${otim}` : '')
+            const baseSrc = ponto.croquiBase64 || ''
+            const finalSrc = otim ? otimSrc : baseSrc
+            return (
+              <div>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                  📐 Croqui {ponto.croquiOtimizado ? <span className="text-purple-600 font-normal">🤖 IA</span> : ''}
+                </div>
+                {isSvgInline ? (
+                  <div
+                    className="border border-gray-200 rounded-lg overflow-hidden bg-white cursor-zoom-in"
+                    dangerouslySetInnerHTML={{ __html: otim }}
+                    style={{ maxWidth: '100%' }}
+                    onClick={() => {
+                      // Para SVG inline, abre versão maior do mesmo SVG num overlay
+                      const svgEncoded = encodeURIComponent(otim)
+                      abrirLightboxFoto('data:image/svg+xml;charset=utf-8,' + svgEncoded)
+                    }}
                   />
-                </a>
-              )}
-            </div>
-          )}
+                ) : finalSrc ? (
+                  <img
+                    src={finalSrc}
+                    alt="Croqui do local"
+                    className="w-full rounded-lg border border-gray-200 hover:opacity-80 transition-opacity cursor-zoom-in bg-white"
+                    onClick={() => abrirLightboxFoto(finalSrc)}
+                  />
+                ) : (
+                  <div className="text-xs text-gray-400 italic">Croqui indisponível</div>
+                )}
+              </div>
+            )
+          })()}
         </div>
       )}
     </div>
@@ -237,6 +272,7 @@ export default function OSDetailPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [showAssistTec, setShowAssistTec] = useState(false)
   const [editData, setEditData] = useState(null)
   const [error, setError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -416,7 +452,7 @@ export default function OSDetailPage() {
       {/* Header */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
         <button onClick={() => navigate('/ordens-servico')} className="btn-secondary">Voltar</button>
-        <h1 className="text-xl font-bold text-gray-800">OS #{String(os.numero || '').padStart(3, '0')}</h1>
+        <h1 className="text-xl font-bold text-gray-800">OS #{fmtNumeroOS(os)}</h1>
         <span className={`text-sm px-3 py-1 rounded-full ${statusCfg.color}`}>{statusCfg.label}</span>
         {pendenteCroqui && (
           <span className="text-sm bg-purple-100 text-purple-700 border border-purple-300 px-3 py-1 rounded-full font-semibold flex items-center gap-1">
@@ -456,6 +492,13 @@ export default function OSDetailPage() {
               </button>
               {/* Compartilhar Pontos movido para o PWA Aplicador */}
               <button onClick={() => { setEditData({ ...os }); setEditing(true) }} className="btn-secondary">✏️ Editar</button>
+              {/* Assistência Técnica — cria reparo a partir desta OS */}
+              {(os.tipo || 'normal') === 'normal' && (
+                <button onClick={() => setShowAssistTec(true)}
+                  className="bg-red-50 text-red-700 border border-red-200 rounded-lg px-4 py-2 text-sm hover:bg-red-100 transition-colors">
+                  🔧 Assistência Técnica
+                </button>
+              )}
               {isAdmin && (
                 <button onClick={() => setConfirmDelete(true)} className="bg-red-50 text-red-600 border border-red-200 rounded-lg px-4 py-2 text-sm hover:bg-red-100 transition-colors">🗑️ Excluir</button>
               )}
@@ -501,6 +544,21 @@ export default function OSDetailPage() {
           <h2 className="font-semibold mb-3 text-primary">Cliente</h2>
           {editing ? (
             <div className="space-y-2">
+              {/* Número da OS — só admin pode editar (correção/integração) */}
+              {isAdmin && (
+                <div>
+                  <label className="label">
+                    Número da OS <span className="text-xs text-amber-600 font-normal">(admin · alterar com cuidado)</span>
+                  </label>
+                  <input
+                    type="number"
+                    className="input"
+                    value={editData.numero || ''}
+                    onChange={e => setEditData(p => ({ ...p, numero: parseInt(e.target.value, 10) || '' }))}
+                    placeholder="Ex: 100"
+                  />
+                </div>
+              )}
               {[['cliente','Cliente'],['endereco','Endereço'],['cidade','Cidade'],['celular','Celular']].map(([f,l]) => (
                 <div key={f}>
                   <label className="label">{l}</label>
@@ -699,12 +757,15 @@ export default function OSDetailPage() {
             <div className="mt-4">
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">📷 Fotos do Problema</h3>
               <div className="grid grid-cols-3 gap-2">
-                {(os.fotosReparo || []).map((f, i) => (
-                  <a key={i} href={f.data || f} target="_blank" rel="noopener noreferrer">
-                    <img src={f.data || f} alt={`Foto ${i+1}`}
-                      className="w-full aspect-square object-cover rounded-lg border border-gray-200 hover:opacity-80 transition-opacity" />
-                  </a>
-                ))}
+                {(os.fotosReparo || []).map((f, i) => {
+                  const src = f.data || f
+                  return (
+                    <button key={i} onClick={() => abrirLightboxFoto(src)} className="block w-full p-0 border-0 bg-transparent">
+                      <img src={src} alt={`Foto ${i+1}`}
+                        className="w-full aspect-square object-cover rounded-lg border border-gray-200 hover:opacity-80 transition-opacity cursor-zoom-in" />
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -721,12 +782,15 @@ export default function OSDetailPage() {
                 )}
               </h3>
               <div className="grid grid-cols-3 gap-2">
-                {(os.fotosDepoisReparo || []).map((f, i) => (
-                  <a key={i} href={f.data || f} target="_blank" rel="noopener noreferrer">
-                    <img src={f.data || f} alt={`Depois ${i+1}`}
-                      className="w-full aspect-square object-cover rounded-lg border border-gray-200 hover:opacity-80 transition-opacity" />
-                  </a>
-                ))}
+                {(os.fotosDepoisReparo || []).map((f, i) => {
+                  const src = f.data || f
+                  return (
+                    <button key={i} onClick={() => abrirLightboxFoto(src)} className="block w-full p-0 border-0 bg-transparent">
+                      <img src={src} alt={`Depois ${i+1}`}
+                        className="w-full aspect-square object-cover rounded-lg border border-gray-200 hover:opacity-80 transition-opacity cursor-zoom-in" />
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -972,7 +1036,7 @@ export default function OSDetailPage() {
                     onClick={() => navigate(`/ordens-servico/${r._id || r.id}`)}>
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm text-gray-800">Reparo #{ri + 1} — OS #{String(r.numero || '').padStart(3, '0')}</span>
+                        <span className="font-semibold text-sm text-gray-800">Reparo #{ri + 1} — OS #{fmtNumeroOS(r)}</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.status === 'concluida' ? 'bg-green-100 text-green-700' : r.status === 'em_andamento' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}`}>
                           {r.status === 'concluida' ? '✓ Concluído' : r.status === 'em_andamento' ? '⏳ Em andamento' : 'Agendado'}
                         </span>
@@ -1045,7 +1109,7 @@ export default function OSDetailPage() {
       {confirmDelete && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
-            <h3 className="font-bold text-gray-800 mb-2">Excluir OS #{String(os.numero || '').padStart(3, '0')}?</h3>
+            <h3 className="font-bold text-gray-800 mb-2">Excluir OS #{fmtNumeroOS(os)}?</h3>
             <p className="text-gray-600 text-sm mb-5">Esta ação não pode ser desfeita.</p>
             <div className="flex gap-3">
               <button onClick={() => setConfirmDelete(false)} className="flex-1 btn-secondary">Cancelar</button>
@@ -1140,6 +1204,18 @@ export default function OSDetailPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Assistência Técnica — abre o modal completo de Novo Reparo com a OS atual já pré-selecionada */}
+      {showAssistTec && (
+        <NovoReparoModal
+          preloadOS={os}
+          onClose={() => setShowAssistTec(false)}
+          onCreated={(novaOS) => {
+            setShowAssistTec(false)
+            navigate(`/ordens-servico/${novaOS.id || novaOS._id}`)
+          }}
+        />
       )}
     </div>
   )

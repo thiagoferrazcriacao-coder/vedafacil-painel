@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
+import AgendaVisitasView from './AgendaVisitasView.jsx'
+import { fmtNumeroOS } from '../lib/osNumero.js'
 
 // ── Cores por status ──────────────────────────────────────────────────────────
 const STATUS_COLORS = {
@@ -64,6 +66,8 @@ function fmtPtBR(date) {
 
 // ── Componente principal ──────────────────────────────────────────────────────
 export default function AgendaPage() {
+  const [abaAtiva, setAbaAtiva] = useState('obras') // 'obras' | 'visitas'
+
   const navigate = useNavigate()
   const [ordens,  setOrdens]  = useState([])
   const [equipes, setEquipes] = useState([])
@@ -226,6 +230,29 @@ export default function AgendaPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
+
+      {/* ── Abas: Obras / Visitas ────────────────────────────────────────────── */}
+      <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
+        {[
+          { key: 'obras',   label: '🏗️ Agenda de Obras',   desc: 'Obras em andamento e agendadas por equipe' },
+          { key: 'visitas', label: '📅 Agenda de Visitas',  desc: 'Visitas de medição agendadas pelos operadores' },
+        ].map(({ key, label }) => (
+          <button key={key} onClick={() => setAbaAtiva(key)}
+            className={`px-5 py-2.5 text-sm font-semibold rounded-t-lg transition-colors border-b-2 -mb-px ${
+              abaAtiva === key
+                ? 'border-primary text-primary bg-white'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Aba: Agenda de Visitas ─────────────────────────────────────────── */}
+      {abaAtiva === 'visitas' && <AgendaVisitasView />}
+
+      {/* ── Aba: Agenda de Obras (conteúdo original) ────────────────────────── */}
+      {abaAtiva === 'obras' && <>
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -578,7 +605,7 @@ export default function AgendaPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                           <span className="font-bold text-primary text-sm">
-                            {isReparo ? '🔧' : '🏗️'} OS #{String(os.numero || '').padStart(3, '0')}
+                            {isReparo ? '🔧' : '🏗️'} OS #{fmtNumeroOS(os)}
                           </span>
                           <span className="text-xs px-2 py-0.5 rounded-full font-medium"
                             style={{ background: c.bg, color: c.text }}>{STATUS_LABEL[os.status] || os.status}</span>
@@ -665,6 +692,7 @@ export default function AgendaPage() {
           ))}
         </div>
       </div>
+      </>}
     </div>
   )
 }

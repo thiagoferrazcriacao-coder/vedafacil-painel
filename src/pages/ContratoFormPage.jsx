@@ -1,7 +1,25 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../api/client.js'
+import { useAuth } from '../App.jsx'
 import ContratoEditorModal from '../components/ContratoEditorModal.jsx'
+
+// Hook: mede a altura real de um elemento e devolve o valor em pixels.
+// Reage a mudanças de tamanho (ResizeObserver) e a resize de janela.
+function useElementHeight() {
+  const ref = useRef(null)
+  const [height, setHeight] = useState(120) // fallback inicial
+  useEffect(() => {
+    if (!ref.current) return
+    const upd = () => setHeight(ref.current?.offsetHeight || 120)
+    upd()
+    const obs = new ResizeObserver(upd)
+    obs.observe(ref.current)
+    window.addEventListener('resize', upd)
+    return () => { obs.disconnect(); window.removeEventListener('resize', upd) }
+  }, [])
+  return [ref, height]
+}
 
 const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
 
@@ -61,6 +79,8 @@ export default function ContratoFormPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [c, setC] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -69,6 +89,8 @@ export default function ContratoFormPage() {
   const [uploadingArquivo, setUploadingArquivo] = useState(false)
   const [viewMode, setViewMode] = useState(() => new URLSearchParams(location.search).get('view') === '1')
   const [showEditor, setShowEditor] = useState(false)
+  // Mede a altura real da sticky bar para evitar que ela corte o conteúdo
+  const [stickyRef, stickyHeight] = useElementHeight()
 
   useEffect(() => {
     api.getContrato(id)
@@ -248,7 +270,7 @@ export default function ContratoFormPage() {
   const totalParcelasContrato = (c.parcelasContrato || []).reduce((s, p) => s + (Number(p.valor) || 0), 0)
 
   return (
-    <div className="p-4 md:p-6 max-w-5xl mx-auto pb-24">
+    <div className="p-4 md:p-6 max-w-5xl mx-auto" style={{ paddingBottom: stickyHeight + 32 }}>
       {/* View mode banner */}
       {viewMode && (
         <div className="mb-4 flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
@@ -362,6 +384,22 @@ export default function ContratoFormPage() {
           <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">1</span>
           Dados do Cliente
         </h2>
+
+        {/* Número do Contrato — só admin pode editar (correção/integração) */}
+        {isAdmin && !viewMode && (
+          <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+            <Field label={<>Nº do Contrato <span className="text-xs text-amber-700 font-normal">(admin · alterar com cuidado)</span></>}>
+              <input
+                type="number"
+                className="input"
+                value={c.numero || ''}
+                onChange={e => setC(prev => ({ ...prev, numero: parseInt(e.target.value, 10) || '' }))}
+                placeholder="Ex: 2205"
+              />
+            </Field>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <Field label="Razão Social">
             <input className={roClass('input', viewMode)} readOnly={viewMode} value={c.razaoSocial || ''} onChange={update('razaoSocial')} />
@@ -836,12 +874,12 @@ export default function ContratoFormPage() {
       </div>
 
       {/* Sticky Bottom */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-3 justify-end z-10 md:left-56">
-        <div className="flex-1 flex items-center gap-4">
-          <span className="text-sm text-gray-500">
+      <div ref={stickyRef} className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-3 md:px-4 py-2.5 flex flex-wrap items-center gap-2 justify-end z-20 md:left-56 shadow-lg">
+        <div className="flex-1 min-w-[140px] flex items-center gap-3">
+          <span className="text-xs md:text-sm text-gray-500 whitespace-nowrap">
             {c.propostaEscolhida ? `Proposta ${c.propostaEscolhida} —` : 'Total:'}
           </span>
-          <span className="text-xl font-bold text-primary">
+          <span className="text-lg md:text-xl font-bold text-primary whitespace-nowrap">
             {fmt(c.propostaEscolhida === 2 ? c.totalBruto : c.totalLiquido)}
           </span>
         </div>

@@ -3,6 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../api/client.js'
 import { useAuth } from '../App.jsx'
 import WorkdayPicker from '../components/WorkdayPicker.jsx'
+import NovoReparoModal from '../components/NovoReparoModal.jsx'
+import { fmtNumeroOS } from '../lib/osNumero.js'
 
 const STATUS_CONFIG = {
   agendada:              { label: 'Agendada',          color: 'bg-blue-100 text-blue-700' },
@@ -408,6 +410,7 @@ export default function OrdensServicoPage() {
     }
   }
 
+
   const ordensFiltradas = useMemo(() => {
     return ordens.filter(os => {
       if (filtroStatus !== 'todos' && os.status !== filtroStatus) return false
@@ -475,6 +478,11 @@ export default function OrdensServicoPage() {
           </button>
           <button onClick={() => setModalOpen(true)} className="btn-primary">
             + Nova OS
+          </button>
+          <button
+            onClick={() => { setTipoParam('reparo'); setModalOpen(true) }}
+            className="bg-red-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-red-700 transition-colors flex items-center gap-1.5">
+            🔧 Novo Reparo
           </button>
         </div>
       </div>
@@ -599,7 +607,7 @@ export default function OrdensServicoPage() {
                     onClick={() => navigate(`/ordens-servico/${id}`)}>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-red-700">OS #{String(os.numero || '').padStart(3, '0')}</span>
+                        <span className="font-bold text-red-700">OS #{fmtNumeroOS(os)}</span>
                         <span className="text-xs bg-red-200 text-red-800 px-2 py-0.5 rounded-full font-semibold">📋 Via Contrato</span>
                         <span className="text-xs bg-orange-100 text-orange-700 border border-orange-300 px-2 py-0.5 rounded-full font-bold animate-pulse">⚠️ SEM EQUIPE</span>
                       </div>
@@ -692,7 +700,7 @@ export default function OrdensServicoPage() {
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="font-bold text-primary">OS #{String(os.numero || '').padStart(3, '0')}</span>
+                      <span className="font-bold text-primary">OS #{fmtNumeroOS(os)}</span>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${cfg.color}`}>{cfg.label}</span>
                       {isReparo && (
                         <span className="text-xs bg-red-600 text-white px-2 py-0.5 rounded-full font-bold">🔧 REPARO</span>
@@ -763,14 +771,20 @@ export default function OrdensServicoPage() {
         </div>
       )}
 
-      {modalOpen && (
+      {modalOpen && tipoParam === 'reparo' ? (
+        // Modal completo de Novo Reparo: seleção de OS original + locais + sub-itens + fotos do cliente
+        <NovoReparoModal
+          onClose={() => { setModalOpen(false); setContratoIdParam(null); setTipoParam(null) }}
+          onCreated={(novaOS) => { setOrdens(prev => [novaOS, ...prev]) }}
+        />
+      ) : modalOpen ? (
         <NovaOSModal
           onClose={() => { setModalOpen(false); setContratoIdParam(null); setTipoParam(null) }}
           onSave={handleSave}
           contratoIdInicial={contratoIdParam}
           tipoInicial={tipoParam}
         />
-      )}
+      ) : null}
     </div>
   )
 }

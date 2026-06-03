@@ -24,6 +24,7 @@ import ProdutosPage from './pages/ProdutosPage.jsx'
 import NovaOSManualPage from './pages/NovaOSManualPage.jsx'
 import IntegracaoPage from './pages/IntegracaoPage.jsx'
 import FollowUpPage from './pages/FollowUpPage.jsx'
+import StatusPage from './pages/StatusPage.jsx'
 
 // ─── Push Notification Setup ──────────────────────────────────────────────────
 function urlBase64ToUint8Array(base64String) {
@@ -193,6 +194,7 @@ export default function App() {
                   <Route path="/usuarios" element={<ProtectedRoute adminOnly><UsersPage /></ProtectedRoute>} />
                   <Route path="/followup" element={<FollowUpPage />} />
                   <Route path="/integracao" element={<IntegracaoPage />} />
+                  <Route path="/status" element={<ProtectedRoute adminOnly><StatusPage /></ProtectedRoute>} />
                   <Route path="/perfil" element={<PerfilPage />} />
                 </Routes>
               </Layout>

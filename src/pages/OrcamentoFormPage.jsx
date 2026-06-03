@@ -1,7 +1,24 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api/client.js'
 import { useAuth } from '../App.jsx'
+import NovoReparoModal from '../components/NovoReparoModal.jsx'
+
+// Hook: mede a altura real de um elemento e devolve em px
+function useElementHeight() {
+  const ref = useRef(null)
+  const [height, setHeight] = useState(120)
+  useEffect(() => {
+    if (!ref.current) return
+    const upd = () => setHeight(ref.current?.offsetHeight || 120)
+    upd()
+    const obs = new ResizeObserver(upd)
+    obs.observe(ref.current)
+    window.addEventListener('resize', upd)
+    return () => { obs.disconnect(); window.removeEventListener('resize', upd) }
+  }, [])
+  return [ref, height]
+}
 
 const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0)
 
@@ -122,6 +139,9 @@ export default function OrcamentoFormPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
+  // Mede a altura real da sticky bar para evitar que ela corte o conteúdo
+  const [stickyRef, stickyHeight] = useElementHeight()
+  const [showAssistTec, setShowAssistTec] = useState(false)
 
   // Load existing or create new
   useEffect(() => {
@@ -260,7 +280,7 @@ export default function OrcamentoFormPage() {
     : (Number(orc.desconto) || 0)
 
   return (
-    <div className="p-4 md:p-6 max-w-5xl mx-auto pb-24">
+    <div className="p-4 md:p-6 max-w-5xl mx-auto" style={{ paddingBottom: stickyHeight + 32 }}>
       {/* Header */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <button onClick={() => navigate('/orcamentos')} className="btn-secondary">
@@ -875,10 +895,10 @@ export default function OrcamentoFormPage() {
       </section>
 
       {/* Sticky Bottom Bar */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-3 justify-end z-10 md:left-56">
-        <div className="flex-1 flex items-center gap-4">
-          <span className="text-sm text-gray-500">{orc.orcMinimo ? 'Total Mínimo:' : 'Total:'}</span>
-          <span className="text-xl font-bold text-primary">
+      <div ref={stickyRef} className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-3 md:px-4 py-2.5 flex flex-wrap items-center gap-2 justify-end z-20 md:left-56 shadow-lg">
+        <div className="flex-1 min-w-[140px] flex items-center gap-3">
+          <span className="text-xs md:text-sm text-gray-500 whitespace-nowrap">{orc.orcMinimo ? 'Total Mínimo:' : 'Total:'}</span>
+          <span className="text-lg md:text-xl font-bold text-primary whitespace-nowrap">
             {fmt(orc.orcMinimo && orc.totalMinimo > 0 ? orc.totalMinimo : orc.totalLiquido)}
           </span>
           {orc.orcMinimo && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">🔖 Mínimo</span>}
@@ -893,6 +913,11 @@ export default function OrcamentoFormPage() {
           Excel
         </button>
         <button
+          onClick={() => setShowAssistTec(true)}
+          className="bg-red-50 text-red-700 border border-red-200 rounded-lg px-3 py-2 text-sm font-semibold hover:bg-red-100 transition-colors">
+          🔧 Assistência Técnica
+        </button>
+        <button
           onClick={async () => { await handleSave(); navigate('/orcamentos') }}
           disabled={saving}
           className="btn-primary"
@@ -900,6 +925,17 @@ export default function OrcamentoFormPage() {
           {saving ? 'Salvando...' : '✓ Concluir'}
         </button>
       </div>
+
+      {/* Modal Assistência Técnica — abre Novo Reparo (Step 1 lista OSes do mesmo cliente/contrato) */}
+      {showAssistTec && (
+        <NovoReparoModal
+          onClose={() => setShowAssistTec(false)}
+          onCreated={() => {
+            setShowAssistTec(false)
+            navigate('/reparos')
+          }}
+        />
+      )}
     </div>
   )
 }

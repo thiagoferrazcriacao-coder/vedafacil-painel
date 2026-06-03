@@ -184,6 +184,48 @@ function EstoqueSemanalTab() {
                     </div>
                   </div>
                 </div>
+
+                {/* Histórico de lançamentos */}
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    📋 Lançamentos da semana
+                  </div>
+                  {!eq.lancamentos || eq.lancamentos.length === 0 ? (
+                    eq.recebido > 0 ? (
+                      <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 leading-relaxed">
+                        ⓘ Esta semana tem <strong>{fmt(eq.recebido)}L</strong> registrados, mas os lançamentos foram feitos antes desse detalhamento estar disponível. <strong>Novos lançamentos da equipe pelo app vão aparecer aqui automaticamente</strong> (quem, quando e quanto).
+                      </div>
+                    ) : (
+                      <div className="text-xs text-gray-400 italic px-2.5 py-1">Nenhum lançamento ainda.</div>
+                    )
+                  ) : (
+                    <div className="space-y-1">
+                      {[...eq.lancamentos].map((l, origIdx) => ({ ...l, origIdx })).reverse().map((l) => (
+                        <div key={l.origIdx} className="flex items-center justify-between text-xs bg-gray-50 rounded-lg px-2.5 py-1.5">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-semibold text-gray-700 truncate">{l.membro || 'Equipe'}</span>
+                            <span className="text-gray-400">
+                              {l.ts ? new Date(l.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}
+                              {l.ts ? ` · ${new Date(l.ts).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}` : ''}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                            <span className="font-bold text-blue-700">+{fmt(l.litros)}L</span>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Excluir este lançamento de ${l.membro || 'Equipe'} (+${fmt(l.litros)}L)?`)) return
+                                const descontar = confirm('Descontar também do total recebido da semana?\n\nOK = sim, descontar  ·  Cancelar = não, manter total')
+                                try { await api.deleteLancamento(eq.equipeId, l.origIdx, semana, descontar); await load(semana) }
+                                catch (e) { alert('Erro: ' + e.message) }
+                              }}
+                              className="text-gray-300 hover:text-red-500 transition-colors text-sm leading-none"
+                              title="Excluir este lançamento">×</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )
           })}
@@ -202,6 +244,105 @@ function EstoqueSemanalTab() {
 const fmt = (n) => Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
 const fmtInt = (n) => Number(n || 0).toLocaleString('pt-BR')
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('pt-BR') : '—'
+
+// ─── Modal: Adicionar lançamento manual (admin) ──────────────────────────────
+function LancamentoManualModal({ equipeId, equipeNome, semana, onClose, onSaved }) {
+  // datetime-local no fuso local — default = agora
+  const agoraLocal = () => {
+    const d = new Date()
+    const off = d.getTimezoneOffset() * 60000
+    return new Date(d - off).toISOString().slice(0, 16)
+  }
+  const [membro, setMembro] = useState('')
+  const [litros, setLitros] = useState('')
+  const [ts, setTs] = useState(agoraLocal())
+  const [somarTotal, setSomarTotal] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [erro, setErro] = useState('')
+
+  // ESC fecha
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [onClose])
+
+  const handleSalvar = async () => {
+    if (!membro.trim()) { setErro('Informe o nome do membro'); return }
+    const litrosNum = parseFloat(String(litros).replace(',', '.'))
+    if (!Number.isFinite(litrosNum) || litrosNum <= 0) { setErro('Quantidade de litros inválida'); return }
+    setErro(''); setSaving(true)
+    try {
+      await api.addLancamentoManual(equipeId, {
+        semana,
+        membro: membro.trim(),
+        litros: litrosNum,
+        ts: new Date(ts).toISOString(),
+        somarTotal,
+      })
+      await onSaved()
+    } catch (e) { setErro(e.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+          <h2 className="text-base font-bold text-gray-800">➕ Adicionar lançamento</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          <div className="text-xs text-gray-500">
+            <strong>{equipeNome}</strong> · {semanaLabel(semana)}
+          </div>
+          {erro && <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">{erro}</div>}
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Membro</label>
+            <input type="text" value={membro} onChange={e => setMembro(e.target.value)}
+              placeholder="Ex: Wanderson"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Litros</label>
+            <input type="number" step="0.1" min="0" value={litros} onChange={e => setLitros(e.target.value)}
+              placeholder="Ex: 30"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Data e hora</label>
+            <input type="datetime-local" value={ts} onChange={e => setTs(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+          </div>
+
+          <label className="flex items-start gap-2 cursor-pointer bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <input type="checkbox" checked={somarTotal} onChange={e => setSomarTotal(e.target.checked)}
+              className="mt-0.5 accent-amber-500" />
+            <div className="text-xs">
+              <div className="font-semibold text-amber-800">Somar ao total recebido da semana?</div>
+              <div className="text-amber-700 mt-0.5">
+                <strong>Deixe DESMARCADO</strong> se você só quer registrar um lançamento antigo que já está somado.<br/>
+                <strong>Marque</strong> se for um lançamento NOVO que ainda não está no total.
+              </div>
+            </div>
+          </label>
+        </div>
+        <div className="px-5 py-3 border-t border-gray-200 flex gap-2 justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">
+            Cancelar
+          </button>
+          <button onClick={handleSalvar} disabled={saving}
+            className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">
+            {saving ? 'Salvando...' : '💾 Salvar lançamento'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ─── GVF Seal Panel ──────────────────────────────────────────────────────────
 function GVFSealPanel() {

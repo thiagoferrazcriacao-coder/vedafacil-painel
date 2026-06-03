@@ -44,6 +44,7 @@ export default function MedicaoDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [medicao, setMedicao] = useState(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -497,6 +498,21 @@ export default function MedicaoDetailPage() {
           <h2 className="font-semibold mb-3 text-primary">Cliente</h2>
           {editing ? (
             <div className="space-y-3">
+              {/* Número da Medição — só admin pode editar (correção/integração) */}
+              {isAdmin && (
+                <div>
+                  <label className="label">
+                    Número da Medição <span className="text-xs text-amber-600 font-normal">(admin · alterar com cuidado)</span>
+                  </label>
+                  <input
+                    type="number"
+                    className="input"
+                    value={editData.numeroMedicao || ''}
+                    onChange={e => updateField('numeroMedicao', parseInt(e.target.value, 10) || '')}
+                    placeholder="Ex: 100"
+                  />
+                </div>
+              )}
               {[
                 ['cliente', 'Nome / Condomínio'],
                 ['ac', 'AC (Responsável)'],

@@ -110,16 +110,49 @@ if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
 }
 
 // MongoDB connection
+// IMPORTANTE: em serverless do Vercel, NÃO confiar em flag boolean estática.
+// Cada container pode ter conexão TCP morta enquanto a flag diz "true",
+// causando "buffering timed out after 10000ms" no Mongoose.
+// Sempre validar via mongoose.connection.readyState:
+//   0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
 let isConnected = false;
+let _connectPromise = null;
 async function connectDB() {
-  if (isConnected) return;
   if (!process.env.MONGODB_URI) {
     console.warn('MONGODB_URI not set — using in-memory fallback');
+    isConnected = false;
     return;
   }
-  await mongoose.connect(process.env.MONGODB_URI);
-  isConnected = true;
+  // Sincroniza a flag com o estado real ANTES de qualquer decisão
+  isConnected = (mongoose.connection.readyState === 1);
+  if (isConnected) return;
+  // Se já há tentativa em curso, aguardar a mesma (evita N conexões paralelas)
+  if (_connectPromise) return _connectPromise;
+  _connectPromise = mongoose.connect(process.env.MONGODB_URI, {
+    serverSelectionTimeoutMS: 5000,   // desistir do Atlas em 5s se não responde
+    socketTimeoutMS: 45000,           // socket idle timeout > cold start
+    connectTimeoutMS: 10000,          // handshake TCP
+    maxPoolSize: 5,                   // serverless = poucos sockets por container
+    minPoolSize: 0,
+    bufferCommands: false,            // SEM buffer falso — falha imediato se sem conexão
+    heartbeatFrequencyMS: 10000,
+  })
+    .then(() => {
+      isConnected = (mongoose.connection.readyState === 1);
+      _connectPromise = null;
+    })
+    .catch(err => {
+      isConnected = false;
+      _connectPromise = null;
+      console.error('Mongo connect failed:', err.message);
+      throw err;
+    });
+  return _connectPromise;
 }
+// Quando o driver perde conexão (ping falha, socket morto), zera a flag para forçar reconnect
+mongoose.connection.on('disconnected', () => { isConnected = false; });
+mongoose.connection.on('error', () => { isConnected = false; });
+mongoose.connection.on('connected', () => { isConnected = true; });
 
 // ── Mongoose Schemas ──────────────────────────────────────────────────────────
 
@@ -267,6 +300,9 @@ const userSchema = new mongoose.Schema({
   googleTokenExpiry: Number,
   setores: { type: [String], default: [] },
   pushSubscription: { type: mongoose.Schema.Types.Mixed },
+  // Horário de almoço (medidor) — usado pra bloquear agendamentos conflitantes na Agenda de Visitas
+  almocoInicio: { type: String, default: '12:00' },  // HH:mm — local de Brasília
+  almocoFim:    { type: String, default: '13:30' },  // HH:mm — sempre 1h30 após inicio (validado no PUT)
 }, { _id: false });
 const User = mongoose.model('User', userSchema);
 
@@ -285,8 +321,11 @@ const configSchema = new mongoose.Schema({
     numMedicao:   { type: Number, default: 1 },
     tecnicos: { type: [String], default: ['Alan', 'Fernando', 'Thiago', 'Daniel'] },
     setores: { type: [String], default: ['Administrativo', 'Financeiro', 'Orçamentos', 'Comercial', 'Adm. de Obras', 'Operacional de Obras'] },
-  }
-}, { _id: false });
+  },
+  // Healthcheck dedup (vide /api/cron/healthcheck): evita spam de WhatsApp
+  ultimoHealthAlertHash: { type: String, default: null },
+  ultimoHealthAlertEm: { type: Number, default: null },
+}, { _id: false, strict: false });
 
 const equipeSchema = new mongoose.Schema({
   _id: { type: String, default: uuidv4 },
@@ -356,6 +395,38 @@ const osSchema = new mongoose.Schema({
   updatedAt: { type: Number, default: Date.now },
 }, { _id: false });
 
+// ── Índices (criados em background; não bloqueiam queries) ────────────────────
+// Reduzem listagens de ~3s para sub-segundo. Não alteram dados.
+medicaoSchema.index({ createdAt: -1 });
+medicaoSchema.index({ numeroMedicao: -1 });
+medicaoSchema.index({ status: 1, createdAt: -1 });
+medicaoSchema.index({ user: 1, createdAt: -1 });
+
+orcamentoSchema.index({ createdAt: -1 });
+orcamentoSchema.index({ numero: -1 });
+orcamentoSchema.index({ status: 1, createdAt: -1 });
+orcamentoSchema.index({ medicaoId: 1 });
+
+contratoSchema.index({ createdAt: -1 });
+contratoSchema.index({ numero: -1 });
+contratoSchema.index({ status: 1, createdAt: -1 });
+contratoSchema.index({ orcamentoId: 1 });
+contratoSchema.index({ dataInicio: 1 });
+
+osSchema.index({ createdAt: -1 });
+osSchema.index({ numero: -1 });
+osSchema.index({ tipo: 1, status: 1, createdAt: -1 });
+osSchema.index({ status: 1, createdAt: -1 });
+osSchema.index({ equipe: 1, status: 1 });
+osSchema.index({ equipe: 1, createdAt: -1 });
+osSchema.index({ osOriginalId: 1 });
+osSchema.index({ contratoId: 1 });
+osSchema.index({ orcamentoId: 1 });
+osSchema.index({ dataInicio: 1 });
+
+equipeSchema.index({ nome: 1 });
+equipeSchema.index({ emailGmail: 1 });
+
 const Medicao = mongoose.model('Medicao', medicaoSchema);
 const Orcamento = mongoose.model('Orcamento', orcamentoSchema);
 const Contrato = mongoose.model('Contrato', contratoSchema);
@@ -423,6 +494,12 @@ const estoqueEquipeSemanaSchema = new mongoose.Schema({
   equipeNome: { type: String, default: '' },
   semana:     { type: String, required: true }, // "2026-W20"
   recebido:   { type: Number, default: 0 },
+  // histórico de lançamentos individuais: quem lançou, quando e quanto
+  lancamentos: [{
+    membro:   String,
+    litros:   Number,
+    ts:       { type: Date, default: Date.now },
+  }],
   criadoEm:   { type: Date, default: Date.now },
   updatedAt:  { type: Date, default: Date.now }
 });
@@ -672,19 +749,430 @@ async function audit(req, action, resource, resourceId, details) {
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
+// ── Telemetria interna: rolling stats em memória (5 min de janela) ────────────
+// Permite o /api/admin/status mostrar latência média, taxa de erro, payload médio.
+// Em serverless cada container tem seu próprio buffer (não é global) — é um best-effort
+// para diagnóstico; o cron de healthcheck cobre o monitoramento contínuo.
+const _stats = {
+  reqs: [],          // { ts, path, ms, status, bytes }
+  errors: [],        // { ts, path, status, msg }
+  payloadWarnings: [], // { ts, path, bytes }
+  startedAt: Date.now(),
+};
+const _STATS_WINDOW_MS = 5 * 60 * 1000;       // 5 minutos
+const _STATS_MAX_REQS = 500;                  // teto p/ não estourar memória
+const _PAYLOAD_WARN_THRESHOLD = 500 * 1024;   // 500 KB
+
+function _trimStats() {
+  const cutoff = Date.now() - _STATS_WINDOW_MS;
+  _stats.reqs = _stats.reqs.filter(r => r.ts >= cutoff).slice(-_STATS_MAX_REQS);
+  _stats.errors = _stats.errors.filter(r => r.ts >= cutoff).slice(-100);
+  _stats.payloadWarnings = _stats.payloadWarnings.filter(r => r.ts >= cutoff).slice(-50);
+}
+
+// Middleware que mede tempo + tamanho de resposta de toda chamada /api/*
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  const t0 = Date.now();
+  let bytes = 0;
+  const origWrite = res.write.bind(res);
+  const origEnd = res.end.bind(res);
+  res.write = (chunk, enc, cb) => {
+    if (chunk) bytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk, enc);
+    return origWrite(chunk, enc, cb);
+  };
+  res.end = (chunk, enc, cb) => {
+    if (chunk) bytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk, enc);
+    const ms = Date.now() - t0;
+    const status = res.statusCode;
+    // Não registrar a própria página de status para não inflar números
+    if (!req.path.startsWith('/api/admin/status') && !req.path.startsWith('/api/health')) {
+      _stats.reqs.push({ ts: Date.now(), path: req.path, ms, status, bytes });
+      if (status >= 500) {
+        _stats.errors.push({ ts: Date.now(), path: req.path, status, msg: `HTTP ${status}` });
+      }
+      if (bytes > _PAYLOAD_WARN_THRESHOLD) {
+        _stats.payloadWarnings.push({ ts: Date.now(), path: req.path, bytes });
+        console.warn(`[payload-warn] ${req.method} ${req.path} → ${(bytes/1024).toFixed(0)} KB (limite recomendado: ${_PAYLOAD_WARN_THRESHOLD/1024} KB)`);
+      }
+      _trimStats();
+    }
+    return origEnd(chunk, enc, cb);
+  };
+  next();
+});
+
+// Ping real do Mongo: round-trip mínimo para medir latência verdadeira
+async function _pingMongo() {
+  if (mongoose.connection.readyState !== 1) return { ok: false, latencyMs: null };
+  const t0 = Date.now();
+  try {
+    await mongoose.connection.db.admin().ping();
+    return { ok: true, latencyMs: Date.now() - t0 };
+  } catch (e) {
+    return { ok: false, latencyMs: Date.now() - t0, error: e.message };
+  }
+}
+
+// Coleta métricas detalhadas do Mongo (storage, conexões, etc)
+async function _collectMongoMetrics() {
+  if (mongoose.connection.readyState !== 1) return null;
+  try {
+    const dbStats = await mongoose.connection.db.stats();
+    const serverStatus = await mongoose.connection.db.admin().serverStatus().catch(() => null);
+    return {
+      storageBytes: dbStats.dataSize + dbStats.indexSize,
+      collections: dbStats.collections,
+      documents: dbStats.objects,
+      connections: serverStatus?.connections?.current ?? null,
+      connectionsAvailable: serverStatus?.connections?.available ?? null,
+    };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+// ── /api/health: termômetro público para monitoramento externo ────────────────
 app.get('/api/health', async (req, res) => {
   try {
     await connectDB();
-    const dbStatus = isConnected ? 'connected' : 'in-memory';
-    res.json({
-      status: 'ok',
-      db: dbStatus,
-      env: process.env.NODE_ENV || 'development',
+    const ping = await _pingMongo();
+    const ok = ping.ok && mongoose.connection.readyState === 1;
+    res.status(ok ? 200 : 503).json({
+      status: ok ? 'ok' : 'degraded',
+      db: ok ? 'connected' : 'disconnected',
+      readyState: mongoose.connection.readyState,
+      mongoLatencyMs: ping.latencyMs,
       uptime: Math.round(process.uptime()),
+      env: process.env.NODE_ENV || 'development',
       ts: new Date().toISOString(),
     });
   } catch (err) {
-    res.status(503).json({ status: 'error', error: err.message });
+    res.status(503).json({ status: 'error', db: 'disconnected', error: err.message });
+  }
+});
+
+// ── /api/admin/status: dashboard completo para o painel (admin only) ──────────
+// Retorna { metric, ideal, limite, atual, status: 'ok'|'warn'|'crit', unidade }
+// para CADA métrica, para a UI mostrar barra/cor sem ter que calcular.
+app.get('/api/admin/status', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+    await connectDB();
+    _trimStats();
+    const ping = await _pingMongo();
+    const mongoMetrics = await _collectMongoMetrics();
+    const mem = process.memoryUsage();
+
+    // Cálculos agregados sobre a janela de 5 min
+    const reqs = _stats.reqs;
+    const totalReqs = reqs.length;
+    const errorReqs = reqs.filter(r => r.status >= 500).length;
+    const errorRate = totalReqs ? (errorReqs / totalReqs) * 100 : 0;
+    const avgMs = totalReqs ? Math.round(reqs.reduce((s, r) => s + r.ms, 0) / totalReqs) : 0;
+    const p95Ms = totalReqs ? (() => {
+      const sorted = [...reqs].map(r => r.ms).sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length * 0.95)] || 0;
+    })() : 0;
+    const avgBytes = totalReqs ? Math.round(reqs.reduce((s, r) => s + r.bytes, 0) / totalReqs) : 0;
+    const maxBytes = totalReqs ? Math.max(...reqs.map(r => r.bytes)) : 0;
+
+    // Helper para classificar status com base em thresholds
+    const cls = (atual, idealMax, critMin) =>
+      atual == null ? 'unknown'
+      : atual <= idealMax ? 'ok'
+      : atual >= critMin ? 'crit'
+      : 'warn';
+
+    // Tier do Atlas (M0 free): 512 MB storage, 500 connections
+    const STORAGE_LIMIT = 512 * 1024 * 1024;
+    const CONN_LIMIT = 500;
+
+    const metrics = {
+      // ── MongoDB ──────────────────────────────────────────────────────────
+      mongo_conexao: {
+        label: 'Conexão com MongoDB',
+        descricao: 'Estado do socket TCP com o Atlas',
+        atual: mongoose.connection.readyState === 1 ? 'Conectado' : 'Desconectado',
+        ideal: 'Conectado',
+        limite: 'Desconectado',
+        status: mongoose.connection.readyState === 1 ? 'ok' : 'crit',
+        unidade: '',
+      },
+      mongo_latencia: {
+        label: 'Latência ping Mongo',
+        descricao: 'Tempo de round-trip de um ping ao Atlas',
+        atual: ping.latencyMs,
+        ideal: '< 100 ms',
+        limite: '> 500 ms',
+        status: cls(ping.latencyMs, 100, 500),
+        unidade: 'ms',
+      },
+      mongo_storage: {
+        label: 'Armazenamento usado',
+        descricao: `Tier M0 free tem ${STORAGE_LIMIT / 1024 / 1024} MB no total`,
+        atual: mongoMetrics?.storageBytes ?? null,
+        atualFmt: mongoMetrics ? `${(mongoMetrics.storageBytes / 1024 / 1024).toFixed(1)} MB` : null,
+        ideal: '< 300 MB',
+        limite: '> 460 MB (90%)',
+        status: !mongoMetrics ? 'unknown'
+          : mongoMetrics.storageBytes > STORAGE_LIMIT * 0.9 ? 'crit'
+          : mongoMetrics.storageBytes > STORAGE_LIMIT * 0.6 ? 'warn'
+          : 'ok',
+        unidade: 'bytes',
+        percent: mongoMetrics ? Math.round((mongoMetrics.storageBytes / STORAGE_LIMIT) * 100) : null,
+      },
+      mongo_conexoes: {
+        label: 'Conexões ativas no Atlas',
+        descricao: `M0 free tier limita em ${CONN_LIMIT} conexões totais`,
+        atual: mongoMetrics?.connections ?? null,
+        ideal: '< 50',
+        limite: `> 400 (${CONN_LIMIT} é o teto)`,
+        status: mongoMetrics?.connections == null ? 'unknown'
+          : mongoMetrics.connections > 400 ? 'crit'
+          : mongoMetrics.connections > 200 ? 'warn'
+          : 'ok',
+        unidade: 'conexões',
+        percent: mongoMetrics?.connections != null ? Math.round((mongoMetrics.connections / CONN_LIMIT) * 100) : null,
+      },
+      mongo_documentos: {
+        label: 'Total de documentos',
+        descricao: 'Soma de todos documentos em todas as coleções',
+        atual: mongoMetrics?.documents ?? null,
+        ideal: '—',
+        limite: '—',
+        status: 'info',
+        unidade: 'docs',
+      },
+
+      // ── API ──────────────────────────────────────────────────────────────
+      api_tempo_medio: {
+        label: 'Tempo médio de resposta',
+        descricao: 'Média dos últimos 5 min em todos endpoints /api/*',
+        atual: avgMs,
+        ideal: '< 500 ms',
+        limite: '> 2.000 ms',
+        status: cls(avgMs, 500, 2000),
+        unidade: 'ms',
+      },
+      api_tempo_p95: {
+        label: 'Tempo p95',
+        descricao: '95% das requisições respondem abaixo deste tempo',
+        atual: p95Ms,
+        ideal: '< 1.500 ms',
+        limite: '> 5.000 ms',
+        status: cls(p95Ms, 1500, 5000),
+        unidade: 'ms',
+      },
+      api_taxa_erro: {
+        label: 'Taxa de erro 5xx',
+        descricao: '% de requisições com erro de servidor nos últimos 5 min',
+        atual: Number(errorRate.toFixed(2)),
+        ideal: '0%',
+        limite: '> 1%',
+        status: errorRate === 0 ? 'ok' : errorRate > 1 ? 'crit' : 'warn',
+        unidade: '%',
+      },
+      api_payload_medio: {
+        label: 'Payload médio',
+        descricao: 'Tamanho médio das respostas JSON nos últimos 5 min',
+        atual: avgBytes,
+        atualFmt: `${(avgBytes / 1024).toFixed(1)} KB`,
+        ideal: '< 100 KB',
+        limite: '> 500 KB',
+        status: cls(avgBytes, 100 * 1024, 500 * 1024),
+        unidade: 'bytes',
+      },
+      api_payload_max: {
+        label: 'Maior payload (5 min)',
+        descricao: 'Maior resposta JSON registrada na janela',
+        atual: maxBytes,
+        atualFmt: `${(maxBytes / 1024).toFixed(1)} KB`,
+        ideal: '< 300 KB',
+        limite: '> 1 MB',
+        status: cls(maxBytes, 300 * 1024, 1024 * 1024),
+        unidade: 'bytes',
+      },
+      api_requisicoes: {
+        label: 'Requisições (5 min)',
+        descricao: 'Total de chamadas /api/* registradas neste container',
+        atual: totalReqs,
+        ideal: '—',
+        limite: '—',
+        status: 'info',
+        unidade: 'reqs',
+      },
+
+      // ── Sistema ──────────────────────────────────────────────────────────
+      sistema_memoria: {
+        label: 'Memória RSS',
+        descricao: 'RAM usada por este container Vercel (limite Hobby = ~1 GB)',
+        atual: mem.rss,
+        atualFmt: `${(mem.rss / 1024 / 1024).toFixed(0)} MB`,
+        ideal: '< 200 MB',
+        limite: '> 400 MB',
+        status: cls(mem.rss, 200 * 1024 * 1024, 400 * 1024 * 1024),
+        unidade: 'bytes',
+      },
+      sistema_heap: {
+        label: 'Heap V8 usado',
+        descricao: 'Memória JS ativa neste container',
+        atual: mem.heapUsed,
+        atualFmt: `${(mem.heapUsed / 1024 / 1024).toFixed(0)} MB`,
+        ideal: '< 150 MB',
+        limite: '> 300 MB',
+        status: cls(mem.heapUsed, 150 * 1024 * 1024, 300 * 1024 * 1024),
+        unidade: 'bytes',
+      },
+      sistema_uptime: {
+        label: 'Uptime do container',
+        descricao: 'Há quanto tempo este container Vercel está vivo',
+        atual: Math.round(process.uptime()),
+        atualFmt: `${Math.round(process.uptime() / 60)} min`,
+        ideal: '—',
+        limite: '—',
+        status: 'info',
+        unidade: 's',
+      },
+    };
+
+    // Resumo geral: ok / warn / crit (pior status entre os monitorados)
+    const niveis = ['info', 'unknown', 'ok', 'warn', 'crit'];
+    const piorNivel = Object.values(metrics).reduce((pior, m) => {
+      const idxAtual = niveis.indexOf(m.status);
+      const idxPior = niveis.indexOf(pior);
+      return idxAtual > idxPior ? m.status : pior;
+    }, 'ok');
+
+    res.json({
+      resumo: piorNivel,
+      ts: new Date().toISOString(),
+      janelaMin: _STATS_WINDOW_MS / 60000,
+      metrics,
+      ultimosErros: _stats.errors.slice(-10).reverse(),
+      ultimosPayloadsGrandes: _stats.payloadWarnings.slice(-10).reverse(),
+      // Top endpoints mais lentos: agrupa por path e calcula média, p95, contagem
+      // para identificar exatamente quais rotas estão derrubando a performance.
+      topEndpointsLentos: (() => {
+        const byPath = new Map()
+        reqs.forEach(r => {
+          // Normaliza path com :id (UUIDs/ObjectIds) pra agrupar rotas semelhantes
+          const norm = r.path
+            .replace(/\/[0-9a-f]{24}/gi, '/:id')                              // ObjectId
+            .replace(/\/[0-9a-f-]{36}/gi, '/:id')                             // UUID
+            .replace(/\/\d+/g, '/:n')                                         // números (sem confundir com path)
+          if (!byPath.has(norm)) byPath.set(norm, { path: norm, count: 0, totalMs: 0, maxMs: 0, totalBytes: 0 })
+          const e = byPath.get(norm)
+          e.count++
+          e.totalMs += r.ms
+          e.maxMs = Math.max(e.maxMs, r.ms)
+          e.totalBytes += r.bytes
+        })
+        return Array.from(byPath.values())
+          .map(e => ({
+            path: e.path,
+            count: e.count,
+            avgMs: Math.round(e.totalMs / e.count),
+            maxMs: e.maxMs,
+            avgBytes: Math.round(e.totalBytes / e.count),
+            // Classificação para a UI colorir
+            severidade: e.totalMs / e.count > 2000 ? 'crit'
+              : e.totalMs / e.count > 500 ? 'warn'
+              : 'ok',
+          }))
+          .sort((a, b) => b.avgMs - a.avgMs)
+          .slice(0, 10)
+      })(),
+    });
+  } catch (err) {
+    console.error('Erro em /api/admin/status:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Cron de healthcheck: bate a cada 5 min e alerta WhatsApp se crítico ───────
+app.get('/api/cron/healthcheck', async (req, res) => {
+  try {
+    // Aceita autenticação via header (X-Cron-Secret) ou query (?secret=...)
+    const secret = req.headers['x-cron-secret'] || req.query.secret;
+    const expected = process.env.CRON_SECRET || JWT_SECRET;
+    if (secret !== expected) return res.status(401).json({ error: 'unauthorized' });
+
+    await connectDB();
+    const ping = await _pingMongo();
+    const mongoMetrics = await _collectMongoMetrics();
+    const STORAGE_LIMIT = 512 * 1024 * 1024;
+
+    const problemas = [];
+    if (mongoose.connection.readyState !== 1) {
+      problemas.push(`Mongo DESCONECTADO (readyState=${mongoose.connection.readyState})`);
+    }
+    if (ping.ok && ping.latencyMs > 3000) {
+      problemas.push(`Latência Mongo MUITO ALTA: ${ping.latencyMs}ms`);
+    }
+    if (mongoMetrics?.storageBytes && mongoMetrics.storageBytes > STORAGE_LIMIT * 0.9) {
+      problemas.push(`Storage Atlas em ${Math.round((mongoMetrics.storageBytes / STORAGE_LIMIT) * 100)}% (>90%)`);
+    }
+    if (mongoMetrics?.connections != null && mongoMetrics.connections > 400) {
+      problemas.push(`Conexões Atlas em ${mongoMetrics.connections}/500 (>80%)`);
+    }
+
+    // Dedup: só alerta no WhatsApp se mudou de estado desde o último cron
+    // (evita spam quando problema dura horas). Estado guardado em Config.
+    let alertaEnviado = false;
+    if (problemas.length > 0 && isConnected) {
+      try {
+        const ConfigModel = mongoose.model('Config');
+        let cfg = await ConfigModel.findOne();
+        if (!cfg) cfg = new ConfigModel({});
+        const ultimoAlertaHash = cfg.ultimoHealthAlertHash;
+        const hashAtual = problemas.sort().join('|');
+        if (ultimoAlertaHash !== hashAtual) {
+          // Envia WhatsApp via Evolution API se configurado
+          const evolutionUrl = process.env.EVOLUTION_API_URL;
+          const evolutionToken = process.env.EVOLUTION_API_TOKEN;
+          const adminWhatsapp = process.env.ADMIN_WHATSAPP; // ex: '5524999999999'
+          if (evolutionUrl && evolutionToken && adminWhatsapp) {
+            const texto = `🚨 *Vedafacil — Alerta de Sistema*\n\nProblemas detectados:\n${problemas.map(p => `• ${p}`).join('\n')}\n\n🕒 ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}\n\nAcesse https://vedafacil-painel.vercel.app/status para detalhes.`;
+            try {
+              await fetch(`${evolutionUrl}/message/sendText/Vedafacil`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', apikey: evolutionToken },
+                body: JSON.stringify({ number: adminWhatsapp, text: texto }),
+              });
+              alertaEnviado = true;
+            } catch (e) {
+              console.error('Falha ao enviar alerta WhatsApp:', e.message);
+            }
+          }
+          cfg.ultimoHealthAlertHash = hashAtual;
+          cfg.ultimoHealthAlertEm = Date.now();
+          await cfg.save();
+        }
+      } catch (e) {
+        console.warn('Não foi possível processar dedup de alerta:', e.message);
+      }
+    } else if (problemas.length === 0 && isConnected) {
+      // Sistema OK: limpa hash do último alerta para que próximo problema dispare
+      try {
+        const ConfigModel = mongoose.model('Config');
+        const cfg = await ConfigModel.findOne();
+        if (cfg && cfg.ultimoHealthAlertHash) {
+          cfg.ultimoHealthAlertHash = null;
+          await cfg.save();
+        }
+      } catch {}
+    }
+
+    res.json({
+      ok: problemas.length === 0,
+      problemas,
+      alertaEnviado,
+      ts: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('Erro em /api/cron/healthcheck:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -981,6 +1469,20 @@ app.post('/api/medicao', bigJson, async (req, res) => {
       // Incrementa para a próxima
       await Config.findByIdAndUpdate('main', { 'precos.numMedicao': numero + 1 });
       const medicao = await Medicao.create({ ...data, _id: data.id || uuidv4(), numeroMedicao: numero, status: 'recebida' });
+
+      // Se essa medição veio de uma visita Vedafacil, atualiza a visita pra registrar a conclusão
+      if (data.visitaId) {
+        try {
+          await Visita.findByIdAndUpdate(data.visitaId, {
+            status: 'concluido',
+            concluidaEm: Date.now(),
+            medicaoId: medicao._id,
+            numeroMedicao: numero,
+            updatedAt: Date.now(),
+          });
+        } catch (e) { console.warn('Falha ao atualizar visita:', e.message); }
+      }
+
       // Push notification para setores Orçamentos e Comercial
       sendPushToSetores(['Orçamentos', 'Comercial'], {
         title: '📐 Nova Medição',
@@ -1048,22 +1550,29 @@ app.get('/api/medicoes', auth, async (req, res) => {
     await connectDB();
     let medicoes;
     if (isConnected) {
-      medicoes = await Medicao.find().sort({ createdAt: -1 }).select('-fotos').lean();
-    } else {
-      medicoes = memStore.medicoes.map(m => { const { fotos, ...rest } = m; return rest; });
-    }
-    // Attach orcamento info
-    if (isConnected && medicoes.length > 0) {
-      const ids = medicoes.map(m => m._id);
-      const orcs = await Orcamento.find({ medicaoId: { $in: ids } }).select('_id medicaoId numero').lean();
+      // Duas queries em PARALELO (eram sequenciais — economizava 1 round-trip ao Atlas).
+      // Medicao.find() com fotos cortadas + Orcamento.find() só com campos mínimos.
+      const [medicoesRaw, orcs] = await Promise.all([
+        Medicao.find()
+          .sort({ createdAt: -1 })
+          .select('-fotos -locais.fotos -locais.fotosMedicao')
+          .lean(),
+        Orcamento.find().select('_id medicaoId numero').lean(),
+      ]);
       const orcByMedicao = {};
-      orcs.forEach(o => { orcByMedicao[o.medicaoId] = { orcamentoId: o._id, numeroOrcamento: o.numero }; });
-      medicoes = medicoes.map(m => ({
+      orcs.forEach(o => { if (o.medicaoId) orcByMedicao[o.medicaoId] = { orcamentoId: o._id, numeroOrcamento: o.numero }; });
+      medicoes = medicoesRaw.map(m => ({
         ...m,
         temOrcamento: !!orcByMedicao[m._id],
         orcamentoId: orcByMedicao[m._id]?.orcamentoId || null,
         numeroOrcamento: orcByMedicao[m._id]?.numeroOrcamento || null,
       }));
+    } else {
+      medicoes = memStore.medicoes.map(m => {
+        const { fotos, ...rest } = m;
+        rest.locais = (rest.locais || []).map(l => { const { fotos, fotosMedicao, ...lr } = l; return lr; });
+        return rest;
+      });
     }
     return res.json(medicoes);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1167,6 +1676,15 @@ app.put('/api/medicoes/:id', auth, bigJson, async (req, res) => {
     await connectDB();
     const data = sanitizeImages(req.body, 'medicao-put');
     if (isConnected) {
+      // Audit log se o número da medição foi alterado
+      if (typeof data.numeroMedicao === 'number') {
+        const atual = await Medicao.findById(req.params.id).lean();
+        if (atual && data.numeroMedicao !== atual.numeroMedicao) {
+          await audit(req, 'update-numero-medicao', 'medicao', req.params.id, {
+            de: atual.numeroMedicao, para: data.numeroMedicao, cliente: atual.cliente,
+          });
+        }
+      }
       const orc = await Orcamento.findOne({ medicaoId: req.params.id });
       if (orc) {
         // Já tem orçamento: salva como dados pendentes de revisão, status 'alterada'
@@ -1336,7 +1854,10 @@ app.delete('/api/medicoes/:id', auth, adminOnly, async (req, res) => {
 app.get('/api/orcamentos', auth, async (req, res) => {
   try {
     await connectDB();
-    if (isConnected) return res.json(await Orcamento.find().sort({ createdAt: -1 }));
+    if (isConnected) return res.json(await Orcamento.find()
+      .sort({ createdAt: -1 })
+      .select('-pdfBase64 -propostas -locais.fotos -locais.fotosMedicao')
+      .lean());
     res.json(memStore.orcamentos);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1504,6 +2025,15 @@ app.put('/api/orcamentos/:id', auth, bigJson, async (req, res) => {
     if (rest.andaime !== undefined) rest.andaime = String(rest.andaime).trim().toLowerCase();
     const updates = { ...rest, updatedAt: Date.now() };
     if (isConnected) {
+      // Audit log se o número do orçamento foi alterado
+      if (typeof updates.numero === 'number') {
+        const atual = await Orcamento.findById(req.params.id).lean();
+        if (atual && updates.numero !== atual.numero) {
+          await audit(req, 'update-numero-orcamento', 'orcamento', req.params.id, {
+            de: atual.numero, para: updates.numero, cliente: atual.cliente,
+          });
+        }
+      }
       // Use $set explicitly for Mongoose 8 compatibility (avoids implicit replace)
       const o = await Orcamento.findByIdAndUpdate(
         req.params.id,
@@ -3649,7 +4179,10 @@ app.post('/api/orcamentos/:id/excel', auth, async (req, res) => {
 app.get('/api/contratos', auth, async (req, res) => {
   try {
     await connectDB();
-    if (isConnected) return res.json(await Contrato.find().sort({ createdAt: -1 }));
+    if (isConnected) return res.json(await Contrato.find()
+      .sort({ createdAt: -1 })
+      .select('-pdfBase64 -pdfManualBase64 -anexoOrcamentoPdfBase64 -textoHtml -clausulas -locais.fotos -locais.fotosMedicao')
+      .lean());
     res.json(memStore.contratos);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -3847,14 +4380,21 @@ app.patch('/api/contratos/:id/status', auth, async (req, res) => {
             fotosDepois: [],
           }));
 
-          // Incrementa número da OS
-          const count = isConnected ? await OS.countDocuments() : (memStore.os?.length || 0);
+          // Se o contrato veio de integração legada, a OS usa o mesmo número
+          // (mantém a cadeia: contrato 2205 → OS 2205 → garantia 2205)
+          let numeroOS
+          if (doc.origem === 'integracao' && doc.numero) {
+            numeroOS = doc.numero
+          } else {
+            const count = isConnected ? await OS.countDocuments() : (memStore.os?.length || 0)
+            numeroOS = count + 1
+          }
 
           const novaOS = {
             _id: uuidv4(),
-            numero: count + 1,
+            numero: numeroOS,
             tipo: 'normal',
-            origem: 'contrato',
+            origem: doc.origem === 'integracao' ? 'integracao' : 'contrato',
             pendente_equipe: true,
             contratoId: req.params.id,
             cliente: doc.razaoSocial || doc.cliente || '',
@@ -4108,10 +4648,71 @@ app.get('/api/auth/google/callback', async (req, res) => {
   }
 });
 
+// ── Medidor master-login: admin entra como qualquer medidor sem precisar do Gmail dele ──
+// Retorna um JWT com role 'medidor-master' + targetEmail (email do medidor escolhido)
+// O PWA Medidor usa esse token e vê como se fosse o próprio medidor (read-only)
+app.get('/api/medidor/master-medidores', async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.json([]);
+    const meds = await User.find({ role: 'medidor' }, '_id email name picture').lean();
+    res.json(meds.map(u => ({ email: u._id, nome: u.name, picture: u.picture || '' })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/medidor/master-login', loginLimiter, async (req, res) => {
+  try {
+    await connectDB();
+    const { masterPassword, medidorEmail } = req.body || {};
+    if (!masterPassword || !medidorEmail) return res.status(400).json({ error: 'masterPassword e medidorEmail obrigatórios' });
+    // Senha master = senha do painel admin (com trim defensivo)
+    const expectedPass = (ADMIN_PASSWORD || '').trim();
+    if ((masterPassword || '').trim() !== expectedPass) {
+      return res.status(401).json({ error: 'Senha master incorreta' });
+    }
+    // Verifica se o medidor existe
+    const target = await User.findById(medidorEmail).lean();
+    if (!target || target.role !== 'medidor') {
+      return res.status(404).json({ error: 'Medidor não encontrado' });
+    }
+    // Emite token master vinculado ao medidor escolhido
+    const token = jwt.sign({
+      username:    target.name,
+      email:       target._id,         // o JWT usa o email do medidor (para identificação no medidor PWA)
+      targetEmail: target._id,         // alias explícito para o endpoint de calendar
+      role:        'medidor-master',
+      picture:     target.picture || '',
+      masterMode:  true,
+    }, JWT_SECRET, { expiresIn: '12h' });
+    res.json({
+      ok: true,
+      token,
+      medidor: { email: target._id, nome: target.name, picture: target.picture || '' },
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/calendar/events', auth, async (req, res) => {
   try {
-    // Use access token from JWT directly — no DB lookup needed
-    const accessToken = req.user.googleAccessToken;
+    // Verifica modo da agenda — se 'proprio', não busca Google Calendar
+    await connectDB();
+    if (isConnected) {
+      const cfg = await Config.findById('main').lean().catch(() => null);
+      if (cfg?.agendaMode === 'proprio') {
+        return res.json({ events: [], desativado: true, agendaMode: 'proprio' });
+      }
+    }
+
+    // Modo master: admin/medidor-master pode buscar Calendar de OUTRO medidor
+    // (?asEmail=outro@gmail.com) usando o refresh token salvo no User
+    let accessToken = req.user.googleAccessToken;
+    if (req.user.role === 'medidor-master' && req.user.targetEmail) {
+      const target = await User.findById(req.user.targetEmail).lean();
+      if (target) accessToken = await refreshGToken(target);
+    } else if (req.query.asEmail && req.user.role === 'admin') {
+      const target = await User.findById(req.query.asEmail).lean();
+      if (target) accessToken = await refreshGToken(target);
+    }
     if (!accessToken) return res.json([]);
 
     const now = new Date();
@@ -4254,6 +4855,42 @@ app.put('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
     if (!u) return res.status(404).json({ error: 'Usuário não encontrado' });
     Object.assign(u, updates);
     res.json({ id: u._id || u.email, email: u.email, name: u.name, role: u.role, setores: u.setores || [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Helpers para horário "HH:mm" → minutos do dia
+function hhmmToMin(s) { if (!s || !/^\d{2}:\d{2}$/.test(s)) return null; const [h,m] = s.split(':').map(Number); return h*60+m; }
+function minToHhmm(min) { const h = Math.floor(min/60), m = min % 60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; }
+
+// GET /api/usuarios/:email/almoco — busca horário de almoço de um medidor
+app.get('/api/usuarios/:email/almoco', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const u = isConnected ? await User.findById(req.params.email).lean() : memStore.users.find(x => (x._id || x.email) === req.params.email);
+    if (!u) return res.status(404).json({ error: 'Usuário não encontrado' });
+    res.json({ almocoInicio: u.almocoInicio || '12:00', almocoFim: u.almocoFim || '13:30' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /api/usuarios/:email/almoco — atualiza horário de almoço (sempre 1h30 de duração)
+app.put('/api/usuarios/:email/almoco', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const { almocoInicio } = req.body || {};
+    if (!/^\d{2}:\d{2}$/.test(almocoInicio || '')) return res.status(400).json({ error: 'almocoInicio inválido (use HH:mm)' });
+    const inicioMin = hhmmToMin(almocoInicio);
+    if (inicioMin < 0 || inicioMin > 1350) return res.status(400).json({ error: 'almocoInicio deve estar entre 00:00 e 22:30' });
+    // Sempre 1h30 depois do início — não pode ser configurado separadamente
+    const almocoFim = minToHhmm(inicioMin + 90);
+    if (isConnected) {
+      const updated = await User.findByIdAndUpdate(req.params.email, { almocoInicio, almocoFim }, { new: true });
+      if (!updated) return res.status(404).json({ error: 'Usuário não encontrado' });
+      return res.json({ almocoInicio: updated.almocoInicio, almocoFim: updated.almocoFim });
+    }
+    const u = memStore.users.find(x => (x._id || x.email) === req.params.email);
+    if (!u) return res.status(404).json({ error: 'Usuário não encontrado' });
+    u.almocoInicio = almocoInicio; u.almocoFim = almocoFim;
+    res.json({ almocoInicio, almocoFim });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -4739,7 +5376,35 @@ app.get('/api/ordens-servico', auth, async (req, res) => {
     const filter = equipeId ? { equipeId } : {};
     if (tipoFilter) filter.tipo = tipoFilter;
     if (osOriginalId) filter.osOriginalId = osOriginalId;
-    if (isConnected) return res.json(await OS.find(filter).sort({ createdAt: -1 }).lean());
+    if (isConnected) {
+      // Lista LEVE — duas queries em paralelo:
+      //   1) find().select() — rápido, pega tudo SEM os campos base64 pesados
+      //   2) aggregate só com _id e flag temCroqui (não carrega base64, só projeta tamanho > 0)
+      // Roda em paralelo com Promise.all para minimizar latência total.
+      const [oses, croquiFlags] = await Promise.all([
+        OS.find(filter)
+          .sort({ createdAt: -1 })
+          .select('-fotosReparo -pontos.fotos -pontos.fotosAntes -pontos.fotosDepois -pontos.fotosMedicao -pontos.croquiBase64 -pontos.croquiOtimizado -fechamentosDia.fotos -pdfBase64 -contratoManualPdfBase64')
+          .lean(),
+        OS.aggregate([
+          { $match: filter },
+          { $project: {
+            _id: 1,
+            temCroqui: { $anyElementTrue: { $map: {
+              input: { $ifNull: ['$pontos', []] },
+              as: 'p',
+              in: { $or: [
+                { $gt: [{ $strLenCP: { $ifNull: ['$$p.croquiBase64', ''] } }, 0] },
+                { $gt: [{ $strLenCP: { $ifNull: ['$$p.croquiOtimizado', ''] } }, 0] },
+              ] },
+            } } },
+          } },
+        ]),
+      ]);
+      const croquiMap = new Map(croquiFlags.map(c => [c._id, c.temCroqui]));
+      oses.forEach(o => { o.temCroqui = croquiMap.get(o._id) || false; });
+      return res.json(oses);
+    }
     let list = memStore.ordens;
     if (equipeId) list = list.filter(o => o.equipeId === equipeId);
     if (tipoFilter) list = list.filter(o => (o.tipo || 'normal') === tipoFilter);
@@ -4804,7 +5469,22 @@ app.put('/api/ordens-servico/:id', auth, async (req, res) => {
   try {
     await connectDB();
     const updates = { ...req.body, updatedAt: Date.now() };
+    // Limpa flag pendente_equipe automaticamente se uma equipe foi atribuída
+    if (updates.equipeId && updates.equipeId !== '') {
+      updates.pendente_equipe = false;
+    }
     if (isConnected) {
+      // Audit log se o número da OS for alterado
+      if (typeof updates.numero === 'number') {
+        const atual = await OS.findById(req.params.id).lean();
+        if (atual && updates.numero !== atual.numero) {
+          await audit(req, 'update-numero-os', 'ordem-servico', req.params.id, {
+            de: atual.numero,
+            para: updates.numero,
+            cliente: atual.cliente,
+          });
+        }
+      }
       const os = await OS.findOneAndUpdate({ _id: req.params.id }, updates, { new: true }).lean();
       if (!os) return res.status(404).json({ error: 'Not found' });
       if (os.pontos) os.pontos = ensureSubPontos(os.pontos);
@@ -5304,7 +5984,7 @@ app.patch('/api/ordens-servico/:id/equipe', auth, async (req, res) => {
 
       const updated = await OS.findByIdAndUpdate(
         req.params.id,
-        { equipeId, equipeNome, historicoEquipes: hist, updatedAt: agora },
+        { equipeId, equipeNome, historicoEquipes: hist, pendente_equipe: false, updatedAt: agora },
         { new: true }
       );
       return res.json(updated);
@@ -6296,10 +6976,18 @@ app.post('/api/reparos/from-os', auth, bigJson, async (req, res) => {
       return total + trinca * 1.5 + juntaDilat * 2.0 + juntaFria * 1.0 + ralo * 1.0 + cortina * 2.0;
     }, 0);
 
-    const count = isConnected ? await OS.countDocuments() : memStore.ordens.length;
+    // OS de reparo herda o número da OS mãe e ganha um sufixo -N (1, 2, 3...)
+    // Ex: OS mãe 3226 → primeiro reparo 3226-1, segundo 3226-2
+    const numeroMae = osOriginal.numero || 0;
+    const reparosExistentes = isConnected
+      ? await OS.countDocuments({ osOriginalId, tipo: 'reparo' })
+      : (memStore.ordens || []).filter(o => o.osOriginalId === osOriginalId && o.tipo === 'reparo').length;
+    const numReparo = reparosExistentes + 1;
     const novaOS = {
       _id: uuidv4(),
-      numero: count + 1,
+      numero: numeroMae,            // mesmo número da OS mãe (numérico, pra ordenar)
+      numReparo: numReparo,         // 1, 2, 3... — o "sufixo" do reparo
+      numeroOriginalMae: numeroMae, // referência explícita para exibição
       tipo: 'reparo',
       osOriginalId,
       tipoReparo: tipoReparo || '',
@@ -6822,7 +7510,8 @@ app.get('/api/estoque-equipes', auth, async (req, res) => {
         semana,
         recebido,
         consumido,
-        restante: Math.max(0, Math.round((recebido - consumido) * 10) / 10)
+        restante: Math.max(0, Math.round((recebido - consumido) * 10) / 10),
+        lancamentos: est.lancamentos || [], // histórico: quem lançou, quando, quanto
       };
     });
     res.json({ semana, semanaRange: { start, end }, equipes: result });
@@ -6842,6 +7531,78 @@ app.put('/api/estoque-equipes/:equipeId', auth, async (req, res) => {
       { upsert: true, new: true }
     );
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/estoque-equipes/:equipeId/lancamento-manual
+// Admin adiciona um lançamento individual ao histórico — usado pra reconstruir
+// lançamentos antigos que não tinham registro (anteriores à feature de histórico).
+// Body: { semana, membro, litros, ts (ISO string opcional), somarTotal (bool) }
+// Se somarTotal=true, também incrementa o campo `recebido`; padrão=false (só histórico).
+app.post('/api/estoque-equipes/:equipeId/lancamento-manual', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    const { semana, membro, litros, ts, somarTotal } = req.body || {};
+    if (!semana || !membro || !litros || isNaN(parseFloat(litros))) {
+      return res.status(400).json({ error: 'semana, membro e litros obrigatórios' });
+    }
+    const equipe = await Equipe.findById(req.params.equipeId).lean();
+    if (!equipe) return res.status(404).json({ error: 'Equipe não encontrada' });
+
+    const lancamento = {
+      membro: String(membro).trim(),
+      litros: parseFloat(litros),
+      ts: ts ? new Date(ts) : new Date(),
+    };
+
+    const updates = {
+      equipeId: req.params.equipeId,
+      equipeNome: equipe.nome,
+      semana,
+      updatedAt: new Date(),
+    };
+
+    // Se somarTotal=true, incrementa o recebido. Senão, só adiciona ao histórico.
+    if (somarTotal) {
+      const atual = await EstoqueEquipeSemana.findOne({ equipeId: req.params.equipeId, semana }).lean();
+      updates.recebido = Math.round(((atual?.recebido || 0) + lancamento.litros) * 10) / 10;
+    }
+
+    const doc = await EstoqueEquipeSemana.findOneAndUpdate(
+      { equipeId: req.params.equipeId, semana },
+      { ...updates, $push: { lancamentos: lancamento } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    await audit(req, 'add-lancamento-manual', 'estoque-equipe', req.params.equipeId, { semana, membro, litros, somarTotal: !!somarTotal });
+    res.json({ success: true, lancamento, recebido: doc.recebido });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/estoque-equipes/:equipeId/lancamento/:idx
+// Admin remove um lançamento específico do histórico (em caso de erro)
+app.delete('/api/estoque-equipes/:equipeId/lancamento/:idx', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    const { semana, descontarTotal } = req.query;
+    if (!semana) return res.status(400).json({ error: 'semana obrigatória' });
+    const doc = await EstoqueEquipeSemana.findOne({ equipeId: req.params.equipeId, semana });
+    if (!doc) return res.status(404).json({ error: 'Estoque não encontrado' });
+    const idx = parseInt(req.params.idx, 10);
+    if (isNaN(idx) || idx < 0 || idx >= (doc.lancamentos || []).length) {
+      return res.status(400).json({ error: 'Índice inválido' });
+    }
+    const removido = doc.lancamentos[idx];
+    doc.lancamentos.splice(idx, 1);
+    if (descontarTotal === 'true' && removido?.litros) {
+      doc.recebido = Math.max(0, Math.round((doc.recebido - removido.litros) * 10) / 10);
+    }
+    doc.updatedAt = new Date();
+    await doc.save();
+    await audit(req, 'delete-lancamento-manual', 'estoque-equipe', req.params.equipeId, { semana, removido, descontarTotal });
+    res.json({ success: true, recebido: doc.recebido });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -6897,7 +7658,7 @@ app.get('/api/aplicador/estoque-summary', authEquipe, async (req, res) => {
 app.post('/api/aplicador/estoque-recebido', authEquipe, async (req, res) => {
   try {
     await connectDB();
-    const { equipeId, litros, semana } = req.body;
+    const { equipeId, litros, semana, membro } = req.body;
     if (!equipeId || !litros || isNaN(parseFloat(litros))) {
       return res.status(400).json({ error: 'equipeId e litros obrigatórios' });
     }
@@ -6906,9 +7667,15 @@ app.post('/api/aplicador/estoque-recebido', authEquipe, async (req, res) => {
     const equipeNome = equipe ? equipe.nome : '';
     const current = await EstoqueEquipeSemana.findOne({ equipeId, semana: semanaStr }).lean();
     const novoRecebido = Math.round(((current?.recebido || 0) + parseFloat(litros)) * 10) / 10;
+    const novoLancamento = { membro: membro || 'Equipe', litros: parseFloat(litros), ts: new Date() };
     await EstoqueEquipeSemana.findOneAndUpdate(
       { equipeId, semana: semanaStr },
-      { equipeId, equipeNome, semana: semanaStr, recebido: novoRecebido, updatedAt: new Date() },
+      {
+        equipeId, equipeNome, semana: semanaStr,
+        recebido: novoRecebido,
+        updatedAt: new Date(),
+        $push: { lancamentos: novoLancamento },
+      },
       { upsert: true, new: true }
     );
     res.json({ success: true, recebido: novoRecebido, semana: semanaStr });
@@ -7071,7 +7838,7 @@ app.post('/api/integracao/extrair-contrato', auth, bigJson, async (req, res) => 
     if (!pdf) return res.status(400).json({ error: 'pdf (base64) obrigatório' });
 
     const pdfBase64 = pdf.replace(/^data:[^;]+;base64,/, '');
-    const prompt = `Analise este PDF de contrato de impermeabilização e extraia os dados. Retorne um JSON com EXATAMENTE estes campos: { "razaoSocial": string, "cnpjCliente": string, "cpfResponsavel": string, "rgResponsavel": string, "sindico": string, "dataAssinatura": string (YYYY-MM-DD) ou null, "dataInicio": string (YYYY-MM-DD) ou null, "dataTermino": string (YYYY-MM-DD) ou null, "prazoExecucao": number (dias úteis) ou null, "garantia": number (15 ou 7), "totalLiquido": number, "parcelas": number (inteiro), "valorParcela": number, "obsGeral": string ou null }. Use null para campos ausentes. Todos os valores numéricos devem ser números, não strings.`;
+    const prompt = `Analise este PDF de contrato de impermeabilização e extraia os dados. Retorne um JSON com EXATAMENTE estes campos: { "numeroContrato": number (número do contrato, geralmente aparece no topo como "Contrato Nº" ou "Nº" — extraia apenas o inteiro) ou null, "razaoSocial": string, "cnpjCliente": string, "cpfResponsavel": string, "rgResponsavel": string, "sindico": string, "dataAssinatura": string (YYYY-MM-DD) ou null, "dataInicio": string (YYYY-MM-DD) ou null, "dataTermino": string (YYYY-MM-DD) ou null, "prazoExecucao": number (dias úteis) ou null, "garantia": number (15 ou 7), "totalLiquido": number, "parcelas": number (inteiro), "valorParcela": number, "obsGeral": string ou null }. Use null para campos ausentes. Todos os valores numéricos devem ser números, não strings.`;
 
     const dados = await geminiExtrairPdf(pdfBase64, prompt, 2048);
     res.json({ success: true, dados });
@@ -7085,19 +7852,31 @@ app.post('/api/integracao/extrair-contrato', auth, bigJson, async (req, res) => 
 app.post('/api/integracao/criar', auth, bigJson, async (req, res) => {
   try {
     await connectDB();
-    const { dadosOrcamento, dadosContrato, locaisComFotos } = req.body;
+    const { dadosOrcamento, dadosContrato, locaisComFotos, numeroOriginal } = req.body;
     if (!dadosOrcamento) return res.status(400).json({ error: 'dadosOrcamento obrigatório' });
 
     const cfg = await getConfig();
     const precos = cfg.precos || {};
 
+    // Se foi informado um número original (contrato legado), usa ele em TODA a cadeia
+    // (medição = orçamento = contrato = OS = garantia com o mesmo número)
+    const usarNumeroLegado = numeroOriginal && Number.isFinite(parseInt(numeroOriginal, 10))
+      ? parseInt(numeroOriginal, 10)
+      : null;
+
     // ── 1. Criar Medição ─────────────────────────────────────────────────────
-    let numMedicao = precos.numMedicao;
-    if (!numMedicao) {
-      const count = await Medicao.countDocuments();
-      numMedicao = count + 1;
+    let numMedicao;
+    if (usarNumeroLegado) {
+      // Usa número do contrato legado, sem mexer no contador global
+      numMedicao = usarNumeroLegado;
+    } else {
+      numMedicao = precos.numMedicao;
+      if (!numMedicao) {
+        const count = await Medicao.countDocuments();
+        numMedicao = count + 1;
+      }
+      await Config.findByIdAndUpdate('main', { 'precos.numMedicao': numMedicao + 1 });
     }
-    await Config.findByIdAndUpdate('main', { 'precos.numMedicao': numMedicao + 1 });
 
     // Mescla fotos do relatório nos locais pelo nome (matching normalizado)
     const normNome = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
@@ -7143,8 +7922,13 @@ app.post('/api/integracao/criar', auth, bigJson, async (req, res) => {
     });
 
     // ── 2. Criar Orçamento ────────────────────────────────────────────────────
-    const numOrcamento = precos.numOrcamento || 1;
-    await Config.findByIdAndUpdate('main', { $inc: { 'precos.numOrcamento': 1 } });
+    let numOrcamento;
+    if (usarNumeroLegado) {
+      numOrcamento = usarNumeroLegado;
+    } else {
+      numOrcamento = precos.numOrcamento || 1;
+      await Config.findByIdAndUpdate('main', { $inc: { 'precos.numOrcamento': 1 } });
+    }
 
     const totals = { trinca: 0, juntaFria: 0, ralo: 0, juntaDilat: 0, ferragem: 0, cortina: 0 };
     locaisMedicao.forEach(l => {
@@ -7326,6 +8110,258 @@ app.get('/api/debug-zapsign', (req, res) => {
     token_prefix: token.substring(0, 8),
     token_env: process.env.ZAPSIGN_API_TOKEN ? 'SET' : 'NOT_SET'
   });
+});
+
+// ── Agenda de Visitas ─────────────────────────────────────────────────────────
+
+const visitaSchema = new mongoose.Schema({
+  _id:             { type: String, default: () => uuidv4() },
+  nomeCondominio:  { type: String, required: true },
+  cep:             String,
+  endereco:        String,
+  bairro:          String,
+  cidade:          String,
+  estado:          String,
+  nomeResponsavel: String,
+  telefone:        String,
+  observacao:      String,
+  dataHora:        String,    // "YYYY-MM-DDTHH:mm"
+  dataHoraFim:     String,    // opcional
+  status:          { type: String, default: 'reservado' },
+                              // 'reservado' | 'confirmado' | 'concluido' | 'cancelado'
+  medidorEmail:       String,    // medidor que vai ao local (email do usuário medidor)
+  medidorNome:        String,    // nome do medidor (desnormalizado para exibição)
+  tecnicoResponsavel: String,    // técnico responsável (da lista de ConfigPage)
+  criadoPor:          String,    // email do operador
+  fotosCliente:       [String],  // fotos anexadas pelo operador (base64) — visíveis pro medidor
+  concluidaEm:        Number,    // timestamp quando o medidor concluiu a medição
+  medicaoId:          String,    // _id da medição criada a partir desta visita
+  numeroMedicao:      Number,    // número da medição (para exibição rápida)
+  createdAt:       { type: Number, default: Date.now },
+  updatedAt:       { type: Number, default: Date.now },
+}, { strict: false });
+visitaSchema.index({ dataHora: 1 });
+visitaSchema.index({ medidorEmail: 1, dataHora: 1 });
+visitaSchema.index({ status: 1, dataHora: 1 });
+const Visita = mongoose.models?.Visita || mongoose.model('Visita', visitaSchema);
+
+// GET /api/visitas — lista visitas para o painel
+// Acesso:
+//   - admin / operador (Comercial/Orçamentos) → vê todas, pode filtrar por ?medidorEmail=
+//   - medidor → só vê as suas próprias (medidorEmail === req.user.email)
+// Modo 'misto': também combina eventos do Google Calendar dos medidores configurados em FollowupConexao
+app.get('/api/visitas', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.json([]);
+    const role = req.user?.role || 'medidor';
+    const email = req.user?.email || '';
+    const filter = {};
+
+    if (role === 'medidor') {
+      filter.medidorEmail = email;
+    } else if (req.query.medidorEmail) {
+      filter.medidorEmail = req.query.medidorEmail;
+    }
+
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.mes) {
+      const [y, m] = req.query.mes.split('-');
+      const ini = `${y}-${m}-01T00:00`;
+      const fim = `${y}-${String(Number(m)+1).padStart(2,'0')}-01T00:00`;
+      filter.dataHora = { $gte: ini, $lt: fim };
+    }
+    // Corta `fotosCliente` (base64) da listagem para acelerar — economia de ~300KB.
+    // Mantém um array placeholder de tamanho correto para a UI da AgendaVisitasView
+    // que faz `v.fotosCliente.length > 0` continuar funcionando sem alteração.
+    // Detalhe completo (com fotos reais) vem via GET /api/visitas/:id.
+    const visitas = await Visita.aggregate([
+      { $match: filter },
+      { $sort: { dataHora: 1 } },
+      { $addFields: {
+        fotosClienteCount: { $size: { $ifNull: ['$fotosCliente', []] } },
+      } },
+      { $project: { fotosCliente: 0 } }, // remove o base64 pesado
+    ]);
+    const visitasComFonte = visitas.map(v => ({
+      ...v,
+      fonte: 'vedafacil',
+      fotosCliente: v.fotosClienteCount > 0 ? new Array(v.fotosClienteCount).fill(1) : [],
+    }));
+
+    // ── Modo misto: também busca Google Calendar dos medidores configurados ─────
+    let eventosGoogle = [];
+    try {
+      const cfg = await Config.findById('main').lean();
+      if (cfg?.agendaMode === 'misto') {
+        const conexoes = await FollowupConexao.find({ email: { $ne: '' } }).lean();
+        // Se medidor logado, filtra só a conexão dele
+        const conexoesAtivas = role === 'medidor'
+          ? conexoes.filter(c => c.email === email)
+          : (req.query.medidorEmail
+              ? conexoes.filter(c => c.email === req.query.medidorEmail)
+              : conexoes);
+
+        // Busca eventos de cada medidor em paralelo
+        const resultados = await Promise.all(conexoesAtivas.map(async c => {
+          const u = await User.findById(c.email).lean();
+          if (!u) return [];
+          try {
+            const events = await fetchCalendarEventsForUser(u, 60); // próximos 60 dias
+            return events.map(e => {
+              const start = e.start?.dateTime || e.start?.date || '';
+              const end   = e.end?.dateTime   || e.end?.date   || '';
+              return {
+                _id:             'gcal_' + e.id,
+                fonte:           'google',
+                nomeCondominio:  e.summary || '(sem título)',
+                dataHora:        start.slice(0, 16),
+                dataHoraFim:     end.slice(0, 16),
+                endereco:        e.location || '',
+                observacao:      e.description || '',
+                medidorEmail:    c.email,
+                medidorNome:     c.nomeExibicao || c.tecnico,
+                status:          'confirmado', // eventos Google são tratados como confirmados
+                readOnly:        true, // não pode ser editado/excluído pelo painel
+              };
+            });
+          } catch (e) { console.warn('Google Calendar fetch error:', c.email, e.message); return []; }
+        }));
+        eventosGoogle = resultados.flat();
+
+        // Aplica filtro de mês também aos eventos Google
+        if (req.query.mes) {
+          eventosGoogle = eventosGoogle.filter(ev => (ev.dataHora || '').startsWith(req.query.mes));
+        }
+      }
+    } catch (e) { console.warn('Erro buscando eventos Google:', e.message); }
+
+    res.json([...visitasComFonte, ...eventosGoogle].sort((a, b) => (a.dataHora || '').localeCompare(b.dataHora || '')));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/visitas — criar visita
+app.post('/api/visitas', auth, bigJson, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    const dados = {
+      ...req.body,
+      criadoPor: req.user?.email || req.user?.username || 'painel',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const visita = await Visita.create(dados);
+    res.status(201).json(visita);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /api/visitas/:id — editar visita
+app.put('/api/visitas/:id', auth, bigJson, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    const updates = { ...req.body, updatedAt: Date.now() };
+    const v = await Visita.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true });
+    if (!v) return res.status(404).json({ error: 'Visita não encontrada' });
+    res.json(v);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /api/visitas/:id/confirmar — muda status reservado → confirmado
+app.patch('/api/visitas/:id/confirmar', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    const novoStatus = req.body.status || 'confirmado'; // permite cancelar tb
+    const v = await Visita.findByIdAndUpdate(
+      req.params.id,
+      { $set: { status: novoStatus, updatedAt: Date.now() } },
+      { new: true }
+    );
+    if (!v) return res.status(404).json({ error: 'Visita não encontrada' });
+    res.json(v);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/visitas/:id — soft delete (admin)
+app.delete('/api/visitas/:id', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    await audit(req, 'delete', 'visita', req.params.id);
+    const v = await Visita.findById(req.params.id).lean();
+    if (v) await salvarNaLixeira('visita', 'Visita', 'visitas', v, req.user?.email || req.user?.username);
+    await Visita.findByIdAndDelete(req.params.id);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/visitas/medidor — visitas confirmadas para o PWA Medidor
+// Aceita JWT do painel (admin/operador/medidor/medidor-master) ou token Google direto
+// Filtra automaticamente por medidorEmail do usuário logado
+app.get('/api/visitas/medidor', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+    if (!token) return res.status(401).json({ error: 'Token obrigatório' });
+
+    // Identifica o email do medidor a partir do token
+    let medidorEmail = null;
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      // No modo master, usa targetEmail (medidor que está sendo visualizado)
+      medidorEmail = payload.targetEmail || payload.email || null;
+    } catch {
+      // Token Google direto — consulta userinfo
+      const gResp = await fetch('https://www.googleapis.com/oauth2/v1/userinfo', {
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(() => null);
+      if (!gResp || !gResp.ok) return res.status(401).json({ error: 'Token inválido' });
+      const userInfo = await gResp.json();
+      medidorEmail = userInfo.email || null;
+    }
+    if (!medidorEmail) return res.status(401).json({ error: 'Não foi possível identificar o medidor' });
+
+    await connectDB();
+    if (!isConnected) return res.json({ visitas: [] });
+    // Usa horário de Brasília — visitas são salvas em horário local (YYYY-MM-DDTHH:mm)
+    // sem fuso, então a comparação tem que ser feita no mesmo fuso (não UTC).
+    const fmtLocal = (d) => d.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).replace(' ', 'T').slice(0, 16);
+    // Folga de 1h: visitas que começaram nos últimos 60 min ainda aparecem (medidor pode estar chegando)
+    const agora = fmtLocal(new Date(Date.now() - 60 * 60 * 1000));
+    const limite = fmtLocal(new Date(Date.now() + 30 * 86400000));
+    // Filtra visitas confirmadas, futuras, atribuídas a este medidor
+    const visitas = await Visita.find({
+      status: 'confirmado',
+      medidorEmail: medidorEmail,
+      dataHora: { $gte: agora, $lte: limite },
+    }).sort({ dataHora: 1 }).lean();
+    res.json({ visitas, fonte: 'vedafacil', medidorEmail });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/config/agenda-mode — retorna modo atual da agenda
+app.get('/api/config/agenda-mode', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const cfg = isConnected ? await Config.findById('main').lean() : null;
+    res.json({ agendaMode: cfg?.agendaMode || 'google' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/config/agenda-mode — muda modo da agenda (admin only)
+app.post('/api/config/agenda-mode', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const { agendaMode } = req.body || {};
+    if (!['google','misto','proprio'].includes(agendaMode)) {
+      return res.status(400).json({ error: 'agendaMode inválido. Use: google, misto ou proprio' });
+    }
+    if (isConnected) await Config.findByIdAndUpdate('main', { agendaMode }, { upsert: true });
+    await audit(req, 'update-agenda-mode', 'config', 'main', { agendaMode });
+    res.json({ ok: true, agendaMode });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── Follow-up Agendamento ─────────────────────────────────────────────────────
@@ -7712,6 +8748,16 @@ async function handleCronFollowup(req, res) {
     log('warn', 'Cron usando secret via query (DEPRECATED). Migre para header X-Cron-Secret.');
   }
   await connectDB();
+
+  // Verifica se follow-up está pausado (admin pode desligar pela UI)
+  try {
+    const cfg = await Config.findById('main').lean();
+    if (cfg?.followupPausado === true) {
+      log('info', 'Cron followup: PAUSADO pela admin — nenhuma mensagem enviada');
+      return res.json({ ok: true, pausado: true, enviados: 0, erros: 0, checkedAt: new Date().toISOString() });
+    }
+  } catch (_) { /* segue normal se falhar */ }
+
   try {
     const agora  = new Date();
     const hoje   = hojeStr();
@@ -7808,6 +8854,27 @@ async function handleCronFollowup(req, res) {
 // Aceita GET e POST (cron-job.org usa GET por padrão)
 app.get('/api/cron/followup', handleCronFollowup);
 app.post('/api/cron/followup', handleCronFollowup);
+
+// GET /api/followup/status — retorna se o follow-up está ativo ou pausado
+app.get('/api/followup/status', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const cfg = await Config.findById('main').lean();
+    res.json({ pausado: cfg?.followupPausado === true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/followup/pausar — liga/desliga os disparos automáticos
+app.post('/api/followup/pausar', auth, adminOnly, async (req, res) => {
+  try {
+    await connectDB();
+    const { pausado } = req.body || {};
+    const novoEstado = !!pausado;
+    await Config.findByIdAndUpdate('main', { followupPausado: novoEstado }, { upsert: true });
+    await audit(req, novoEstado ? 'pausar-followup' : 'ativar-followup', 'config', 'main', { pausado: novoEstado });
+    res.json({ ok: true, pausado: novoEstado });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ── Start server (local dev) ──────────────────────────────────────────────────
 

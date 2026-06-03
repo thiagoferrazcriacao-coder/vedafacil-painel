@@ -82,6 +82,8 @@ export default function FollowUpPage() {
   const [showLogs, setShowLogs] = useState(false)
   const [editConexao, setEditConexao] = useState(null)
   const [loadingQr, setLoadingQr] = useState(false)
+  const [pausado, setPausado] = useState(false)
+  const [togglingPausa, setTogglingPausa] = useState(false)
 
   // ── filtros ────────────────────────────────────────────────────────────────
   const [filtroPeriodo, setFiltroPeriodo] = useState('semana') // hoje | amanha | semana | 7dias | tudo
@@ -118,10 +120,40 @@ export default function FollowUpPage() {
     }
   }, [])
 
+  const loadPauseStatus = useCallback(async () => {
+    try {
+      const data = await api.getFollowupPauseStatus()
+      setPausado(!!data?.pausado)
+    } catch { /* mantém estado atual */ }
+  }, [])
+
+  const togglePausa = async () => {
+    const novoEstado = !pausado
+    const acao = novoEstado ? 'PAUSAR' : 'REATIVAR'
+    const confirma = window.confirm(
+      novoEstado
+        ? '⚠️ Confirmar PAUSA dos disparos automáticos?\n\nNenhuma mensagem será enviada até você reativar.'
+        : '✅ Confirmar REATIVAR os disparos automáticos?\n\nAs mensagens 24h e 1h antes voltarão a ser enviadas.'
+    )
+    if (!confirma) return
+    setTogglingPausa(true)
+    try {
+      await api.setFollowupPaused(novoEstado)
+      setPausado(novoEstado)
+      setSuccess(novoEstado ? '⏸ Follow-up pausado. Nenhuma mensagem será enviada.' : '✅ Follow-up reativado.')
+      setTimeout(() => setSuccess(''), 4000)
+    } catch (err) {
+      setError(err.message || `Erro ao ${acao}`)
+    } finally {
+      setTogglingPausa(false)
+    }
+  }
+
   useEffect(() => {
     load()
     loadEvolutionStatus()
-  }, [load, loadEvolutionStatus])
+    loadPauseStatus()
+  }, [load, loadEvolutionStatus, loadPauseStatus])
 
   // ── filtros aplicados ──────────────────────────────────────────────────────
   const eventosFiltrados = useMemo(() => {
@@ -233,6 +265,30 @@ export default function FollowUpPage() {
             🔄 Atualizar
           </button>
         </div>
+      </div>
+
+      {/* ── Switch Pausar / Ativar (admin) ── */}
+      <div className={`mb-4 rounded-xl border-2 p-4 flex items-center justify-between gap-3 flex-wrap ${pausado ? 'bg-red-50 border-red-300' : 'bg-green-50 border-green-300'}`}>
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className="text-3xl">{pausado ? '⏸️' : '▶️'}</div>
+          <div className="min-w-0">
+            <div className={`font-bold text-lg ${pausado ? 'text-red-800' : 'text-green-800'}`}>
+              {pausado ? 'Follow-up PAUSADO' : 'Follow-up ATIVO'}
+            </div>
+            <div className={`text-sm ${pausado ? 'text-red-700' : 'text-green-700'}`}>
+              {pausado
+                ? 'Nenhuma mensagem está sendo enviada automaticamente. O cron continua rodando, mas ignora os disparos.'
+                : 'O cron envia lembretes 24h e 1h antes de cada evento.'}
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={togglePausa}
+          disabled={togglingPausa}
+          className={`px-5 py-3 rounded-lg font-bold text-white shadow-md transition-all disabled:opacity-50 ${pausado ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
+        >
+          {togglingPausa ? '...' : pausado ? '▶️ REATIVAR' : '⏸️ PAUSAR DISPAROS'}
+        </button>
       </div>
 
       {error && <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{error}</div>}
