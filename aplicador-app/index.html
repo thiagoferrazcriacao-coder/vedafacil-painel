@@ -236,7 +236,8 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
 <!-- ── BANNER MASTER MODE (fixo, aparece somente no modo master) ─────────── -->
 <div id="master-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#1a1a1a;color:#f59340;font-size:12px;font-weight:700;text-align:center;padding:6px 12px;letter-spacing:0.5px">
   👁 MODO MASTER &nbsp;·&nbsp; <span id="master-banner-equipe"></span>
-  &nbsp;<button onclick="sairMasterMode()" style="background:#e87722;border:none;color:#fff;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;cursor:pointer;margin-left:8px">Sair</button>
+  &nbsp;<button onclick="sairMasterMode(false)" style="background:#555;border:none;color:#fff;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;cursor:pointer;margin-left:8px">🔄 Trocar equipe</button>
+  &nbsp;<button onclick="sairMasterMode(true)" style="background:#e87722;border:none;color:#fff;font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;cursor:pointer;margin-left:4px">Sair</button>
 </div>
 
 <!-- ── SCREEN: MASTER LOGIN ──────────────────────────────────────────────── -->
@@ -249,12 +250,18 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
       <p style="font-size:13px;color:#6b7280;margin-top:4px">Entre com a senha master e escolha a equipe que deseja visualizar</p>
     </div>
     <div class="card">
-      <div style="margin-bottom:14px">
+      <!-- Campo de senha só aparece quando não há sessão master ativa -->
+      <div id="master-senha-bloco" style="margin-bottom:14px">
         <label class="label">Senha master</label>
         <div style="position:relative">
           <input id="inp-master-senha" class="input" type="password" placeholder="Senha do painel admin" style="padding-right:44px" onkeydown="if(event.key==='Enter')doMasterLogin()">
           <button type="button" onclick="toggleSenhaVis('inp-master-senha','btn-vis-master')" id="btn-vis-master" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:18px;color:#9ca3af;padding:0">👁</button>
         </div>
+      </div>
+      <!-- Banner quando já está autenticado (só troca de equipe) -->
+      <div id="master-ja-autenticado" style="display:none;margin-bottom:14px;background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:10px 14px;">
+        <div style="font-size:13px;font-weight:700;color:#166534">✅ Sessão master ativa</div>
+        <div style="font-size:12px;color:#15803d;margin-top:2px">Selecione a equipe para trocar sem redigitar a senha.</div>
       </div>
       <div style="margin-bottom:18px">
         <label class="label">Equipe a visualizar</label>
@@ -263,6 +270,9 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
         </select>
       </div>
       <button class="btn btn-primary" onclick="doMasterLogin()">👁 Visualizar equipe →</button>
+      <div id="master-sair-sessao-btn" style="display:none;margin-top:10px;text-align:center">
+        <button onclick="sairMasterMode(true)" style="background:none;border:none;font-size:12px;color:#9ca3af;cursor:pointer;padding:8px">🚪 Encerrar sessão master completamente</button>
+      </div>
     </div>
     <div id="master-login-error" class="alert alert-error" style="display:none"></div>
   </div>
@@ -737,14 +747,14 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
 <!-- ── FECHAR DIA MODAL ───────────────────────────────────────────────────── -->
 <div id="fechar-dia-modal" class="modal-overlay hidden">
   <div class="modal-sheet">
-    <h3 style="font-size:18px;font-weight:800;margin-bottom:4px">🌅 Concluir Período</h3>
-    <p style="font-size:13px;color:#6b7280;margin-bottom:16px">Informe a quantidade de produto <strong>GVF Seal</strong> usada neste período.</p>
+    <h3 style="font-size:18px;font-weight:800;margin-bottom:4px">🧪 Informar Gasto de Produto</h3>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:16px">Informe quantos litros de <strong>GVF Seal</strong> e injetores foram usados neste período.</p>
     <label class="label">Produto usado (litros) *</label>
     <input id="fechar-dia-litros" class="input" type="number" min="0.1" step="0.1" placeholder="Ex: 12.5" style="margin-bottom:12px">
     <label class="label">Quantidade de injetores utilizados</label>
     <input id="fechar-dia-injetores" class="input" type="number" min="0" step="1" placeholder="Ex: 48" style="margin-bottom:16px">
     <div id="fechar-dia-error" class="alert alert-error" style="display:none;margin-bottom:12px"></div>
-    <button class="btn btn-orange" onclick="confirmarFecharDia()">✅ Concluir Período</button>
+    <button class="btn btn-orange" onclick="confirmarFecharDia()">✅ Salvar Gasto</button>
     <button class="btn btn-outline" style="margin-top:10px" onclick="fecharDiaModal()">Cancelar</button>
   </div>
 </div>
@@ -1151,6 +1161,7 @@ async function boot() {
       renderEquipesMaster();
     } catch (e) { console.warn('Equipes load failed:', e); }
     hideLoading();
+    atualizarUIMaster(); // mostra/esconde campo senha conforme sessão
     showScreen('screen-master-login');
     return;
   }
@@ -1208,56 +1219,131 @@ function renderEquipesMaster() {
 }
 
 async function doMasterLogin() {
-  const senha    = document.getElementById('inp-master-senha').value;
   const equipeId = document.getElementById('sel-master-equipe').value;
   const errEl    = document.getElementById('master-login-error');
-  if (!senha)    { errEl.textContent = 'Digite a senha master'; errEl.style.display = ''; return; }
-  if (!equipeId) { errEl.textContent = 'Selecione a equipe';    errEl.style.display = ''; return; }
+  if (!equipeId) { errEl.textContent = 'Selecione a equipe'; errEl.style.display = ''; return; }
   errEl.style.display = 'none';
-  showLoading('Verificando...');
-  try {
-    const r = await apiFetch(`${API}/auth/master-login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ masterPassword: senha, equipeId }),
-    });
-    const data = await r.json();
-    if (!r.ok) {
+
+  // Verifica se já temos um token master válido no sessionStorage (troca de equipe)
+  const tokenSalvo = sessionStorage.getItem('vfa_master_token');
+
+  // Se não tem token salvo, precisa da senha
+  if (!tokenSalvo) {
+    const senha = document.getElementById('inp-master-senha').value;
+    if (!senha) { errEl.textContent = 'Digite a senha master'; errEl.style.display = ''; return; }
+
+    showLoading('Verificando...');
+    try {
+      const r = await apiFetch(`${API}/auth/master-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ masterPassword: senha, equipeId }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        hideLoading();
+        errEl.textContent = data.error || 'Senha incorreta';
+        errEl.style.display = '';
+        return;
+      }
+      // Salva token master no sessionStorage (dura enquanto o browser está aberto)
+      if (data.token) {
+        sessionStorage.setItem('vfa_master_token', data.token);
+        setAppToken(data.token);
+      }
+      _entrarComoEquipe(data.equipe || { _id: equipeId, nome: '' });
+    } catch (e) {
       hideLoading();
-      errEl.textContent = data.error || 'Senha incorreta';
+      errEl.textContent = 'Erro de conexão. Tente novamente.';
       errEl.style.display = '';
-      return;
     }
-    // Salva JWT master (admin pode visualizar como equipe escolhida)
-    if (data.token) setAppToken(data.token);
-    // Entra como a equipe em modo master (sem salvar no localStorage)
-    S.masterMode = true;
-    S.equipeId   = equipeId;
-    S.equipeNome = data.equipe?.nome || '';
-    S.membro     = 'Master';
-    // Mostra banner master
-    const banner = document.getElementById('master-banner');
-    document.getElementById('master-banner-equipe').textContent = S.equipeNome;
-    banner.style.display = '';
-    // Adiciona padding-top em todas as telas para não ficar sob o banner
-    document.querySelectorAll('.screen').forEach(s => s.style.paddingTop = '32px');
-    document.getElementById('equipe-badge').textContent = S.equipeNome;
-    loadOSList();
-    irParaHome();
-  } catch (e) {
-    hideLoading();
-    errEl.textContent = 'Erro de conexão. Tente novamente.';
-    errEl.style.display = '';
+  } else {
+    // Já autenticado: apenas troca de equipe usando o token existente
+    showLoading('Trocando equipe...');
+    try {
+      const r = await fetch(`${API_BASE}/api/aplicador/auth/master-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tokenSalvo },
+        body: JSON.stringify({ masterPassword: '_use_token_', equipeId }),
+      });
+      // Se o token ainda for válido, o servidor emite um novo token para essa equipe
+      // Se falhou (token expirado), limpa e pede senha novamente
+      if (r.status === 401) {
+        sessionStorage.removeItem('vfa_master_token');
+        hideLoading();
+        errEl.textContent = 'Sessão expirada. Digite a senha novamente.';
+        errEl.style.display = '';
+        document.getElementById('inp-master-senha').value = '';
+        return;
+      }
+      const data = await r.json();
+      if (!r.ok) {
+        // Não foi erro de autenticação, mas a API usa a senha — reautenticar via endpoint diferente
+        // Fallback: busca dados da equipe direto
+        const eqResp = await apiFetch(`${API_BASE}/api/aplicador/equipes`);
+        const equipes = eqResp.ok ? await eqResp.json() : S.equipes;
+        const equipe = equipes.find(e => (e._id || e.id) === equipeId);
+        if (equipe) {
+          setAppToken(tokenSalvo);
+          _entrarComoEquipe(equipe);
+        } else {
+          hideLoading();
+          errEl.textContent = 'Equipe não encontrada.';
+          errEl.style.display = '';
+        }
+        return;
+      }
+      if (data.token) {
+        sessionStorage.setItem('vfa_master_token', data.token);
+        setAppToken(data.token);
+      }
+      _entrarComoEquipe(data.equipe || { _id: equipeId, nome: S.equipes.find(e=>(e._id||e.id)===equipeId)?.nome || '' });
+    } catch (e) {
+      hideLoading();
+      errEl.textContent = 'Erro de conexão.';
+      errEl.style.display = '';
+    }
   }
 }
 
-function sairMasterMode() {
+// Atualiza a UI da tela master de acordo com o estado da sessão
+function atualizarUIMaster() {
+  const temSessao = !!sessionStorage.getItem('vfa_master_token');
+  const senhaBloco = document.getElementById('master-senha-bloco');
+  const jaAutent   = document.getElementById('master-ja-autenticado');
+  const sairBtn    = document.getElementById('master-sair-sessao-btn');
+  if (senhaBloco) senhaBloco.style.display = temSessao ? 'none' : '';
+  if (jaAutent)   jaAutent.style.display   = temSessao ? '' : 'none';
+  if (sairBtn)    sairBtn.style.display    = temSessao ? '' : 'none';
+}
+
+function _entrarComoEquipe(equipe) {
+  S.masterMode = true;
+  S.equipeId   = equipe._id || equipe.id || '';
+  S.equipeNome = equipe.nome || '';
+  S.membro     = 'Master';
+  const banner = document.getElementById('master-banner');
+  document.getElementById('master-banner-equipe').textContent = S.equipeNome;
+  banner.style.display = '';
+  document.querySelectorAll('.screen').forEach(s => s.style.paddingTop = '32px');
+  document.getElementById('equipe-badge').textContent = S.equipeNome;
+  loadOSList();
+  irParaHome();
+}
+
+function sairMasterMode(sairCompletamente = false) {
   S.masterMode = false;
   S.equipeId = ''; S.equipeNome = ''; S.membro = '';
-  setAppToken(null);
   document.getElementById('master-banner').style.display = 'none';
   document.querySelectorAll('.screen').forEach(s => s.style.paddingTop = '');
-  document.getElementById('inp-master-senha').value = '';
+  hideLoading();
+
+  if (sairCompletamente) {
+    setAppToken(null);
+    sessionStorage.removeItem('vfa_master_token');
+    document.getElementById('inp-master-senha').value = '';
+  }
+  atualizarUIMaster();
   showScreen('screen-master-login');
 }
 
@@ -1579,7 +1665,7 @@ async function confirmarLancamentoSemanal() {
     const res = await apiFetch(`${API}/estoque-recebido`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ equipeId: S.equipeId, litros })
+      body: JSON.stringify({ equipeId: S.equipeId, litros, membro: S.membro || 'Equipe' })
     });
     const data = await res.json();
     hideLoading();
@@ -1757,17 +1843,17 @@ function renderOSDetail() {
 
     ${jaConcluida ? `<div class="alert alert-success" style="margin-bottom:14px;text-align:center;font-weight:700;font-size:15px">✅ OS Concluída!</div>` : ''}
 
-    ${/* ── CONCLUIR DIA: aparece SEMPRE (concluida ou não) se ainda não fechou hoje ── */
+    ${/* ── INFORMAR GASTO DE PRODUTO: aparece SEMPRE (concluida ou não) se ainda não informou hoje ── */
       temFechamento
-        ? `<div class="dia-badge" style="width:100%;justify-content:center;margin-bottom:12px">✅ Período encerrado · ${ultFd ? ultFd.litros+'L de GVF Seal registrado' : ''}</div>
+        ? `<div class="dia-badge" style="width:100%;justify-content:center;margin-bottom:12px">✅ Gasto registrado · ${ultFd ? ultFd.litros+'L de GVF Seal' : ''}</div>
            <button class="btn btn-outline" style="margin-bottom:10px;font-size:13px" onclick="abrirFecharDiaModal()">
-             🌅 + Novo Período
+             🧪 + Informar mais gasto
            </button>`
         : `<div class="alert alert-warning" style="margin-bottom:10px;font-size:13px">
-             ⚠️ <strong>Produto não registrado neste período!</strong> Não esqueça de concluir o período.
+             ⚠️ <strong>Gasto de produto ainda não informado!</strong> Lance antes de sair da obra.
            </div>
            <button class="btn btn-orange" style="margin-bottom:10px" onclick="abrirFecharDiaModal()">
-             🌅 Concluir Período
+             🧪 Informar Gasto de Produto
            </button>`
     }
 
@@ -2770,7 +2856,7 @@ async function confirmarFecharDia() {
     S.currentOS.totalConsumoReal = data.totalConsumoReal;
     renderOSDetail();
     const injetMsg = injetores > 0 ? ` · ${injetores} injetores` : '';
-    showToast(`🌅 Dia fechado! ${litros}L${injetMsg}`);
+    showToast(`✅ Gasto registrado: ${litros}L${injetMsg}`);
   } catch (e) {
     hideLoading();
     showToast('⚠️ Erro de conexão');
@@ -2829,7 +2915,7 @@ async function confirmarAdicionarProduto() {
     const res = await apiFetch(`${API}/estoque-recebido`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ equipeId: S.equipeId, litros })
+      body: JSON.stringify({ equipeId: S.equipeId, litros, membro: S.membro || 'Equipe' })
     });
     const data = await res.json();
     hideLoading();
@@ -2864,7 +2950,7 @@ async function confirmarEstoqueRecebido() {
     const res = await apiFetch(`${API}/estoque-recebido`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ equipeId: S.equipeId, litros })
+      body: JSON.stringify({ equipeId: S.equipeId, litros, membro: S.membro || 'Equipe' })
     });
     const data = await res.json();
     hideLoading();

@@ -68,6 +68,46 @@ Estas regras são **invioláveis** e se sobrepõem a qualquer outra instrução 
 - O `.gitignore` deve sempre conter: `node_modules/`, `dist/`, `.env`, `*_b64.txt`, `*.local`
 - O hook pre-commit bloqueia automaticamente commits com esses arquivos
 
+### 🧟 PROIBIDO: padrão de conexão Mongoose zumbi (causou incidente 03/06/2026)
+
+**NUNCA escrever este padrão** em `painel/server.js` ou em qualquer função serverless:
+
+```js
+// ❌ ERRADO — causa "buffering timed out after 10000ms"
+let isConnected = false;
+async function connectDB() {
+  if (isConnected) return;
+  await mongoose.connect(URI);
+  isConnected = true;
+}
+```
+
+**Por que é proibido:** em serverless (Vercel), containers ficam ociosos e o Atlas mata o socket TCP depois de ~10 min, mas a flag boolean continua `true` em memória. A próxima request tenta usar conexão morta, Mongoose bufferiza esperando, e dá timeout de exatos 10s. Isso travou o sistema em produção dia 03/06/2026.
+
+**Sempre usar o padrão correto** (já implementado em `connectDB()`):
+- Validar `mongoose.connection.readyState === 1` em vez de boolean
+- Passar `bufferCommands: false` ao `mongoose.connect()` para falhar rápido
+- Passar `maxPoolSize: 5` (serverless precisa de pool pequeno)
+- Passar `serverSelectionTimeoutMS: 5000` para detectar Atlas indisponível em 5s
+- Listeners `disconnected`/`error`/`connected` para sincronizar a flag
+
+**Regra geral:** em endpoints que usam Mongoose, sempre `await connectDB()` no início do handler — o `connectDB` real revalida o `readyState` a cada chamada.
+
+### 📦 PROIBIDO: retornar fotos/PDFs base64 em listagens (causou incidente 03/06/2026)
+
+`/api/ordens-servico`, `/api/medicoes`, `/api/orcamentos`, `/api/contratos` e qualquer outro endpoint de **lista** DEVE usar `.select()` ou `$project` para **excluir** campos base64 pesados:
+
+- OS: `fotosReparo`, `pontos.fotos`, `pontos.fotosAntes`, `pontos.fotosDepois`, `pontos.fotosMedicao`, `pontos.croquiBase64`, `pontos.croquiOtimizado`, `fechamentosDia.fotos`, `pdfBase64`, `contratoManualPdfBase64`
+- Medição: `fotos`, `locais.fotos`, `locais.fotosMedicao`
+- Orçamento: `pdfBase64`, `propostas`, `locais.fotos`, `locais.fotosMedicao`
+- Contrato: `pdfBase64`, `pdfManualBase64`, `anexoOrcamentoPdfBase64`, `textoHtml`, `clausulas`, `locais.fotos`, `locais.fotosMedicao`
+
+Sem isso, listagens chegam a **20 MB** (vimos isso no incidente). Equipe em campo no 4G simplesmente não consegue usar.
+
+Para a UI manter o que precisa (ex: badge de croqui na listagem de OS), retornar **flags booleanos computados** (`temCroqui: true/false`) via `$addFields` do aggregate em vez do base64 inteiro.
+
+Detalhes completos (com fotos) continuam vindo via `GET /api/<recurso>/:id` que **NÃO** filtra.
+
 ---
 
 ## Contexto do Projeto
