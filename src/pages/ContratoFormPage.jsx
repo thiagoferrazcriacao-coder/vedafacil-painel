@@ -89,6 +89,10 @@ export default function ContratoFormPage() {
   const [uploadingArquivo, setUploadingArquivo] = useState(false)
   const [viewMode, setViewMode] = useState(() => new URLSearchParams(location.search).get('view') === '1')
   const [showEditor, setShowEditor] = useState(false)
+  // Flag: se este contrato tem textoPersonalizado (HTML editado manualmente)
+  // que IGNORA os campos do formulário quando renderiza o PDF.
+  const [textoPersInfo, setTextoPersInfo] = useState({ tem: false, editadoEm: null })
+  const [resetandoTexto, setResetandoTexto] = useState(false)
   // Mede a altura real da sticky bar para evitar que ela corte o conteúdo
   const [stickyRef, stickyHeight] = useElementHeight()
 
@@ -97,7 +101,31 @@ export default function ContratoFormPage() {
       .then(data => setC(data))
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
+    // Verifica se o contrato tem texto personalizado salvo (em paralelo)
+    api.getContratoTemTextoPersonalizado(id)
+      .then(info => setTextoPersInfo(info))
+      .catch(() => {})
   }, [id])
+
+  async function handleResetTextoPersonalizado() {
+    if (!confirm(
+      'Resetar o PDF para o template padrão?\n\n' +
+      'Você perde as edições manuais que foram salvas via "Editar PDF" para este contrato. ' +
+      'Depois disso, o PDF passa a refletir AUTOMATICAMENTE os campos do formulário ' +
+      '(razão social, CNPJ, endereço, etc).\n\n' +
+      'Você pode editar de novo via "Editar PDF" depois — isso só apaga a versão atual.'
+    )) return
+    setResetandoTexto(true)
+    try {
+      await api.resetContratoTextoPersonalizado(id)
+      setTextoPersInfo({ tem: false, editadoEm: null })
+      alert('✅ Texto resetado! O PDF agora reflete os campos do formulário.')
+    } catch (e) {
+      alert('❌ Falha ao resetar: ' + e.message)
+    } finally {
+      setResetandoTexto(false)
+    }
+  }
 
   const update = (field) => (e) => {
     setC(prev => ({ ...prev, [field]: e.target.value }))
@@ -379,6 +407,41 @@ export default function ContratoFormPage() {
       )}
 
       {/* ── Seção 1: Dados do Cliente ── */}
+      {/* Banner: contrato tem texto personalizado salvo via "Editar PDF" — alterações nos campos NÃO refletem no PDF */}
+      {textoPersInfo.tem && (
+        <div className="mb-4 rounded-2xl border-2 border-amber-400 bg-amber-50 overflow-hidden">
+          <div className="bg-amber-400 px-4 py-2 text-amber-900 font-bold text-sm flex items-center gap-2">
+            <span className="text-xl">⚠️</span>
+            <span>PDF com texto editado manualmente</span>
+          </div>
+          <div className="p-4 text-sm text-amber-900">
+            <p className="mb-2">
+              Este contrato tem um <strong>texto personalizado</strong> salvo via botão <strong>"Editar PDF"</strong>
+              {textoPersInfo.editadoEm && (
+                <span> em <strong>{new Date(textoPersInfo.editadoEm).toLocaleString('pt-BR')}</strong></span>
+              )}.
+            </p>
+            <p className="mb-3">
+              <strong>⚠️ Importante:</strong> alterações nos campos abaixo (razão social, CNPJ, endereço, etc) <strong>não refletem no PDF</strong>{' '}
+              porque o sistema usa o HTML salvo em vez de gerar dinamicamente. Você tem 2 opções:
+            </p>
+            <ul className="list-disc ml-6 mb-3 space-y-1">
+              <li>Edite o PDF de novo via <strong>"Editar PDF"</strong> e atualize os dados lá dentro também, ou</li>
+              <li>Clique em <strong>"Resetar PDF para padrão"</strong> abaixo para voltar a usar o template automático</li>
+            </ul>
+            {isAdmin && (
+              <button
+                onClick={handleResetTextoPersonalizado}
+                disabled={resetandoTexto}
+                className="bg-amber-600 hover:bg-amber-700 text-white font-semibold px-4 py-2 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+              >
+                {resetandoTexto ? '⏳ Resetando...' : '🔄 Resetar PDF para padrão'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <section className="card mb-4">
         <h2 className="font-semibold text-primary mb-4 flex items-center gap-2">
           <span className="w-6 h-6 rounded-full bg-primary text-white text-xs flex items-center justify-center">1</span>

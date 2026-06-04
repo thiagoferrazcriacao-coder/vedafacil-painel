@@ -96,13 +96,17 @@ export default function NovaVisitaModal({ visita, onSalvar, onFechar }) {
 
   // Carrega medidores e técnicos ao abrir o modal
   useEffect(() => {
-    // Medidores: usuários com role 'medidor'
-    api.getUsuarios().then(lista => {
+    // Medidores: endpoint público (auth) /api/usuarios/medidores — funciona para
+    // operador e admin. NÃO usar getUsuarios() aqui pois exige adminOnly e cai
+    // silenciosamente no catch quando o usuário logado é operador.
+    api.getMedidores().then(lista => {
       const meds = (Array.isArray(lista) ? lista : [])
-        .filter(u => u.role === 'medidor')
         .map(u => ({ email: u.email || u.id, nome: u.name || u.email }))
       setMedidores(meds)
-    }).catch(() => {})
+    }).catch(err => {
+      // Loga no console para diagnóstico (era silencioso antes)
+      console.warn('Falha ao carregar medidores:', err?.message || err)
+    })
 
     // Técnicos: lista configurada na ConfigPage (Alan, Fernando, Thiago, Daniel…)
     api.getPrecos().then(p => {

@@ -254,8 +254,9 @@ export default function Layout({ children }) {
         <div className="text-white/70 text-xs">Painel Administrativo</div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
+      {/* Nav — rolável quando a lista exceder a altura disponível (admin tem 18+ itens).
+          O contêiner pai do sidebar usa h-screen, então o overflow fica dentro da nav. */}
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto sidebar-scroll min-h-0">
         {[...navItems, ...(isAdmin ? adminNavItems : []), ...(user?.role === 'operador' ? operadorNavItems : [])].map(item => {
           const badgeCount = item.badgeKey ? badges[item.badgeKey] : 0
           return (

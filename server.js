@@ -132,8 +132,18 @@ async function connectDB() {
     serverSelectionTimeoutMS: 5000,   // desistir do Atlas em 5s se não responde
     socketTimeoutMS: 45000,           // socket idle timeout > cold start
     connectTimeoutMS: 10000,          // handshake TCP
-    maxPoolSize: 5,                   // serverless = poucos sockets por container
+    // POOL SIZING para Vercel Pro:
+    // Pro mantém vários containers warm em paralelo. Com maxPoolSize:5 e ~100 containers,
+    // o Atlas Flex (500 conn) chegou em 90%. Reduzimos pra 2 — cada container abre poucas
+    // conexões e o Vercel ainda balanceia tráfego entre eles. 100 containers × 2 = 200,
+    // sobra metade do pool do Flex pra picos.
+    maxPoolSize: 2,
     minPoolSize: 0,
+    // maxIdleTimeMS: fecha conexões ociosas em 30s em vez de esperar TCP timeout (~10 min).
+    // CRÍTICO em serverless — containers Vercel são killed sem SIGTERM, conexões ficariam
+    // pendentes no Atlas até o socket expirar. Fechando rápido, liberamos pool pro próximo.
+    maxIdleTimeMS: 30000,
+    waitQueueTimeoutMS: 5000,         // espera 5s por conexão livre antes de falhar
     bufferCommands: false,            // SEM buffer falso — falha imediato se sem conexão
     heartbeatFrequencyMS: 10000,
   })
@@ -646,9 +656,11 @@ app.use(cors({
   credentials: true,
 }));
 
-// JSON parser: limite global 1MB; rotas que recebem fotos sobrescrevem com bigJson
+// JSON parser: limite global 1MB; rotas que recebem fotos sobrescrevem com bigJson.
+// Vercel Pro suporta body até 100 MB. Usamos 50 MB pra ter margem de segurança e
+// permitir lotes maiores de fotos sem precisar do workaround de batches pequenos.
 app.use(express.json({ limit: '1mb' }));
-const bigJson = express.json({ limit: '25mb' });
+const bigJson = express.json({ limit: '50mb' });
 // Exporta como global para rotas grandes usarem (ver uso em /api/medicao etc.)
 app.locals.bigJson = bigJson;
 
@@ -884,9 +896,19 @@ app.get('/api/admin/status', auth, async (req, res) => {
       : atual >= critMin ? 'crit'
       : 'warn';
 
-    // Tier do Atlas (M0 free): 512 MB storage, 500 connections
-    const STORAGE_LIMIT = 512 * 1024 * 1024;
-    const CONN_LIMIT = 500;
+    // ── Configuração do tier MongoDB Atlas em uso ──────────────────────────
+    // Trocar aqui ao mudar de tier (M0 → Flex → M10…). Os thresholds derivam disto.
+    // Flex (atual): 5 GB storage, ~500 connections, CPU compartilhada com burst on-demand.
+    const ATLAS_TIER = {
+      nome:           'Flex',
+      storageBytes:   5 * 1024 * 1024 * 1024,    // 5 GB
+      maxConnections: 500,
+      idealStoragePct: 0.40,   // até 40% (~2 GB) = OK
+      warnStoragePct:  0.60,   // de 40% a 90% = atenção
+      critStoragePct:  0.90,   // > 90% = crítico
+    };
+    const STORAGE_LIMIT = ATLAS_TIER.storageBytes;
+    const CONN_LIMIT = ATLAS_TIER.maxConnections;
 
     const metrics = {
       // ── MongoDB ──────────────────────────────────────────────────────────
@@ -901,33 +923,37 @@ app.get('/api/admin/status', auth, async (req, res) => {
       },
       mongo_latencia: {
         label: 'Latência ping Mongo',
-        descricao: 'Tempo de round-trip de um ping ao Atlas',
+        descricao: 'Round-trip de um ping ao Atlas. GCP/São Paulo costuma operar em 100-150 ms.',
         atual: ping.latencyMs,
-        ideal: '< 100 ms',
+        ideal: '< 200 ms',
         limite: '> 500 ms',
-        status: cls(ping.latencyMs, 100, 500),
+        status: cls(ping.latencyMs, 200, 500),
         unidade: 'ms',
       },
       mongo_storage: {
         label: 'Armazenamento usado',
-        descricao: `Tier M0 free tem ${STORAGE_LIMIT / 1024 / 1024} MB no total`,
+        descricao: `Tier ${ATLAS_TIER.nome} tem ${(STORAGE_LIMIT / 1024 / 1024 / 1024).toFixed(0)} GB no total`,
         atual: mongoMetrics?.storageBytes ?? null,
-        atualFmt: mongoMetrics ? `${(mongoMetrics.storageBytes / 1024 / 1024).toFixed(1)} MB` : null,
-        ideal: '< 300 MB',
-        limite: '> 460 MB (90%)',
+        atualFmt: mongoMetrics
+          ? (mongoMetrics.storageBytes >= 1024 * 1024 * 1024
+              ? `${(mongoMetrics.storageBytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+              : `${(mongoMetrics.storageBytes / 1024 / 1024).toFixed(0)} MB`)
+          : null,
+        ideal: `< ${((STORAGE_LIMIT * ATLAS_TIER.idealStoragePct) / 1024 / 1024 / 1024).toFixed(1)} GB (${Math.round(ATLAS_TIER.idealStoragePct * 100)}%)`,
+        limite: `> ${((STORAGE_LIMIT * ATLAS_TIER.critStoragePct) / 1024 / 1024 / 1024).toFixed(1)} GB (${Math.round(ATLAS_TIER.critStoragePct * 100)}%)`,
         status: !mongoMetrics ? 'unknown'
-          : mongoMetrics.storageBytes > STORAGE_LIMIT * 0.9 ? 'crit'
-          : mongoMetrics.storageBytes > STORAGE_LIMIT * 0.6 ? 'warn'
+          : mongoMetrics.storageBytes > STORAGE_LIMIT * ATLAS_TIER.critStoragePct ? 'crit'
+          : mongoMetrics.storageBytes > STORAGE_LIMIT * ATLAS_TIER.warnStoragePct ? 'warn'
           : 'ok',
         unidade: 'bytes',
         percent: mongoMetrics ? Math.round((mongoMetrics.storageBytes / STORAGE_LIMIT) * 100) : null,
       },
       mongo_conexoes: {
         label: 'Conexões ativas no Atlas',
-        descricao: `M0 free tier limita em ${CONN_LIMIT} conexões totais`,
+        descricao: `Tier ${ATLAS_TIER.nome} permite até ${CONN_LIMIT} conexões simultâneas`,
         atual: mongoMetrics?.connections ?? null,
-        ideal: '< 50',
-        limite: `> 400 (${CONN_LIMIT} é o teto)`,
+        ideal: '< 100',
+        limite: `> 400 de ${CONN_LIMIT}`,
         status: mongoMetrics?.connections == null ? 'unknown'
           : mongoMetrics.connections > 400 ? 'crit'
           : mongoMetrics.connections > 200 ? 'warn'
@@ -946,22 +972,30 @@ app.get('/api/admin/status', auth, async (req, res) => {
       },
 
       // ── API ──────────────────────────────────────────────────────────────
+      // Estatística com poucas amostras é volátil. Abaixo de 20 reqs, percentil
+      // não é confiável — uma única chamada lenta vira "p95". Marcamos como info
+      // pra não disparar alerta falso quando o sistema está apenas ocioso.
       api_tempo_medio: {
         label: 'Tempo médio de resposta',
-        descricao: 'Média dos últimos 5 min em todos endpoints /api/*',
+        descricao: totalReqs < 20
+          ? `Média de ${totalReqs} req(s) nos últimos 5 min — amostra pequena, valor pouco representativo`
+          : 'Média dos últimos 5 min em todos endpoints /api/*',
         atual: avgMs,
         ideal: '< 500 ms',
         limite: '> 2.000 ms',
-        status: cls(avgMs, 500, 2000),
+        status: totalReqs < 5 ? 'info' : cls(avgMs, 500, 2000),
         unidade: 'ms',
       },
       api_tempo_p95: {
         label: 'Tempo p95',
-        descricao: '95% das requisições respondem abaixo deste tempo',
+        descricao: totalReqs < 20
+          ? `Apenas ${totalReqs} req(s) na janela — p95 não é estatisticamente significativo abaixo de 20 amostras`
+          : '95% das requisições respondem abaixo deste tempo',
         atual: p95Ms,
         ideal: '< 1.500 ms',
         limite: '> 5.000 ms',
-        status: cls(p95Ms, 1500, 5000),
+        // Com poucas amostras, o "p95" é só o pior tempo registrado — marca como info
+        status: totalReqs < 20 ? 'info' : cls(p95Ms, 1500, 5000),
         unidade: 'ms',
       },
       api_taxa_erro: {
@@ -1004,24 +1038,25 @@ app.get('/api/admin/status', auth, async (req, res) => {
       },
 
       // ── Sistema ──────────────────────────────────────────────────────────
+      // Container Vercel Pro: até 3008 MB de RAM por função (maxDuration 180s).
       sistema_memoria: {
         label: 'Memória RSS',
-        descricao: 'RAM usada por este container Vercel (limite Hobby = ~1 GB)',
+        descricao: 'RAM total usada por este container Vercel Pro (limite: 3 GB)',
         atual: mem.rss,
         atualFmt: `${(mem.rss / 1024 / 1024).toFixed(0)} MB`,
-        ideal: '< 200 MB',
-        limite: '> 400 MB',
-        status: cls(mem.rss, 200 * 1024 * 1024, 400 * 1024 * 1024),
+        ideal: '< 1 GB',
+        limite: '> 2,5 GB',
+        status: cls(mem.rss, 1024 * 1024 * 1024, 2.5 * 1024 * 1024 * 1024),
         unidade: 'bytes',
       },
       sistema_heap: {
         label: 'Heap V8 usado',
-        descricao: 'Memória JS ativa neste container',
+        descricao: 'Memória JS ativa neste container (objetos vivos)',
         atual: mem.heapUsed,
         atualFmt: `${(mem.heapUsed / 1024 / 1024).toFixed(0)} MB`,
-        ideal: '< 150 MB',
-        limite: '> 300 MB',
-        status: cls(mem.heapUsed, 150 * 1024 * 1024, 300 * 1024 * 1024),
+        ideal: '< 500 MB',
+        limite: '> 1,5 GB',
+        status: cls(mem.heapUsed, 500 * 1024 * 1024, 1.5 * 1024 * 1024 * 1024),
         unidade: 'bytes',
       },
       sistema_uptime: {
@@ -1033,6 +1068,16 @@ app.get('/api/admin/status', auth, async (req, res) => {
         limite: '—',
         status: 'info',
         unidade: 's',
+      },
+      sistema_tier: {
+        label: 'Tier Vercel',
+        descricao: 'Plano atual e principais limites de infra',
+        atual: 'Pro',
+        atualFmt: 'Pro · 1 TB BW · 240h CPU · crons ilimitados · body 50 MB',
+        ideal: 'Pro / Enterprise',
+        limite: 'Hobby (limite estourado em 2026-06)',
+        status: 'ok',
+        unidade: '',
       },
     };
 
@@ -1101,7 +1146,8 @@ app.get('/api/cron/healthcheck', async (req, res) => {
     await connectDB();
     const ping = await _pingMongo();
     const mongoMetrics = await _collectMongoMetrics();
-    const STORAGE_LIMIT = 512 * 1024 * 1024;
+    // Tier atual: Flex (5 GB). Trocar aqui ao mudar de tier.
+    const STORAGE_LIMIT = 5 * 1024 * 1024 * 1024;
 
     const problemas = [];
     if (mongoose.connection.readyState !== 1) {
@@ -3370,6 +3416,45 @@ ${cronograma.length > 0 ? `
 }
 
 // Retorna o HTML editável do corpo do contrato (para o editor rich text)
+// ── Resetar texto personalizado do contrato pro template dinâmico ─────────────
+// Quando o usuário usa "Editar PDF", o HTML é gravado em textoPersonalizado e
+// IGNORA os campos do form (razaoSocial, cnpj, endereço, etc). Esse endpoint
+// apaga o texto personalizado para voltar a renderizar dinamicamente.
+app.delete('/api/contratos/:id/texto-personalizado', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(500).json({ error: 'Sem conexão com banco' });
+    const c = await Contrato.findOneAndUpdate(
+      { _id: req.params.id },
+      { $unset: { textoPersonalizado: '', textoPersonalizadoAt: '' }, $set: { updatedAt: Date.now() } },
+      { new: true }
+    );
+    if (!c) return res.status(404).json({ error: 'Contrato não encontrado' });
+    await audit(req, 'reset-texto-personalizado', 'contrato', req.params.id, { cliente: c.cliente, numero: c.numero });
+    res.json({ ok: true, numero: c.numero });
+  } catch (err) {
+    log('error', 'reset textoPersonalizado:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Indica se o contrato tem texto personalizado (não retorna o HTML — só o flag).
+// Usado pelo ContratoFormPage para mostrar o banner de aviso sem trazer 21KB de HTML toda vez.
+app.get('/api/contratos/:id/tem-texto-personalizado', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.json({ tem: false });
+    const c = await Contrato.findOne({ _id: req.params.id })
+      .select('textoPersonalizado textoPersonalizadoAt')
+      .lean();
+    if (!c) return res.status(404).json({ error: 'Contrato não encontrado' });
+    res.json({
+      tem: !!c.textoPersonalizado && c.textoPersonalizado.length > 0,
+      editadoEm: c.textoPersonalizadoAt || null,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/contratos/:id/texto-html', auth, async (req, res) => {
   try {
     await connectDB();
@@ -4801,6 +4886,24 @@ app.get('/api/usuarios/me', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Lista pública (auth) de MEDIDORES — usada por operadores no modal de visita ──
+// Devolve apenas usuários com role 'medidor', sem dados sensíveis (tokens Google, etc).
+// IMPORTANTE: declarada ANTES de /api/usuarios/:id pra não ser capturada como id.
+app.get('/api/usuarios/medidores', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (isConnected) {
+      const meds = await User.find({ role: 'medidor' })
+        .select('_id email name picture')
+        .lean();
+      return res.json(meds.map(u => ({ id: u._id, email: u.email, name: u.name, role: 'medidor', picture: u.picture })));
+    }
+    res.json((memStore.users || [])
+      .filter(u => u.role === 'medidor')
+      .map(u => ({ id: u._id || u.email, email: u.email, name: u.name, role: 'medidor', picture: u.picture })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/usuarios', auth, adminOnly, async (req, res) => {
   try {
     await connectDB();
@@ -5495,6 +5598,130 @@ app.put('/api/ordens-servico/:id', auth, async (req, res) => {
     Object.assign(os, updates);
     res.json(os);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Restaurar fotos da OS a partir do contrato/orçamento/medição ──────────────
+// Necessário pra consertar OSes criadas durante a janela de bug em que a NovaOSModal
+// usava api.getContratos() (listagem sem fotos por causa da otimização de payload),
+// resultando em pontos[*] sem fotos. Pode ser chamado quantas vezes for preciso —
+// idempotente: só preenche o que está vazio, não duplica.
+app.post('/api/ordens-servico/:id/restaurar-fotos', auth, async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+    await connectDB();
+    if (!isConnected) return res.status(500).json({ error: 'Sem conexão com banco' });
+
+    const os = await OS.findById(req.params.id);
+    if (!os) return res.status(404).json({ error: 'OS não encontrada' });
+
+    // Tenta achar uma fonte de fotos seguindo a cadeia OS → contrato → orçamento → medição.
+    // Importante: precisa testar se a fonte realmente TEM fotos, não só se tem locais.
+    // Caso contrário, pega um contrato vazio e nunca chega na medição que tem as fotos.
+    const temFotosUtilizaveis = src => (src?.locais || []).some(l => Array.isArray(l.fotos) && l.fotos.length > 0);
+
+    let fonte = null;
+    let fonteTipo = null;
+
+    // 1ª tentativa: contrato
+    if (os.contratoId) {
+      const c = await Contrato.findById(os.contratoId).lean();
+      if (temFotosUtilizaveis(c)) { fonte = c; fonteTipo = 'contrato'; }
+    }
+
+    // 2ª tentativa: orçamento (direto, ou via contrato.orcamentoId se não veio do contrato)
+    if (!fonte) {
+      let orcId = os.orcamentoId;
+      if (!orcId && os.contratoId) {
+        const c = await Contrato.findById(os.contratoId).select('orcamentoId').lean();
+        orcId = c?.orcamentoId;
+      }
+      if (orcId) {
+        const o = await Orcamento.findById(orcId).lean();
+        if (temFotosUtilizaveis(o)) { fonte = o; fonteTipo = 'orcamento'; }
+        // Guarda referência ao orçamento para pegar medicaoId no próximo passo
+        if (!fonte && o?.medicaoId) { os._orcamentoMedicaoId = o.medicaoId; }
+      }
+    }
+
+    // 3ª tentativa: medição (via orçamento.medicaoId)
+    if (!fonte) {
+      let medId = os._orcamentoMedicaoId;
+      if (!medId) {
+        const orcId = os.orcamentoId || (os.contratoId && (await Contrato.findById(os.contratoId).select('orcamentoId').lean())?.orcamentoId);
+        if (orcId) {
+          const o = await Orcamento.findById(orcId).select('medicaoId').lean();
+          medId = o?.medicaoId;
+        }
+      }
+      if (medId) {
+        const m = await Medicao.findById(medId).lean();
+        if (temFotosUtilizaveis(m)) { fonte = m; fonteTipo = 'medicao'; }
+      }
+    }
+
+    if (!fonte) return res.status(404).json({ error: 'Não foi possível localizar fotos na cadeia contrato → orçamento → medição desta OS' });
+
+    // Normaliza string para match
+    const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+
+    // Constrói mapa nome → fotos da fonte
+    const fotosPorNome = new Map();
+    (fonte.locais || []).forEach(l => {
+      const fotosLocal = Array.isArray(l.fotos) ? l.fotos : [];
+      if (fotosLocal.length > 0) fotosPorNome.set(norm(l.nome || l.local), fotosLocal);
+    });
+
+    if (fotosPorNome.size === 0) {
+      return res.status(404).json({ error: `${fonteTipo} encontrado mas sem fotos nos locais` });
+    }
+
+    // Aplica nos pontos da OS, fazendo match por nome
+    let pontosAtualizados = 0;
+    let fotosAdicionadas = 0;
+    const novosPontos = (os.pontos || []).map((p, pi) => {
+      // Se já tem fotosMedicao, preserva
+      if (Array.isArray(p.fotosMedicao) && p.fotosMedicao.length > 0) return p;
+
+      const nomePonto = norm(p.local || p.nome);
+      // Match exato → match por substring (em qualquer direção)
+      let fotosFonte = fotosPorNome.get(nomePonto);
+      if (!fotosFonte) {
+        for (const [k, v] of fotosPorNome) {
+          if (k.includes(nomePonto) || nomePonto.includes(k)) { fotosFonte = v; break; }
+        }
+      }
+      if (!fotosFonte || fotosFonte.length === 0) return p;
+
+      // Normaliza estrutura: aceita strings base64 e objetos { data, thumb, full }
+      const fotosMedicao = fotosFonte.map((f, i) => {
+        if (!f) return null;
+        if (typeof f === 'string') return { data: f, id: `ref_${pi}_${i}` };
+        if (typeof f === 'object') return { ...f, id: f.id || `ref_${pi}_${i}` };
+        return null;
+      }).filter(Boolean);
+
+      pontosAtualizados++;
+      fotosAdicionadas += fotosMedicao.length;
+      return { ...(p.toObject ? p.toObject() : p), fotosMedicao };
+    });
+
+    os.pontos = novosPontos;
+    os.markModified('pontos');
+    os.updatedAt = Date.now();
+    await os.save();
+
+    log('info', `OS ${os.numero}: fotos restauradas de ${fonteTipo} — ${pontosAtualizados} ponto(s), ${fotosAdicionadas} foto(s)`);
+    res.json({
+      ok: true,
+      fonte: fonteTipo,
+      pontosAtualizados,
+      fotosAdicionadas,
+      totalPontos: novosPontos.length,
+    });
+  } catch (err) {
+    log('error', 'ordens-servico/:id/restaurar-fotos:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.patch('/api/ordens-servico/:id/status', auth, async (req, res) => {
@@ -6266,17 +6493,42 @@ app.post('/api/aplicador/auth/master-login', loginLimiter, async (req, res) => {
   try {
     await connectDB();
     const { masterPassword, equipeId } = req.body || {};
-    if (!masterPassword || !equipeId) return res.status(400).json({ error: 'masterPassword e equipeId obrigatórios' });
-    // Verifica senha master — APENAS a senha do painel (sem fallback hardcoded)
-    // .trim() defensivo: env vars do Vercel podem vir com \n no final
-    const expectedPass = (ADMIN_PASSWORD || '').trim();
-    if ((masterPassword || '').trim() !== expectedPass) return res.status(401).json({ error: 'Senha master incorreta' });
+    if (!equipeId) return res.status(400).json({ error: 'equipeId obrigatório' });
+
+    // Aceita DOIS modos de autenticação:
+    //  1) Senha master no body (1ª autenticação)
+    //  2) JWT master válido no header Authorization (troca de equipe sem redigitar senha)
+    let autenticado = false;
+
+    // Modo 2: tenta validar o JWT do header (caso o frontend já tenha sessão master)
+    const authHeader = req.headers.authorization || '';
+    if (authHeader.startsWith('Bearer ')) {
+      try {
+        const decoded = jwt.verify(authHeader.slice(7), JWT_SECRET);
+        // Só aceita se for um token com masterMode (não um token de equipe comum)
+        if (decoded && decoded.masterMode === true && decoded.role === 'admin') {
+          autenticado = true;
+        }
+      } catch { /* token inválido — cai pro modo 1 */ }
+    }
+
+    // Modo 1: valida senha master se ainda não autenticado pelo JWT
+    if (!autenticado) {
+      if (!masterPassword) return res.status(400).json({ error: 'masterPassword obrigatório' });
+      // .trim() defensivo: env vars do Vercel podem vir com \n no final
+      const expectedPass = (ADMIN_PASSWORD || '').trim();
+      if (String(masterPassword).trim() !== expectedPass) {
+        return res.status(401).json({ error: 'Senha master incorreta' });
+      }
+      autenticado = true;
+    }
+
     // Busca a equipe
     const equipe = isConnected
       ? await Equipe.findById(equipeId).lean()
       : memStore.equipes.find(e => e._id === equipeId);
     if (!equipe) return res.status(404).json({ error: 'Equipe não encontrada' });
-    // Emite JWT de admin com equipeId selecionada
+    // Emite JWT de admin com equipeId selecionada (sempre, mesmo na troca de equipe — atualiza equipeId)
     const token = jwt.sign({ role: 'admin', masterMode: true, equipeId: String(equipe._id), equipeNome: equipe.nome, username: 'master' }, JWT_SECRET, { expiresIn: '24h' });
     res.json({ ok: true, masterMode: true, token, equipe: { _id: equipe._id, nome: equipe.nome, cor: equipe.cor } });
   } catch (err) { res.status(500).json({ error: err.message }); }

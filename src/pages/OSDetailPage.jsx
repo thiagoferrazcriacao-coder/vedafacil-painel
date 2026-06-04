@@ -406,6 +406,11 @@ export default function OSDetailPage() {
   const concluidos = pontos.filter(p => (p.statusLocal || p.status) === 'concluido').length
   const totalFotosAntes = pontos.reduce((s, p) => s + (p.fotosAntes?.length || 0), 0)
   const totalFotosDepois = pontos.reduce((s, p) => s + (p.fotosDepois?.length || 0), 0)
+  // Fotos de REFERÊNCIA (vindas da medição/orçamento) — diferentes das fotosAntes/Depois
+  // que são preenchidas pelo aplicador em campo. Se for 0 e a OS veio de contrato/orçamento,
+  // mostramos o botão "Restaurar Fotos" pra recompor do banco.
+  const totalFotosRef = pontos.reduce((s, p) =>
+    s + ((p.fotosMedicao?.length || 0) + (p.fotosRef?.length || 0) + (p.fotos?.length || 0)), 0)
 
   // Progresso calculado por sub-pontos (ticados pelo aplicador)
   let totalSubs = 0, feitosSubs = 0
@@ -497,6 +502,26 @@ export default function OSDetailPage() {
                 <button onClick={() => setShowAssistTec(true)}
                   className="bg-red-50 text-red-700 border border-red-200 rounded-lg px-4 py-2 text-sm hover:bg-red-100 transition-colors">
                   🔧 Assistência Técnica
+                </button>
+              )}
+              {isAdmin && totalFotosRef === 0 && (os.contratoId || os.orcamentoId) && (
+                <button
+                  onClick={async () => {
+                    if (!confirm('Restaurar fotos da medição/orçamento para esta OS?\n\nIsso copia as fotos do contrato (ou medição) para cada local correspondente. Só preenche o que está vazio — não duplica.')) return
+                    try {
+                      const r = await api.restaurarFotosOS(id)
+                      alert(`✅ Fotos restauradas!\n\nFonte: ${r.fonte}\nPontos atualizados: ${r.pontosAtualizados}/${r.totalPontos}\nTotal de fotos: ${r.fotosAdicionadas}`)
+                      // Recarrega a OS
+                      const fresh = await api.getOrdemServico(id)
+                      setOs(fresh)
+                    } catch (e) {
+                      alert(`❌ Falha ao restaurar fotos: ${e.message}`)
+                    }
+                  }}
+                  className="bg-blue-50 text-blue-700 border border-blue-200 rounded-lg px-4 py-2 text-sm hover:bg-blue-100 transition-colors"
+                  title="Copia fotos do contrato/medição para os pontos sem fotos"
+                >
+                  📸 Restaurar Fotos
                 </button>
               )}
               {isAdmin && (

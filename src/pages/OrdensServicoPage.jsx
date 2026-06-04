@@ -92,7 +92,35 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
         }
       } else {
         if (!form.contratoId) { setError('Selecione um contrato'); setSaving(false); return }
-        const c = contratoSel
+        // IMPORTANTE: api.getContratos() (listagem) NÃO retorna locais.fotos / locais.fotosMedicao
+        // (foi cortado para acelerar payload). Aqui buscamos o contrato COMPLETO com fotos
+        // via GET /api/contratos/:id, garantindo que a OS herde as fotos da medição/orçamento.
+        const c = await api.getContrato(form.contratoId)
+        if (!c) { setError('Contrato não encontrado'); setSaving(false); return }
+        // Converte locais → pontos, transformando fotos no formato que o aplicador entende:
+        //   contrato.locais[*].fotos        = [{ data: 'base64...' }]  (formato da medição)
+        //   OS.pontos[*].fotosMedicao       = [{ data, id: 'ref_i' }]   (fotos de referência — read-only no app)
+        //   OS.pontos[*].fotosAntes/Depois  = []                        (preenchidas pela equipe em campo)
+        const pontos = (c.locais || []).map((l, li) => {
+          // Normaliza fotos: aceita tanto array de strings base64 quanto array de objetos {data}
+          const fotosRaw = Array.isArray(l.fotos) ? l.fotos : []
+          const fotosMedicao = fotosRaw
+            .map((f, i) => {
+              if (!f) return null
+              if (typeof f === 'string') return { data: f, id: `ref_${li}_${i}` }
+              if (typeof f === 'object') return { ...f, id: f.id || `ref_${li}_${i}` }
+              return null
+            })
+            .filter(Boolean)
+          return {
+            ...l,
+            fotosMedicao,
+            fotosAntes:  l.fotosAntes  || [],
+            fotosDepois: l.fotosDepois || [],
+            status:      l.status      || 'pendente',
+            statusLocal: l.statusLocal || 'pendente',
+          }
+        })
         payload = {
           ...form,
           contratoManual: false,
@@ -104,7 +132,7 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
           diasTrabalho: c?.diasTrabalho || 0,
           consumoProduto: c?.consumoProduto || 0,
           qtdInjetores: c?.qtdInjetores || 0,
-          pontos: c?.locais || [],
+          pontos,
           itens: c?.itens || [],
         }
       }
@@ -359,6 +387,7 @@ export default function OrdensServicoPage() {
   const [deletandoLote, setDeletandoLote] = useState(false)
 
   // Filtros
+  const [filtroBusca, setFiltroBusca] = useState('')
   const [filtroStatus, setFiltroStatus] = useState('todos')
   const [filtroTipo, setFiltroTipo] = useState('todos')
   const [filtroEquipe, setFiltroEquipe] = useState('')
@@ -412,6 +441,9 @@ export default function OrdensServicoPage() {
 
 
   const ordensFiltradas = useMemo(() => {
+    // Normaliza o termo de busca: sem acentos, lowercase, trim
+    const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    const busca = norm(filtroBusca).trim()
     return ordens.filter(os => {
       if (filtroStatus !== 'todos' && os.status !== filtroStatus) return false
       if (filtroTipo !== 'todos' && (os.tipo || 'normal') !== filtroTipo) return false
@@ -424,9 +456,26 @@ export default function OrdensServicoPage() {
         const d = os.dataInicio || os.createdAt?.slice(0, 10) || ''
         if (d > filtroFim) return false
       }
+      // Busca livre: número da OS (com ou sem zeros à esquerda, com sufixo de reparo)
+      // ou nome do cliente, endereço, cidade, equipe
+      if (busca) {
+        const numeroFmt = String(os.numero || '').padStart(3, '0')
+        const numeroReparo = os.numReparo ? `${numeroFmt}-${os.numReparo}` : ''
+        const haystack = [
+          String(os.numero || ''),
+          numeroFmt,
+          numeroReparo,
+          norm(os.cliente),
+          norm(os.endereco),
+          norm(os.cidade),
+          norm(os.equipeNome),
+          norm(os.tecnicoResponsavel),
+        ].filter(Boolean).join(' | ')
+        if (!haystack.includes(busca)) return false
+      }
       return true
     })
-  }, [ordens, filtroStatus, filtroTipo, filtroEquipe, filtroInicio, filtroFim])
+  }, [ordens, filtroBusca, filtroStatus, filtroTipo, filtroEquipe, filtroInicio, filtroFim])
 
   const contadores = Object.keys(STATUS_CONFIG).reduce((acc, s) => {
     acc[s] = ordens.filter(o => o.status === s).length
@@ -485,6 +534,25 @@ export default function OrdensServicoPage() {
             🔧 Novo Reparo
           </button>
         </div>
+      </div>
+
+      {/* Busca rápida — sempre visível, antes dos filtros avançados */}
+      <div className="mb-4 relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">🔎</span>
+        <input
+          type="text"
+          value={filtroBusca}
+          onChange={e => setFiltroBusca(e.target.value)}
+          placeholder="Buscar por nº da OS (ex: 3177, 3226-1), cliente, endereço, cidade, equipe ou técnico…"
+          className="w-full border border-gray-300 rounded-lg pl-10 pr-10 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+        />
+        {filtroBusca && (
+          <button
+            onClick={() => setFiltroBusca('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-100"
+            title="Limpar busca"
+          >✕</button>
+        )}
       </div>
 
       {/* Filtros avançados */}

@@ -25,7 +25,7 @@ const SECOES = [
   {
     titulo: '🖥️ Container Vercel',
     descricao: 'Recursos do servidor onde a API está rodando',
-    chaves: ['sistema_memoria', 'sistema_heap', 'sistema_uptime'],
+    chaves: ['sistema_tier', 'sistema_memoria', 'sistema_heap', 'sistema_uptime'],
   },
 ]
 

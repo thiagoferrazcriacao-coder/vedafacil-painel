@@ -4,8 +4,8 @@
   "outputDirectory": "dist",
   "framework": null,
   "functions": {
-    "api/index.js": { "maxDuration": 60, "memory": 2048 },
-    "api/zapsign-send.js": { "maxDuration": 30, "memory": 512 }
+    "api/index.js": { "maxDuration": 180, "memory": 3008 },
+    "api/zapsign-send.js": { "maxDuration": 60, "memory": 1024 }
   },
   "rewrites": [
     { "source": "/api/zapsign-send/:path*", "destination": "/api/zapsign-send" },
@@ -66,6 +66,6 @@
   ],
   "crons": [
     { "path": "/api/cron/backup", "schedule": "0 6 * * *" },
-    { "path": "/api/cron/healthcheck", "schedule": "0 8 * * *" }
+    { "path": "/api/cron/healthcheck", "schedule": "*/5 * * * *" }
   ]
 }

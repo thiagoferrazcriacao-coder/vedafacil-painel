@@ -72,6 +72,8 @@ export const api = {
   createContrato: (data) => request('POST', '/contratos', data),
   updateContrato: (id, data) => request('PUT', `/contratos/${id}`, data),
   getContratoTextoHtml: (id) => request('GET', `/contratos/${id}/texto-html`),
+  getContratoTemTextoPersonalizado: (id) => request('GET', `/contratos/${id}/tem-texto-personalizado`),
+  resetContratoTextoPersonalizado: (id) => request('DELETE', `/contratos/${id}/texto-personalizado`),
   updateContratoStatus: (id, status) => request('PATCH', `/contratos/${id}/status`, { status }),
   sendToZapSign: (id, email, nomeSigner) => request('POST', `/zapsign-send`, { contratoId: id, email, nomeSigner }),
   otimizarCroqui: (imagem) => request('POST', '/croqui/otimizar', { imagem }),
@@ -100,6 +102,7 @@ export const api = {
   createOrdemServico: (data) => request('POST', '/ordens-servico', data),
   updateOrdemServico: (id, data) => request('PUT', `/ordens-servico/${id}`, data),
   updateOSStatus: (id, status, progresso) => request('PATCH', `/ordens-servico/${id}/status`, { status, progresso }),
+  restaurarFotosOS: (id) => request('POST', `/ordens-servico/${id}/restaurar-fotos`, {}),
   deleteOrdemServico: (id) => request('DELETE', `/ordens-servico/${id}`),
   redirecionarEquipe: (id, equipeId) => request('PATCH', `/ordens-servico/${id}/equipe`, { equipeId }),
   getGarantiaOSUrl: (id) => `${BASE}/ordens-servico/${id}/garantia?token=${encodeURIComponent(getToken() || '')}`,
@@ -158,6 +161,7 @@ export const api = {
 
   // Usuários
   getUsuarios: () => request('GET', '/usuarios'),
+  getMedidores: () => request('GET', '/usuarios/medidores'),
   getAlmocoMedidor: (email) => request('GET', `/usuarios/${encodeURIComponent(email)}/almoco`),
   setAlmocoMedidor: (email, almocoInicio) => request('PUT', `/usuarios/${encodeURIComponent(email)}/almoco`, { almocoInicio }),
   createUsuario: (data) => request('POST', '/usuarios', data),
