@@ -1258,10 +1258,12 @@ async function doMasterLogin() {
       errEl.style.display = '';
     }
   } else {
-    // Já autenticado: apenas troca de equipe usando o token existente
+    // Já autenticado: apenas troca de equipe usando o token existente.
+    // IMPORTANTE: usar `${API}` (já contém /api/aplicador) ao invés de
+    // `${API_BASE}/api/aplicador/...` que duplicava /api/api/ → 404.
     showLoading('Trocando equipe...');
     try {
-      const r = await fetch(`${API_BASE}/api/aplicador/auth/master-login`, {
+      const r = await fetch(`${API}/auth/master-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tokenSalvo },
         body: JSON.stringify({ masterPassword: '_use_token_', equipeId }),
@@ -1279,8 +1281,8 @@ async function doMasterLogin() {
       const data = await r.json();
       if (!r.ok) {
         // Não foi erro de autenticação, mas a API usa a senha — reautenticar via endpoint diferente
-        // Fallback: busca dados da equipe direto
-        const eqResp = await apiFetch(`${API_BASE}/api/aplicador/equipes`);
+        // Fallback: busca dados da equipe direto (também sem duplicar /api/)
+        const eqResp = await apiFetch(`${API}/equipes`);
         const equipes = eqResp.ok ? await eqResp.json() : S.equipes;
         const equipe = equipes.find(e => (e._id || e.id) === equipeId);
         if (equipe) {

@@ -87,7 +87,9 @@ async function connectDB() {
 **Sempre usar o padrão correto** (já implementado em `connectDB()`):
 - Validar `mongoose.connection.readyState === 1` em vez de boolean
 - Passar `bufferCommands: false` ao `mongoose.connect()` para falhar rápido
-- Passar `maxPoolSize: 5` (serverless precisa de pool pequeno)
+- Passar `maxPoolSize: 2` (Vercel Pro mantém muitos containers warm; com pool 5 estouramos o Flex em 90% com ~100 containers)
+- Passar `maxIdleTimeMS: 30000` (fecha conexões ociosas em 30s — containers Vercel morrem sem SIGTERM, sem isso o Atlas fica com conexões pendentes ~10 min)
+- Passar `waitQueueTimeoutMS: 5000` (espera no máximo 5s por conexão livre antes de falhar)
 - Passar `serverSelectionTimeoutMS: 5000` para detectar Atlas indisponível em 5s
 - Listeners `disconnected`/`error`/`connected` para sincronizar a flag
 
