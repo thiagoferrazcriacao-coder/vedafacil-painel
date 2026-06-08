@@ -5,7 +5,7 @@ const ROLE_LABELS = { admin: 'Admin', medidor: 'Medidor', operador: 'Operador' }
 
 const DEFAULT_SETORES = ['Administrativo', 'Financeiro', 'Orçamentos', 'Comercial', 'Adm. de Obras', 'Operacional de Obras']
 
-const emptyForm = { email: '', name: '', role: 'operador', setores: [] }
+const emptyForm = { email: '', name: '', role: 'operador', setores: [], podeAgendar: false, agendaPara: [] }
 
 export default function UsersPage() {
   const [users, setUsers] = useState([])
@@ -41,7 +41,14 @@ export default function UsersPage() {
   }
 
   function openEdit(user) {
-    setForm({ email: user.email, name: user.name || '', role: user.role || 'medidor', setores: user.setores || [] })
+    setForm({
+      email: user.email,
+      name: user.name || '',
+      role: user.role || 'medidor',
+      setores: user.setores || [],
+      podeAgendar: !!user.podeAgendar,
+      agendaPara: user.agendaPara || [],
+    })
     setEditingEmail(user.email)
     setShowForm(true)
   }
@@ -66,10 +73,14 @@ export default function UsersPage() {
     setSaving(true)
     setError(null)
     try {
+      // Só envia podeAgendar/agendaPara quando o papel é medidor (irrelevante pros outros)
+      const extras = form.role === 'medidor'
+        ? { podeAgendar: !!form.podeAgendar, agendaPara: form.agendaPara || [] }
+        : { podeAgendar: false, agendaPara: [] }
       if (editingEmail) {
-        await api.updateUsuario(editingEmail, { name: form.name, role: form.role, setores: form.setores })
+        await api.updateUsuario(editingEmail, { name: form.name, role: form.role, setores: form.setores, ...extras })
       } else {
-        await api.createUsuario({ email: form.email, name: form.name, role: form.role, setores: form.setores })
+        await api.createUsuario({ email: form.email, name: form.name, role: form.role, setores: form.setores, ...extras })
       }
       cancelForm()
       await load()
@@ -187,6 +198,62 @@ export default function UsersPage() {
               </div>
             </div>
 
+            {/* Permissão de agendamento (só medidor) */}
+            {form.role === 'medidor' && (
+              <div className="rounded-lg border-2 border-orange-200 bg-orange-50 p-4 space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={!!form.podeAgendar}
+                    onChange={e => setForm(f => ({ ...f, podeAgendar: e.target.checked }))}
+                    className="rounded border-orange-300 text-orange-600 focus:ring-orange-300"
+                  />
+                  <span className="text-sm font-semibold text-orange-900">
+                    📅 Pode agendar visitas pelo app
+                  </span>
+                </label>
+                <p className="text-xs text-orange-800 -mt-1 ml-6">
+                  Mostra o botão <strong>"FAZER AGENDAMENTO"</strong> na home do PWA Medidor.
+                  Visitas criadas por ele já nascem confirmadas.
+                </p>
+
+                {form.podeAgendar && (
+                  <div className="ml-6">
+                    <label className="block text-xs font-medium text-orange-900 mb-1.5">
+                      Pode agendar para outros medidores além de si:
+                    </label>
+                    <div className="flex flex-wrap gap-2 bg-white rounded p-2 border border-orange-200">
+                      {users.filter(u => u.role === 'medidor' && u.email !== form.email).length === 0 ? (
+                        <span className="text-xs text-gray-400 italic">Nenhum outro medidor cadastrado</span>
+                      ) : (
+                        users
+                          .filter(u => u.role === 'medidor' && u.email !== form.email)
+                          .map(u => (
+                            <label key={u.email} className="flex items-center gap-1.5 cursor-pointer select-none px-2 py-1 rounded hover:bg-orange-50">
+                              <input
+                                type="checkbox"
+                                checked={(form.agendaPara || []).includes(u.email)}
+                                onChange={() => setForm(f => ({
+                                  ...f,
+                                  agendaPara: (f.agendaPara || []).includes(u.email)
+                                    ? f.agendaPara.filter(e => e !== u.email)
+                                    : [...(f.agendaPara || []), u.email]
+                                }))}
+                                className="rounded border-orange-300 text-orange-600 focus:ring-orange-300"
+                              />
+                              <span className="text-sm text-gray-800">{u.name || u.email}</span>
+                            </label>
+                          ))
+                      )}
+                    </div>
+                    <p className="text-xs text-orange-700 mt-1">
+                      Visitas criadas por ele para outros medidores também nascem confirmadas e vão direto pra agenda do colega.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-2">
               <button
                 type="submit"
@@ -253,15 +320,25 @@ export default function UsersPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-600">{u.email}</td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                      u.role === 'admin'
-                        ? 'bg-blue-100 text-blue-700'
-                        : u.role === 'operador'
-                        ? 'bg-orange-100 text-orange-700'
-                        : 'bg-gray-100 text-gray-600'
-                    }`}>
-                      {ROLE_LABELS[u.role] || u.role}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        u.role === 'admin'
+                          ? 'bg-blue-100 text-blue-700'
+                          : u.role === 'operador'
+                          ? 'bg-orange-100 text-orange-700'
+                          : 'bg-gray-100 text-gray-600'
+                      }`}>
+                        {ROLE_LABELS[u.role] || u.role}
+                      </span>
+                      {u.role === 'medidor' && u.podeAgendar && (
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700"
+                          title={`Pode agendar pra ${[u.email, ...(u.agendaPara || [])].length} medidor(es)`}
+                        >
+                          📅 Agenda
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">

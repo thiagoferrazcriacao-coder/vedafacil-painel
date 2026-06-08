@@ -155,9 +155,19 @@ export default function MedicaoDetailPage() {
   }
 
   // ── Adicionar Local ──────────────────────────────────────────────────────
+  // Ref pra fazer scroll automático até o form quando ele abre (a página é longa
+  // e o usuário muitas vezes não percebia o form aparecendo embaixo dos locais).
+  const newLocalFormRef = useRef(null)
   const handleOpenAddLocal = () => {
     setNewLocal(initNewLocal())
     setAddingNewLocal(true)
+    // Aguarda o React renderizar o form pra fazer o scroll
+    setTimeout(() => {
+      newLocalFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      // Foca o input de nome — facilita pra começar a digitar de cara
+      const inp = newLocalFormRef.current?.querySelector('input[type="text"], input:not([type])')
+      if (inp) inp.focus()
+    }, 50)
   }
 
   const handleNewLocalFotos = async (files) => {
@@ -696,8 +706,8 @@ export default function MedicaoDetailPage() {
                     ➕ Adicionar novo local
                   </button>
                 ) : (
-                  <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4 space-y-3">
-                    <h3 className="text-sm font-bold text-green-800 mb-1">Novo Local</h3>
+                  <div ref={newLocalFormRef} className="bg-green-50 border-2 border-green-300 rounded-xl p-4 space-y-3 ring-4 ring-green-100 shadow-lg">
+                    <h3 className="text-sm font-bold text-green-800 mb-1">➕ Novo Local</h3>
 
                     {/* Nome e Andar */}
                     <div className="grid sm:grid-cols-2 gap-3">
@@ -770,7 +780,7 @@ export default function MedicaoDetailPage() {
                         onClick={handleSaveNewLocal}
                         disabled={savingNewLocal || !newLocal?.nome?.trim()}
                         className="btn-primary text-sm py-1.5 px-4 disabled:opacity-50">
-                        {savingNewLocal ? '⏳ Salvando...' : '✅ Adicionar Local'}
+                        {savingNewLocal ? '⏳ Salvando...' : '💾 SALVAR LOCAL'}
                       </button>
                     </div>
                   </div>

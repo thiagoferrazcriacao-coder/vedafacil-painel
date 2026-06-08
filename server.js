@@ -313,6 +313,11 @@ const userSchema = new mongoose.Schema({
   // Horário de almoço (medidor) — usado pra bloquear agendamentos conflitantes na Agenda de Visitas
   almocoInicio: { type: String, default: '12:00' },  // HH:mm — local de Brasília
   almocoFim:    { type: String, default: '13:30' },  // HH:mm — sempre 1h30 após inicio (validado no PUT)
+  // Agendamento pelo PWA Medidor:
+  // podeAgendar = true → medidor vê botão "FAZER AGENDAMENTO" e pode criar visitas
+  // agendaPara = lista de e-mails de outros medidores pra quem ele pode agendar (além dele)
+  podeAgendar: { type: Boolean, default: false },
+  agendaPara:  { type: [String], default: [] },
 }, { _id: false });
 const User = mongoose.model('User', userSchema);
 
@@ -4907,11 +4912,21 @@ app.get('/api/usuarios/medidores', auth, async (req, res) => {
 app.get('/api/usuarios', auth, adminOnly, async (req, res) => {
   try {
     await connectDB();
+    const mapUser = u => ({
+      id: u._id || u.email,
+      email: u.email,
+      name: u.name,
+      role: u.role,
+      picture: u.picture,
+      setores: u.setores || [],
+      podeAgendar: !!u.podeAgendar,
+      agendaPara: u.agendaPara || [],
+    });
     if (isConnected) {
       const users = await User.find().select('-googleAccessToken -googleRefreshToken -googleTokenExpiry');
-      return res.json(users.map(u => ({ id: u._id, email: u.email, name: u.name, role: u.role, picture: u.picture, setores: u.setores || [] })));
+      return res.json(users.map(mapUser));
     }
-    res.json(memStore.users.map(u => ({ id: u._id || u.email, email: u.email, name: u.name, role: u.role, picture: u.picture, setores: u.setores || [] })));
+    res.json(memStore.users.map(mapUser));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -4944,20 +4959,37 @@ app.put('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
   try {
     await connectDB();
     const { email } = req.params;
-    const { name, role, setores } = req.body;
+    const { name, role, setores, podeAgendar, agendaPara } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (role !== undefined) updates.role = role;
     if (setores !== undefined) updates.setores = setores;
+    // Permissão de agendamento (PWA Medidor pode criar visitas pra ele + lista de colegas)
+    if (podeAgendar !== undefined) updates.podeAgendar = !!podeAgendar;
+    if (agendaPara !== undefined) {
+      updates.agendaPara = Array.isArray(agendaPara)
+        ? agendaPara.filter(e => typeof e === 'string' && e.trim()).map(e => e.trim().toLowerCase())
+        : [];
+    }
     if (isConnected) {
       const updated = await User.findByIdAndUpdate(email, updates, { new: true });
       if (!updated) return res.status(404).json({ error: 'Usuário não encontrado' });
-      return res.json({ id: updated._id, email: updated.email, name: updated.name, role: updated.role, setores: updated.setores || [] });
+      return res.json({
+        id: updated._id, email: updated.email, name: updated.name, role: updated.role,
+        setores: updated.setores || [],
+        podeAgendar: !!updated.podeAgendar,
+        agendaPara: updated.agendaPara || [],
+      });
     }
     const u = memStore.users.find(x => x._id === email || x.email === email);
     if (!u) return res.status(404).json({ error: 'Usuário não encontrado' });
     Object.assign(u, updates);
-    res.json({ id: u._id || u.email, email: u.email, name: u.name, role: u.role, setores: u.setores || [] });
+    res.json({
+      id: u._id || u.email, email: u.email, name: u.name, role: u.role,
+      setores: u.setores || [],
+      podeAgendar: !!u.podeAgendar,
+      agendaPara: u.agendaPara || [],
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -8384,7 +8416,8 @@ const visitaSchema = new mongoose.Schema({
   medidorEmail:       String,    // medidor que vai ao local (email do usuário medidor)
   medidorNome:        String,    // nome do medidor (desnormalizado para exibição)
   tecnicoResponsavel: String,    // técnico responsável (da lista de ConfigPage)
-  criadoPor:          String,    // email do operador
+  criadoPor:          String,    // email do criador (admin/operador/medidor)
+  criadoPorRole:      String,    // 'admin' | 'operador' | 'medidor' — usado pra decidir quem pode editar
   fotosCliente:       [String],  // fotos anexadas pelo operador (base64) — visíveis pro medidor
   concluidaEm:        Number,    // timestamp quando o medidor concluiu a medição
   medicaoId:          String,    // _id da medição criada a partir desta visita
@@ -8492,7 +8525,7 @@ app.get('/api/visitas', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/visitas — criar visita
+// POST /api/visitas — criar visita (pelo painel: admin/operador)
 app.post('/api/visitas', auth, bigJson, async (req, res) => {
   try {
     await connectDB();
@@ -8500,6 +8533,7 @@ app.post('/api/visitas', auth, bigJson, async (req, res) => {
     const dados = {
       ...req.body,
       criadoPor: req.user?.email || req.user?.username || 'painel',
+      criadoPorRole: req.user?.role || 'operador',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -8549,47 +8583,248 @@ app.delete('/api/visitas/:id', auth, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Helper: identifica o email do medidor a partir do token (JWT painel ou Google) ─
+// Retorna { medidorEmail } ou { error, status } pra resposta direta.
+async function _identifyMedidor(req) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '');
+  if (!token) return { error: 'Token obrigatório', status: 401 };
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    // No modo master, usa targetEmail (medidor que está sendo visualizado)
+    return { medidorEmail: payload.targetEmail || payload.email || null };
+  } catch {
+    // Token Google direto — consulta userinfo
+    const gResp = await fetch('https://www.googleapis.com/oauth2/v1/userinfo', {
+      headers: { Authorization: `Bearer ${token}` }
+    }).catch(() => null);
+    if (!gResp || !gResp.ok) return { error: 'Token inválido', status: 401 };
+    const userInfo = await gResp.json();
+    return { medidorEmail: userInfo.email || null };
+  }
+}
+
 // GET /api/visitas/medidor — visitas confirmadas para o PWA Medidor
-// Aceita JWT do painel (admin/operador/medidor/medidor-master) ou token Google direto
-// Filtra automaticamente por medidorEmail do usuário logado
+// Aceita JWT do painel (admin/operador/medidor/medidor-master) ou token Google direto.
+// Retorna visitas DELE + dos medidores em `agendaPara` (se ele puder agendar pra outros).
+// Cada visita ganha:
+//   - propria: true se for do próprio medidor logado
+//   - podeEditar: true se foi criada por medidor (ele ou alguém que ele pode agendar)
 app.get('/api/visitas/medidor', async (req, res) => {
   try {
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.replace(/^Bearer\s+/i, '');
-    if (!token) return res.status(401).json({ error: 'Token obrigatório' });
-
-    // Identifica o email do medidor a partir do token
-    let medidorEmail = null;
-    try {
-      const payload = jwt.verify(token, JWT_SECRET);
-      // No modo master, usa targetEmail (medidor que está sendo visualizado)
-      medidorEmail = payload.targetEmail || payload.email || null;
-    } catch {
-      // Token Google direto — consulta userinfo
-      const gResp = await fetch('https://www.googleapis.com/oauth2/v1/userinfo', {
-        headers: { Authorization: `Bearer ${token}` }
-      }).catch(() => null);
-      if (!gResp || !gResp.ok) return res.status(401).json({ error: 'Token inválido' });
-      const userInfo = await gResp.json();
-      medidorEmail = userInfo.email || null;
-    }
-    if (!medidorEmail) return res.status(401).json({ error: 'Não foi possível identificar o medidor' });
+    const id = await _identifyMedidor(req);
+    if (id.error) return res.status(id.status).json({ error: id.error });
+    if (!id.medidorEmail) return res.status(401).json({ error: 'Não foi possível identificar o medidor' });
+    const medidorEmail = id.medidorEmail;
 
     await connectDB();
     if (!isConnected) return res.json({ visitas: [] });
+
+    // Carrega permissões do medidor pra saber se vê visitas de colegas
+    const usr = await User.findOne({ email: medidorEmail }).select('podeAgendar agendaPara').lean();
+    const podeAgendar = !!usr?.podeAgendar;
+    const agendaPara = Array.isArray(usr?.agendaPara) ? usr.agendaPara.filter(e => e && e !== medidorEmail) : [];
+    // Lista de emails cujas visitas ele pode VER (dele + os que ele pode agendar pra)
+    const emailsVisiveis = [medidorEmail, ...agendaPara];
+
     // Usa horário de Brasília — visitas são salvas em horário local (YYYY-MM-DDTHH:mm)
-    // sem fuso, então a comparação tem que ser feita no mesmo fuso (não UTC).
     const fmtLocal = (d) => d.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).replace(' ', 'T').slice(0, 16);
-    // Folga de 1h: visitas que começaram nos últimos 60 min ainda aparecem (medidor pode estar chegando)
     const agora = fmtLocal(new Date(Date.now() - 60 * 60 * 1000));
     const limite = fmtLocal(new Date(Date.now() + 30 * 86400000));
-    // Filtra visitas confirmadas, futuras, atribuídas a este medidor
+
     const visitas = await Visita.find({
       status: 'confirmado',
-      medidorEmail: medidorEmail,
+      medidorEmail: { $in: emailsVisiveis },
       dataHora: { $gte: agora, $lte: limite },
     }).sort({ dataHora: 1 }).lean();
-    res.json({ visitas, fonte: 'vedafacil', medidorEmail });
+
+    // Anota cada visita com flags de UX:
+    //   - propria: se é dele
+    //   - podeEditar: só medidor (não foi escritório que criou)
+    //   - criadorEhEscritorio: true se criadoPorRole indica admin/operador
+    const visitasAnotadas = visitas.map(v => {
+      const criadorEhEscritorio = v.criadoPorRole === 'admin' || v.criadoPorRole === 'operador';
+      return {
+        ...v,
+        fonte: 'vedafacil',
+        propria: v.medidorEmail === medidorEmail,
+        criadorEhEscritorio,
+        podeEditar: !criadorEhEscritorio,
+      };
+    });
+
+    res.json({ visitas: visitasAnotadas, fonte: 'vedafacil', medidorEmail, podeAgendar, agendaPara });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/medidor/agenda-para — info do medidor + lista de outros medidores que ele pode agendar
+// Retorna: { podeAgendar, agendaPara: [{ email, name }] }
+app.get('/api/medidor/agenda-para', async (req, res) => {
+  try {
+    const id = await _identifyMedidor(req);
+    if (id.error) return res.status(id.status).json({ error: id.error });
+    if (!id.medidorEmail) return res.status(401).json({ error: 'Não foi possível identificar o medidor' });
+
+    await connectDB();
+    if (!isConnected) return res.json({ podeAgendar: false, agendaPara: [] });
+
+    const usr = await User.findOne({ email: id.medidorEmail }).select('podeAgendar agendaPara name').lean();
+    if (!usr) return res.json({ podeAgendar: false, agendaPara: [] });
+
+    // Resolve nomes dos emails em agendaPara
+    const emailsExtra = Array.isArray(usr.agendaPara) ? usr.agendaPara.filter(e => e && e !== id.medidorEmail) : [];
+    let outros = [];
+    if (emailsExtra.length > 0) {
+      const usuariosExtra = await User.find({ email: { $in: emailsExtra }, role: 'medidor' }).select('email name').lean();
+      outros = usuariosExtra.map(u => ({ email: u.email, name: u.name || u.email }));
+    }
+
+    res.json({
+      podeAgendar: !!usr.podeAgendar,
+      meuEmail: id.medidorEmail,
+      meuNome: usr.name || id.medidorEmail,
+      agendaPara: outros,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/medidor/visitas — medidor cria visita (já nasce confirmada)
+// Permite criar pra ele mesmo OU pra qualquer medidor em agendaPara.
+app.post('/api/medidor/visitas', bigJson, async (req, res) => {
+  try {
+    const id = await _identifyMedidor(req);
+    if (id.error) return res.status(id.status).json({ error: id.error });
+    if (!id.medidorEmail) return res.status(401).json({ error: 'Não foi possível identificar o medidor' });
+
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+
+    const usr = await User.findOne({ email: id.medidorEmail }).select('podeAgendar agendaPara name role').lean();
+    if (!usr || !usr.podeAgendar) {
+      return res.status(403).json({ error: 'Você não tem permissão para agendar visitas. Solicite ao administrador.' });
+    }
+
+    const alvoEmail = req.body.medidorEmail || id.medidorEmail;
+    const emailsPermitidos = [id.medidorEmail, ...(Array.isArray(usr.agendaPara) ? usr.agendaPara : [])];
+    if (!emailsPermitidos.includes(alvoEmail)) {
+      return res.status(403).json({ error: `Você não pode agendar visitas para ${alvoEmail}.` });
+    }
+
+    // Resolve nome do medidor alvo (caso seja outro)
+    let medidorNome = req.body.medidorNome || '';
+    if (!medidorNome) {
+      if (alvoEmail === id.medidorEmail) {
+        medidorNome = usr.name || id.medidorEmail;
+      } else {
+        const target = await User.findOne({ email: alvoEmail }).select('name').lean();
+        medidorNome = target?.name || alvoEmail;
+      }
+    }
+
+    const dados = {
+      ...req.body,
+      medidorEmail: alvoEmail,
+      medidorNome,
+      status: 'confirmado',                  // medidor cria já confirmado
+      criadoPor: id.medidorEmail,
+      criadoPorRole: 'medidor',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const visita = await Visita.create(dados);
+    res.status(201).json(visita);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /api/medidor/visitas/:id — medidor edita visita
+// REGRA: só pode editar visitas criadas por medidor (não pelo escritório).
+app.put('/api/medidor/visitas/:id', bigJson, async (req, res) => {
+  try {
+    const id = await _identifyMedidor(req);
+    if (id.error) return res.status(id.status).json({ error: id.error });
+    if (!id.medidorEmail) return res.status(401).json({ error: 'Não foi possível identificar o medidor' });
+
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+
+    const usr = await User.findOne({ email: id.medidorEmail }).select('podeAgendar agendaPara').lean();
+    if (!usr || !usr.podeAgendar) {
+      return res.status(403).json({ error: 'Você não tem permissão para agendar visitas.' });
+    }
+
+    const visita = await Visita.findById(req.params.id).lean();
+    if (!visita) return res.status(404).json({ error: 'Visita não encontrada' });
+
+    // REGRA 1: visita criada pelo escritório → bloqueia
+    if (visita.criadoPorRole === 'admin' || visita.criadoPorRole === 'operador') {
+      return res.status(403).json({
+        error: 'Esta visita foi criada pelo escritório. Para alterar, fale com a equipe do escritório.',
+        criadoPorEscritorio: true,
+      });
+    }
+
+    // REGRA 2: só edita visita dele OU de quem ele pode agendar
+    const emailsPermitidos = [id.medidorEmail, ...(Array.isArray(usr.agendaPara) ? usr.agendaPara : [])];
+    if (!emailsPermitidos.includes(visita.medidorEmail)) {
+      return res.status(403).json({ error: 'Você não tem permissão para editar esta visita.' });
+    }
+
+    // Atualiza preservando metadados críticos (criador, role, status sempre confirmado)
+    const updates = {
+      ...req.body,
+      criadoPor: visita.criadoPor,
+      criadoPorRole: visita.criadoPorRole,
+      status: 'confirmado',
+      updatedAt: Date.now(),
+    };
+    // Permite trocar o alvo (medidor) só pra quem ele pode agendar
+    if (updates.medidorEmail && !emailsPermitidos.includes(updates.medidorEmail)) {
+      return res.status(403).json({ error: `Você não pode atribuir esta visita para ${updates.medidorEmail}.` });
+    }
+    const atualizada = await Visita.findByIdAndUpdate(req.params.id, updates, { new: true }).lean();
+    res.json(atualizada);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/medidor/visitas/:id — medidor cancela visita (vai pra lixeira)
+app.delete('/api/medidor/visitas/:id', async (req, res) => {
+  try {
+    const id = await _identifyMedidor(req);
+    if (id.error) return res.status(id.status).json({ error: id.error });
+    if (!id.medidorEmail) return res.status(401).json({ error: 'Não foi possível identificar o medidor' });
+
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+
+    const usr = await User.findOne({ email: id.medidorEmail }).select('podeAgendar agendaPara').lean();
+    if (!usr || !usr.podeAgendar) {
+      return res.status(403).json({ error: 'Você não tem permissão para cancelar visitas.' });
+    }
+
+    const visita = await Visita.findById(req.params.id).lean();
+    if (!visita) return res.status(404).json({ error: 'Visita não encontrada' });
+
+    if (visita.criadoPorRole === 'admin' || visita.criadoPorRole === 'operador') {
+      return res.status(403).json({
+        error: 'Esta visita foi criada pelo escritório. Para cancelar, fale com a equipe do escritório.',
+        criadoPorEscritorio: true,
+      });
+    }
+
+    const emailsPermitidos = [id.medidorEmail, ...(Array.isArray(usr.agendaPara) ? usr.agendaPara : [])];
+    if (!emailsPermitidos.includes(visita.medidorEmail)) {
+      return res.status(403).json({ error: 'Você não tem permissão para cancelar esta visita.' });
+    }
+
+    // Soft delete via Lixeira (regra do CLAUDE.md: jamais deleta direto)
+    try {
+      await salvarNaLixeira('visita', 'Visita', 'visitas', visita, id.medidorEmail);
+      await Visita.findByIdAndDelete(req.params.id);
+    } catch (lixErr) {
+      // Fallback: marca como cancelada se a lixeira falhar
+      await Visita.findByIdAndUpdate(req.params.id, { status: 'cancelado', updatedAt: Date.now() });
+    }
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

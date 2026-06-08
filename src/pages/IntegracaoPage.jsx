@@ -647,13 +647,45 @@ export default function IntegracaoPage() {
             </div>
             <div className="space-y-3">
               {locais.map((l, i) => (
-                <LocalCard key={i} local={l} idx={i}
-                  onChange={updateLocal}
-                  onFotosAdd={addFotos}
-                  onFotoRemove={removeFoto}
-                />
+                <div key={i} className="relative">
+                  <LocalCard local={l} idx={i}
+                    onChange={updateLocal}
+                    onFotosAdd={addFotos}
+                    onFotoRemove={removeFoto}
+                  />
+                  {/* Remover este local */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!confirm(`Remover o local "${l.nome || 'sem nome'}"?`)) return
+                      setLocais(ls => ls.filter((_, j) => j !== i))
+                    }}
+                    className="absolute top-2 right-2 w-7 h-7 bg-red-100 text-red-600 hover:bg-red-200 rounded-full text-sm font-bold flex items-center justify-center transition-colors"
+                    title="Remover este local"
+                  >×</button>
+                </div>
               ))}
             </div>
+
+            {/* Botão Adicionar Local manualmente — útil pra orçamento mínimo
+                ou quando a IA não pega um local. Vai salvo no painel pra contagem interna. */}
+            <button
+              type="button"
+              onClick={() => {
+                const novo = { nome: '', andar: '', trinca: null, juntaFria: null, ralo: null, juntaDilat: null, ferragem: null, cortina: null, fotos: [] }
+                setLocais(ls => [...ls, novo])
+                // Scroll pro final pra mostrar o novo card
+                setTimeout(() => {
+                  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+                }, 50)
+              }}
+              className="mt-3 w-full border-2 border-dashed border-green-300 rounded-lg py-3 text-green-700 hover:border-green-400 hover:bg-green-50 text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+            >
+              ➕ Adicionar Local manualmente
+            </button>
+            <p className="text-xs text-gray-400 mt-1 ml-1">
+              Use quando a IA não pegou um local do PDF ou em contratos de <strong>orçamento mínimo</strong> que não têm locais detalhados.
+            </p>
           </div>
         </div>
       )}

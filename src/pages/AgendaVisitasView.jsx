@@ -51,7 +51,9 @@ const PALETA_MEDIDORES = [
   '#4f46e5', // índigo
 ]
 function corDoMedidor(email) {
-  if (!email) return '#9ca3af'
+  // Sem medidor atribuído → cor neutra mas com bom contraste (escura, não cinza opaco).
+  // Mantém legibilidade do texto branco e visual consistente com os outros cards.
+  if (!email) return '#64748b' // slate-500
   let hash = 0
   for (let i = 0; i < email.length; i++) hash = (hash * 31 + email.charCodeAt(i)) & 0xffffffff
   return PALETA_MEDIDORES[Math.abs(hash) % PALETA_MEDIDORES.length]
@@ -60,6 +62,64 @@ function corDoMedidor(email) {
 function corClaraMedidor(email) {
   const cor = corDoMedidor(email)
   return cor + '22' // 13% alpha
+}
+
+// Componente de Card padronizado para a agenda (vista mês e semana).
+// Garante que TODA visita mostre: hora · bairro · condomínio · medidor — mesmo
+// quando algum campo está faltando (usa placeholders sutis em vez de sumir).
+function VisitaCardCompacto({ v, onClick, modo = 'semana' }) {
+  const sc = STATUS_CONFIG[v.status] || STATUS_CONFIG.reservado
+  const corMed = corDoMedidor(v.medidorEmail)
+  const bgCor = v.status === 'cancelado' ? '#9ca3af'
+              : v.status === 'concluido' ? corMed + 'bb'
+              : corMed
+  const hora = fmtHora(v.dataHora)
+  const ehGoogle = v.fonte === 'google'
+
+  if (modo === 'mes') {
+    // Modo mês: muito compacto — usa só uma linha (hora · condomínio)
+    return (
+      <div onClick={onClick}
+        className="cursor-pointer rounded text-xs overflow-hidden mb-0.5 hover:brightness-90 transition-all"
+        style={{ background: bgCor }}
+        title={`${v.nomeCondominio || '(sem nome)'} — ${hora || 'sem hora'} — ${sc.label}${v.bairro ? ' — ' + v.bairro : ''}${v.medidorNome ? ' — Medidor: ' + v.medidorNome : ''}`}>
+        <div style={{ height: 2, background: ehGoogle ? '#3b82f6' : sc.border, opacity: 0.9 }} />
+        <div className="px-1.5 py-0.5 text-white font-semibold truncate leading-tight">
+          {ehGoogle && <span title="Google Calendar" className="opacity-80 mr-0.5">📅</span>}
+          {hora && <span className="opacity-80 mr-1">{hora}</span>}
+          {v.nomeCondominio || '(sem nome)'}
+        </div>
+      </div>
+    )
+  }
+
+  // Modo semana: mais espaço — 4 linhas no padrão roxo (hora · bairro / condomínio / medidor)
+  return (
+    <div onClick={onClick}
+      className="cursor-pointer rounded mb-1 overflow-hidden hover:brightness-90 transition-all shadow-sm"
+      style={{ background: bgCor }}
+      title={`${v.nomeCondominio || '(sem nome)'} — ${hora || 'sem hora'} — ${sc.label}${v.medidorNome ? ' — ' + v.medidorNome : ''}`}>
+      <div style={{ height: 3, background: ehGoogle ? '#3b82f6' : sc.border, opacity: 0.9 }} />
+      <div className="px-2 py-1.5 text-white">
+        {/* Linha 1: hora amarela + bairro */}
+        <div className="text-[11px] font-bold mb-0.5 flex items-center gap-1.5 flex-wrap leading-tight">
+          {ehGoogle && <span title="Google Calendar">📅</span>}
+          <span style={{ color: '#fef08a' }}>{hora || '—'}</span>
+          {v.bairro && <span className="opacity-95">· {v.bairro}</span>}
+        </div>
+        {/* Linha 2: condomínio (destaque) */}
+        <div className="text-xs font-semibold leading-tight" style={{ wordBreak: 'break-word' }}>
+          {v.nomeCondominio || <span className="opacity-60 italic font-normal">(sem nome)</span>}
+        </div>
+        {/* Linha 3: medidor (mesmo quando vazio, mostra placeholder discreto) */}
+        <div className="text-[10px] opacity-95 mt-1 font-medium leading-tight">
+          {v.medidorNome
+            ? <>📐 {v.medidorNome}</>
+            : <span className="opacity-70 italic">📐 sem medidor</span>}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
@@ -363,27 +423,9 @@ export default function AgendaVisitasView() {
                         isToday ? 'bg-primary text-white' : thisMonth ? 'text-gray-700' : 'text-gray-300'
                       }`}>{date.getDate()}</span>
                     </div>
-                    {dayVisitas.slice(0, 3).map(v => {
-                      const sc = STATUS_CONFIG[v.status] || STATUS_CONFIG.reservado
-                      const corMed = corDoMedidor(v.medidorEmail)
-                      // Concluído/cancelado fica acinzentado
-                      const bgCor = v.status === 'cancelado' ? '#9ca3af' : v.status === 'concluido' ? corMed + 'bb' : corMed
-                      return (
-                        <div key={v._id}
-                          onClick={() => abrirEditar(v)}
-                          className="cursor-pointer rounded text-xs overflow-hidden mb-0.5 hover:brightness-90 transition-all"
-                          style={{ background: bgCor }}
-                          title={`${v.nomeCondominio} — ${fmtHora(v.dataHora) || 'sem hora'} — ${sc.label}${v.medidorNome ? ' — Medidor: ' + v.medidorNome : ''}`}>
-                          {/* faixa de status no topo (Google fica azul) */}
-                          <div style={{ height: 2, background: v.fonte === 'google' ? '#3b82f6' : sc.border, opacity: 0.9 }} />
-                          <div className="px-1.5 py-0.5 text-white font-semibold truncate leading-tight">
-                            {v.fonte === 'google' && <span title="Google Calendar" className="opacity-80 mr-0.5">📅</span>}
-                            {fmtHora(v.dataHora) && <span className="opacity-80 mr-1">{fmtHora(v.dataHora)}</span>}
-                            {v.nomeCondominio}
-                          </div>
-                        </div>
-                      )
-                    })}
+                    {dayVisitas.slice(0, 3).map(v => (
+                      <VisitaCardCompacto key={v._id} v={v} modo="mes" onClick={() => abrirEditar(v)} />
+                    ))}
                     {dayVisitas.length > 3 && (
                       <div className="text-xs text-gray-400 px-1 font-medium">+{dayVisitas.length - 3}</div>
                     )}
@@ -427,34 +469,9 @@ export default function AgendaVisitasView() {
                       <div key={i} className={`min-h-[260px] p-1.5 border-r border-b last:border-r-0 border-gray-100 ${isWE ? 'bg-gray-50/40' : 'bg-white'}`}>
                         {dayVisitas.length === 0 ? (
                           <div className="text-xs text-gray-300 text-center pt-4">—</div>
-                        ) : dayVisitas.map(v => {
-                          const sc = STATUS_CONFIG[v.status] || STATUS_CONFIG.reservado
-                          const corMed = corDoMedidor(v.medidorEmail)
-                          const bgCor = v.status === 'cancelado' ? '#9ca3af' : v.status === 'concluido' ? corMed + 'bb' : corMed
-                          return (
-                            <div key={v._id}
-                              onClick={() => abrirEditar(v)}
-                              className="cursor-pointer rounded mb-1 overflow-hidden hover:brightness-90 transition-all shadow-sm"
-                              style={{ background: bgCor }}
-                              title={`${v.nomeCondominio} — ${fmtHora(v.dataHora) || 'sem hora'} — ${sc.label}${v.medidorNome ? ' — ' + v.medidorNome : ''}`}>
-                              <div style={{ height: 3, background: v.fonte === 'google' ? '#3b82f6' : sc.border, opacity: 0.9 }} />
-                              <div className="px-2 py-1.5 text-white">
-                                <div className="text-xs font-bold opacity-90 mb-0.5 flex items-center gap-1">
-                                  {v.fonte === 'google' && <span title="Google Calendar">📅</span>}
-                                  {fmtHora(v.dataHora) || '—'}
-                                </div>
-                                <div className="text-xs font-semibold leading-tight" style={{ wordBreak: 'break-word' }}>
-                                  {v.nomeCondominio}
-                                </div>
-                                {v.medidorNome && (
-                                  <div className="text-[10px] opacity-90 mt-1 font-medium">
-                                    📐 {v.medidorNome}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
+                        ) : dayVisitas.map(v => (
+                          <VisitaCardCompacto key={v._id} v={v} modo="semana" onClick={() => abrirEditar(v)} />
+                        ))}
                       </div>
                     )
                   })}
