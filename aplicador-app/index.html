@@ -278,6 +278,25 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
   </div>
 </div>
 
+<!-- ══════════════════════════════════════════════
+     SCREEN: DEVOCIONAL (versículo do dia — primeira abertura do dia)
+══════════════════════════════════════════════ -->
+<div id="screen-devocional" style="display:none;position:fixed;inset:0;z-index:99999;background:linear-gradient(135deg,#2d1106 0%,#5a2209 55%,#8b3812 100%);color:#fdf6e8;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;text-align:center;overflow-y:auto;">
+  <div style="max-width:520px;width:100%;animation:dvFadeIn 0.6s ease;">
+    <div style="font-size:48px;margin-bottom:24px;opacity:0.9;">✝️</div>
+    <div style="font-size:13px;font-weight:600;letter-spacing:2px;text-transform:uppercase;opacity:0.85;margin-bottom:24px;color:#fef08a;">Palavra do dia</div>
+    <div id="devocional-texto" style="font-size:22px;line-height:1.45;font-weight:500;margin-bottom:24px;text-shadow:0 1px 3px rgba(0,0,0,0.4);">…</div>
+    <div id="devocional-ref" style="font-size:15px;font-weight:700;opacity:0.95;margin-bottom:48px;color:#fef08a;">…</div>
+    <button id="devocional-btn-amem" onclick="fecharDevocional()" style="background:#fef08a;color:#5a2209;border:none;border-radius:999px;padding:16px 56px;font-size:20px;font-weight:800;letter-spacing:1.5px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.4);transition:transform 0.15s;">
+      🙏 AMÉM
+    </button>
+  </div>
+</div>
+<style>
+@keyframes dvFadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+#devocional-btn-amem:active { transform: scale(0.96); }
+</style>
+
 <!-- ── SCREEN: LOGIN ─────────────────────────────────────────────────────── -->
 <div id="screen-login" class="screen active">
   <div class="header"><h1>⚡ Vedafácil Aplicador</h1></div>
@@ -967,9 +986,34 @@ function updateHomeCounts() {
   const ncl = document.getElementById('nav-count-concluidas');    if (ncl) ncl.textContent = concluidas;
 }
 
+// ── Devocional diário: aparece na 1ª abertura do dia ──────────────────────
+async function mostrarVersiculoDoDia() {
+  try {
+    const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+    const chave = `vfa_versiculo_visto_${hoje}`;
+    if (localStorage.getItem(chave)) return; // já viu hoje
+    const r = await fetch(`${API_BASE}/devocional/hoje`);
+    if (!r.ok) return;
+    const v = await r.json();
+    document.getElementById('devocional-texto').textContent = '"' + v.texto + '"';
+    document.getElementById('devocional-ref').textContent = '— ' + v.referencia;
+    document.getElementById('screen-devocional').style.display = 'flex';
+  } catch (e) { /* silencioso — não atrapalha o app */ }
+}
+function fecharDevocional() {
+  const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  localStorage.setItem(`vfa_versiculo_visto_${hoje}`, '1');
+  const el = document.getElementById('screen-devocional');
+  el.style.transition = 'opacity 0.4s ease';
+  el.style.opacity = '0';
+  setTimeout(() => { el.style.display = 'none'; el.style.opacity = '1'; el.style.transition = ''; }, 420);
+}
+
 function irParaHome() {
   atualizarHomeGreeting();
   showScreen('screen-home');
+  // Versículo diário (não bloqueia o resto — mostra por cima quando carregar)
+  mostrarVersiculoDoDia();
 }
 
 function irParaLista(tab) {
@@ -3648,12 +3692,13 @@ async function otimizarCroqui() {
       aprimorarCroquiLocal(canvas);
       saveSnapshot();
       CQ.iaOtimizado = false;
-      const motivo = data.aviso ? data.aviso.slice(0, 80) : 'IA indisponível';
-      showToast('⚠️ ' + motivo + ' — indo para anotações.');
+      // Mensagem amigável pra equipe + detalhe técnico no console pra debug
+      if (data.aviso) console.warn('[Croqui IA] fallback motivo:', data.aviso);
+      showToast('⚠️ IA indisponível agora — usando otimização local (alto contraste).');
       irParaEtapa2();
     } else {
-      const msg = data.error || data.aviso || data.msg || 'IA indisponível';
-      showToast('⚠️ ' + msg + ' — indo para anotações.');
+      if (data.error || data.aviso) console.warn('[Croqui IA] erro:', data.error || data.aviso);
+      showToast('⚠️ IA indisponível — usando otimização local.');
       irParaEtapa2();
     }
   } catch (err) {
