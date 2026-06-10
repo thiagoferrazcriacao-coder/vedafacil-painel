@@ -719,18 +719,19 @@ export default function MedicoesPage() {
         />
       )}
       {/* Main List */}
-      <div className="flex-1 p-6 overflow-auto min-w-0">
-        <div className="flex items-center justify-between mb-5">
+      <div className="flex-1 p-3 sm:p-6 overflow-auto min-w-0">
+        <div className="flex items-center justify-between mb-4 sm:mb-5 gap-2">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Medições</h1>
-            <p className="text-gray-500 text-sm mt-0.5">{filtered.length} registros</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Medições</h1>
+            <p className="text-gray-500 text-xs sm:text-sm mt-0.5">{filtered.length} registros</p>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowManual(true)}
-              className="btn-primary text-sm"
+              className="btn-primary text-sm whitespace-nowrap"
             >
-              + Nova Manual
+              <span className="hidden sm:inline">+ Nova Manual</span>
+              <span className="sm:hidden">+ Nova</span>
             </button>
             {isAdmin && checked.size > 0 && (
               <button
@@ -817,17 +818,17 @@ export default function MedicoesPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    {isAdmin && <th className="px-4 py-3 w-10">
+                    {isAdmin && <th className="px-2 sm:px-4 py-3 w-10">
                       <input type="checkbox" checked={checked.size === filtered.length && filtered.length > 0} onChange={toggleAll} className="rounded" />
                     </th>}
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Nº</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Data/Hora</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Cliente</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Bairro / Cidade</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Medidor</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Locais</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
-                    <th className="px-4 py-3"></th>
+                    <th className="text-left px-2 sm:px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Nº</th>
+                    <th className="hidden md:table-cell text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Data/Hora</th>
+                    <th className="text-left px-2 sm:px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Cliente</th>
+                    <th className="hidden md:table-cell text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Bairro / Cidade</th>
+                    <th className="hidden lg:table-cell text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Medidor</th>
+                    <th className="hidden sm:table-cell text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Locais</th>
+                    <th className="text-left px-2 sm:px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
+                    <th className="px-2 sm:px-4 py-3"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -837,27 +838,27 @@ export default function MedicoesPage() {
                       className={`hover:bg-gray-50 cursor-pointer transition-colors ${selected?.id === m.id ? 'bg-blue-50' : ''}`}
                       onClick={() => setSelected(selected?.id === m.id ? null : m)}
                     >
-                      {isAdmin && <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                      {isAdmin && <td className="px-2 sm:px-4 py-3" onClick={e => e.stopPropagation()}>
                         <input type="checkbox" checked={checked.has(m.id)} onChange={e => toggleCheck(m.id, e)} className="rounded" />
                       </td>}
-                      <td className="px-4 py-3 font-mono text-xs text-gray-500">
+                      <td className="px-2 sm:px-4 py-3 font-mono text-xs text-gray-500">
                         #{String(m.numeroMedicao || '').padStart(3, '0')}
                       </td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                      <td className="hidden md:table-cell px-4 py-3 text-gray-600 whitespace-nowrap">
                         {new Date(m.createdAt || m.receivedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
                       </td>
-                      <td className="px-4 py-3 font-medium text-gray-800">
+                      <td className="px-2 sm:px-4 py-3 font-medium text-gray-800">
                         {m.cliente || m.nomeCliente || '—'}
                       </td>
-                      <td className="px-4 py-3 text-gray-600">
+                      <td className="hidden md:table-cell px-4 py-3 text-gray-600">
                         {m.bairro && <div className="text-xs font-medium text-gray-700">{m.bairro}</div>}
                         <div className="text-xs">{m.cidade || '—'}</div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{m.user || m.medidor || '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">
+                      <td className="hidden lg:table-cell px-4 py-3 text-gray-600">{m.user || m.medidor || '—'}</td>
+                      <td className="hidden sm:table-cell px-4 py-3 text-gray-600">
                         {Array.isArray(m.locais) ? m.locais.length : '—'}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2 sm:px-4 py-3">
                         <div className="flex flex-col gap-1">
                           <span className={`badge ${STATUS_COLORS[m.status] || 'bg-gray-100 text-gray-700'}`}>
                             {STATUS_LABELS[m.status] || m.status || 'Pendente'}
@@ -877,7 +878,7 @@ export default function MedicoesPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2 sm:px-4 py-3">
                         {m.status === 'alterada' ? (
                           <button
                             className="text-xs py-1 px-3 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 animate-pulse"
@@ -903,9 +904,9 @@ export default function MedicoesPage() {
         )}
       </div>
 
-      {/* Side Panel */}
+      {/* Side Panel — em mobile cobre a tela toda como drawer */}
       {selected && (
-        <div className="w-80 xl:w-96 border-l border-gray-200 bg-white overflow-auto flex-shrink-0">
+        <div className="fixed inset-0 z-40 bg-white overflow-auto md:static md:inset-auto md:z-auto md:w-80 xl:w-96 md:border-l md:border-gray-200 md:flex-shrink-0">
           <MedicaoPanel
             medicao={selected}
             onClose={() => setSelected(null)}

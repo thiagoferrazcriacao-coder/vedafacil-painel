@@ -215,7 +215,7 @@ export default function DashboardPage() {
     : []
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-3 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-6">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="bg-gradient-to-r from-[#2d1106] via-[#5a2209] to-[#8b3812] rounded-2xl p-6 text-white shadow-lg">

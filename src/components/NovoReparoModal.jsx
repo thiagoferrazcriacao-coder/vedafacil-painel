@@ -14,6 +14,9 @@ const STATUS_CONFIG = {
 // Usado tanto em ReparosPage quanto em OrdensServicoPage (quando ?tipo=reparo).
 export default function NovoReparoModal({ onClose, onCreated, preloadOS }) {
   const [step, setStep] = useState(1)
+  // Modo "manual" = reparo avulso (cliente novo, sem OS pai). Útil pra atendimentos
+  // de clientes antigos cujo histórico não está no sistema.
+  const [modoManual, setModoManual] = useState(false)
   const [busca, setBusca] = useState('')
   const [osList, setOsList] = useState([])
   const [loadingOS, setLoadingOS] = useState(false)
@@ -22,6 +25,9 @@ export default function NovoReparoModal({ onClose, onCreated, preloadOS }) {
   const [itensSelecionados, setItensSelecionados] = useState({})
   const [pontosExpandidos, setPontosExpandidos] = useState(new Set())
   const [equipes, setEquipes] = useState([])
+  const [clienteForm, setClienteForm] = useState({
+    cliente: '', endereco: '', bairro: '', cidade: '', celular: '',
+  })
   const [form, setForm] = useState({
     tipoReparo: '',
     equipeId: '',
@@ -67,30 +73,43 @@ export default function NovoReparoModal({ onClose, onCreated, preloadOS }) {
   const pontos = osSelecionada?.pontos || []
 
   const handleSubmit = async () => {
-    if (!osSelecionada) return
     if (!form.tipoReparo.trim()) { setError('Descreva o tipo de reparo'); return }
-    if (pontos.length > 0 && pontosIdx.length === 0) {
-      setError('Selecione ao menos um local para o reparo')
-      return
-    }
     setSaving(true); setError('')
     try {
-      const itensSelecionadosPayload = pontosIdx.length > 0
-        ? pontosIdx
-            .filter(i => itensSelecionados[i]?.length > 0)
-            .map(i => ({ pontoIdx: i, subPontosIdx: itensSelecionados[i] }))
-        : []
-      const payload = {
-        osOriginalId: osSelecionada.id || osSelecionada._id,
-        pontosIdx: pontosIdx.length > 0 ? pontosIdx : undefined,
-        itensSelecionados: itensSelecionadosPayload.length > 0 ? itensSelecionadosPayload : undefined,
-        tipoReparo: form.tipoReparo,
-        equipeId: form.equipeId || undefined,
-        dataInicio: form.dataInicio || undefined,
-        obs: form.obs || undefined,
-        fotosReparo: fotos.map(f => f.data),
+      let novaOS
+      if (modoManual) {
+        // Reparo avulso — cliente novo, sem OS pai
+        if (!clienteForm.cliente.trim()) { setError('Informe o nome do cliente'); setSaving(false); return }
+        novaOS = await api.createReparoManual({
+          ...clienteForm,
+          tipoReparo: form.tipoReparo,
+          equipeId: form.equipeId || undefined,
+          dataInicio: form.dataInicio || undefined,
+          obs: form.obs || undefined,
+          fotosReparo: fotos.map(f => f.data),
+        })
+      } else {
+        if (!osSelecionada) { setError('Selecione uma OS de origem'); setSaving(false); return }
+        if (pontos.length > 0 && pontosIdx.length === 0) {
+          setError('Selecione ao menos um local para o reparo')
+          setSaving(false); return
+        }
+        const itensSelecionadosPayload = pontosIdx.length > 0
+          ? pontosIdx
+              .filter(i => itensSelecionados[i]?.length > 0)
+              .map(i => ({ pontoIdx: i, subPontosIdx: itensSelecionados[i] }))
+          : []
+        novaOS = await api.createReparoFromOS({
+          osOriginalId: osSelecionada.id || osSelecionada._id,
+          pontosIdx: pontosIdx.length > 0 ? pontosIdx : undefined,
+          itensSelecionados: itensSelecionadosPayload.length > 0 ? itensSelecionadosPayload : undefined,
+          tipoReparo: form.tipoReparo,
+          equipeId: form.equipeId || undefined,
+          dataInicio: form.dataInicio || undefined,
+          obs: form.obs || undefined,
+          fotosReparo: fotos.map(f => f.data),
+        })
       }
-      const novaOS = await api.createReparoFromOS(payload)
       if (onCreated) onCreated(novaOS)
       onClose()
     } catch (err) {
@@ -111,9 +130,69 @@ export default function NovoReparoModal({ onClose, onCreated, preloadOS }) {
         <div className="overflow-auto flex-1 p-5 space-y-4">
           {error && <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 text-sm">{error}</div>}
 
-          {/* Step 1: Selecionar OS + Locais + Sub-itens */}
+          {/* Step 1: Selecionar OS + Locais + Sub-itens (ou modo manual) */}
           {step === 1 && (
             <>
+              {/* Toggle: reparo de OS existente vs reparo avulso */}
+              <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
+                <button type="button"
+                  onClick={() => setModoManual(false)}
+                  className={`flex-1 py-2 px-3 rounded-md text-xs font-semibold transition-colors ${!modoManual ? 'bg-white text-primary shadow-sm' : 'text-gray-600'}`}>
+                  📋 De OS existente
+                </button>
+                <button type="button"
+                  onClick={() => setModoManual(true)}
+                  className={`flex-1 py-2 px-3 rounded-md text-xs font-semibold transition-colors ${modoManual ? 'bg-white text-primary shadow-sm' : 'text-gray-600'}`}>
+                  🆕 Cliente avulso
+                </button>
+              </div>
+
+              {modoManual ? (
+                <>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                    Use quando o cliente <strong>não tem OS no sistema</strong> (serviço antigo, terceirizado etc).
+                    O reparo será criado avulso, sem vínculo com OS pai.
+                  </div>
+                  <div>
+                    <label className="label">Cliente / Condomínio *</label>
+                    <input className="input" value={clienteForm.cliente}
+                      onChange={e => setClienteForm(f => ({ ...f, cliente: e.target.value }))}
+                      placeholder="Nome do cliente ou condomínio" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="label">Endereço</label>
+                      <input className="input" value={clienteForm.endereco}
+                        onChange={e => setClienteForm(f => ({ ...f, endereco: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="label">Bairro</label>
+                      <input className="input" value={clienteForm.bairro}
+                        onChange={e => setClienteForm(f => ({ ...f, bairro: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="label">Cidade</label>
+                      <input className="input" value={clienteForm.cidade}
+                        onChange={e => setClienteForm(f => ({ ...f, cidade: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="label">Celular</label>
+                      <input className="input" value={clienteForm.celular}
+                        onChange={e => setClienteForm(f => ({ ...f, celular: e.target.value }))}
+                        placeholder="(21) 99999-9999" />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button onClick={onClose} className="btn-secondary">Cancelar</button>
+                    <button
+                      onClick={() => { if (!clienteForm.cliente.trim()) { setError('Informe o nome do cliente'); return } setError(''); setStep(2) }}
+                      className="btn-primary">
+                      Próximo →
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
               <div>
                 <label className="label">Buscar OS de origem</label>
                 <input className="input" value={busca} onChange={e => setBusca(e.target.value)}
@@ -255,20 +334,32 @@ export default function NovoReparoModal({ onClose, onCreated, preloadOS }) {
                   Próximo →
                 </button>
               </div>
+                </>
+              )}
             </>
           )}
 
           {/* Step 2: Detalhes do reparo */}
           {step === 2 && (
             <>
-              <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800">
-                <div className="font-medium">OS de origem:</div>
-                <div>OS #{String(osSelecionada.numero || '').padStart(3, '0')} — {osSelecionada.cliente}</div>
-                {pontosIdx.length > 0
-                  ? <div className="text-xs mt-1">Locais: {pontosIdx.map(i => pontos[i]?.nome || `Local ${i + 1}`).join(', ')}</div>
-                  : <div className="text-xs mt-1 text-blue-600">Todos os locais incluídos</div>
-                }
-              </div>
+              {modoManual ? (
+                <div className="bg-orange-50 rounded-lg p-3 text-sm text-orange-800">
+                  <div className="font-medium">🆕 Reparo avulso (sem OS pai):</div>
+                  <div>{clienteForm.cliente}</div>
+                  {(clienteForm.endereco || clienteForm.cidade) && (
+                    <div className="text-xs mt-1">{[clienteForm.endereco, clienteForm.bairro, clienteForm.cidade].filter(Boolean).join(' · ')}</div>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800">
+                  <div className="font-medium">OS de origem:</div>
+                  <div>OS #{String(osSelecionada.numero || '').padStart(3, '0')} — {osSelecionada.cliente}</div>
+                  {pontosIdx.length > 0
+                    ? <div className="text-xs mt-1">Locais: {pontosIdx.map(i => pontos[i]?.nome || `Local ${i + 1}`).join(', ')}</div>
+                    : <div className="text-xs mt-1 text-blue-600">Todos os locais incluídos</div>
+                  }
+                </div>
+              )}
 
               <div>
                 <label className="label">Tipo de reparo / problema *</label>

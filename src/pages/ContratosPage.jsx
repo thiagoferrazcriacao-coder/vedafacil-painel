@@ -398,6 +398,11 @@ export default function ContratosPage() {
                   </span>
                   <span className="font-semibold text-gray-800 flex-1 min-w-0 truncate">
                     {c.cliente || '—'}
+                    {c.criadoPor && (
+                      <span className="ml-2 text-[10px] font-normal text-gray-400 whitespace-nowrap" title={`Criado por ${c.criadoPor}`}>
+                        👤 {c.criadoPor.split('@')[0]}
+                      </span>
+                    )}
                   </span>
                   <span className="text-sm text-gray-500 w-32 flex-shrink-0 truncate hidden md:block">
                     {c.cidade || '—'}

@@ -192,6 +192,8 @@ const medicaoSchema = new mongoose.Schema({
   fotos: [mongoose.Schema.Types.Mixed],
   dadosAlterados: { type: mongoose.Schema.Types.Mixed, default: null }, // payload do reenvio aguardando revisão
   origem: String, // 'integracao' para registros importados via integração
+  criadoPor: String,      // nome/email de quem criou — preenchido no POST
+  criadoPorRole: String,  // 'admin' | 'operador' | 'medidor' | 'integracao'
 }, { _id: false });
 
 const orcamentoSchema = new mongoose.Schema({
@@ -247,6 +249,8 @@ const orcamentoSchema = new mongoose.Schema({
   obsGeral: { type: String, default: 'Obs: O contrato deve ser assinado até 2 dias após recebimento. Após este período não garantimos a data estabelecida préviamente para execução do serviço, podendo ser modificada sem aviso prévio.' },
   departamentoComercial: { type: String, default: 'Daniel Guimarães' },
   enviadoParaCliente: { type: Boolean, default: false },
+  criadoPor: String,
+  criadoPorRole: String,
 }, { _id: false });
 
 const contratoSchema = new mongoose.Schema({
@@ -295,6 +299,8 @@ const contratoSchema = new mongoose.Schema({
   textoPersonalizado: String, // HTML editado pelo operador (substitui cláusulas geradas automaticamente)
   textoPersonalizadoAt: Number, // timestamp da última edição
   origem: String, // 'integracao' para registros importados via integração
+  criadoPor: String,
+  criadoPorRole: String,
 }, { _id: false });
 
 const userSchema = new mongoose.Schema({
@@ -411,6 +417,8 @@ const osSchema = new mongoose.Schema({
   contratoManualPdfBase64: String,
   createdAt: { type: Number, default: Date.now },
   updatedAt: { type: Number, default: Date.now },
+  criadoPor: String,      // nome/email de quem criou a OS
+  criadoPorRole: String,  // 'admin' | 'operador' | 'medidor' | 'contrato' (auto)
 }, { _id: false });
 
 // ── Índices (criados em background; não bloqueiam queries) ────────────────────
@@ -512,10 +520,15 @@ const estoqueEquipeSemanaSchema = new mongoose.Schema({
   equipeNome: { type: String, default: '' },
   semana:     { type: String, required: true }, // "2026-W20"
   recebido:   { type: Number, default: 0 },
+  // injetores recebidos do encarregado (Edson) — fecha o ciclo de declaração
+  // igual ao `recebido` (litros). Equipe declara no aplicador.
+  injetoresRecebidos: { type: Number, default: 0 },
   // histórico de lançamentos individuais: quem lançou, quando e quanto
   lancamentos: [{
     membro:   String,
     litros:   Number,
+    injetores: Number,   // quantidade de injetores (se for esse o tipo do lançamento)
+    tipo:     { type: String, default: 'produto' },  // 'produto' | 'injetores'
     ts:       { type: Date, default: Date.now },
   }],
   criadoEm:   { type: Date, default: Date.now },
@@ -738,6 +751,15 @@ function auth(req, res, next) {
   } catch {
     res.status(401).json({ error: 'Invalid token' });
   }
+}
+
+// Extrai info do criador a partir do JWT — usado em POSTs pra rastrear quem criou
+// cada medição/orçamento/contrato/OS. nome cai em email (admin/operador) ou username.
+function creatorInfo(req) {
+  return {
+    criadoPor: req.user?.email || req.user?.username || req.user?.nome || '—',
+    criadoPorRole: req.user?.role || 'operador',
+  };
 }
 
 // JWT auth middleware (equipe — aplicador). Garante que o token é de equipe,
@@ -1663,7 +1685,15 @@ app.post('/api/medicao', bigJson, async (req, res) => {
       }
       // Incrementa para a próxima
       await Config.findByIdAndUpdate('main', { 'precos.numMedicao': numero + 1 });
-      const medicao = await Medicao.create({ ...data, _id: data.id || uuidv4(), numeroMedicao: numero, status: 'recebida' });
+      // Medições do PWA têm `data.user` = email do medidor (preenchido pelo cliente)
+      const medicao = await Medicao.create({
+        ...data,
+        _id: data.id || uuidv4(),
+        numeroMedicao: numero,
+        status: 'recebida',
+        criadoPor: data.user || data.medidor || '—',
+        criadoPorRole: 'medidor',
+      });
 
       // Se essa medição veio de uma visita Vedafacil, atualiza a visita pra registrar a conclusão
       if (data.visitaId) {
@@ -1735,6 +1765,7 @@ app.post('/api/medicoes/manual', auth, bigJson, async (req, res) => {
       status: 'recebida',
       user: req.user?.email || req.user?.username || 'manual',
       createdAt,
+      ...creatorInfo(req),
     });
     return res.json({ success: true, id: medicao._id, numeroMedicao: numero, ...medicao.toObject() });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -2137,6 +2168,7 @@ app.post('/api/orcamentos', auth, async (req, res) => {
       diasTrabalho: obra.diasTrabalho,
       consumoProduto: obra.consumoProduto,
       qtdInjetores: obra.qtdInjetores,
+      ...creatorInfo(req),
     };
 
     if (isConnected) {
@@ -2195,6 +2227,7 @@ app.post('/api/orcamentos/:id/duplicar', auth, async (req, res) => {
       medicaoId: orig.medicaoId || null,
       zapsignDocId: undefined,
       zapsignSignUrl: undefined,
+      ...creatorInfo(req),
     };
     delete copia.zapsignDocId;
     delete copia.zapsignSignUrl;
@@ -4471,6 +4504,7 @@ app.post('/api/contratos', auth, async (req, res) => {
       zapsignDocId: null, zapsignSignUrl: null, assinadoEm: null,
       statusHistorico: [{ status: 'rascunho', data: Date.now() }],
       ...req.body,
+      ...creatorInfo(req),
     };
 
     if (isConnected) { await Contrato.create(novoContrato); }
@@ -5710,7 +5744,7 @@ app.post('/api/ordens-servico', auth, async (req, res) => {
         if (ct?.numero) numero = ct.numero;
       } catch {}
     }
-    const data = { ...req.body, _id: uuidv4(), numero, createdAt: Date.now(), updatedAt: Date.now() };
+    const data = { ...req.body, _id: uuidv4(), numero, createdAt: Date.now(), updatedAt: Date.now(), ...creatorInfo(req) };
 
     // Try to create Google Calendar event
     if (data.dataInicio && data.equipeId) {
@@ -7443,6 +7477,7 @@ app.post('/api/reparos/from-os', auth, bigJson, async (req, res) => {
       totalConsumoReal: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      ...creatorInfo(req),
     };
 
     if (isConnected) {
@@ -7453,6 +7488,67 @@ app.post('/api/reparos/from-os', auth, bigJson, async (req, res) => {
       memStore.ordens.push(novaOS);
       return res.json(novaOS);
     }
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/reparos/manual — cria reparo avulso (cliente novo, sem OS pai)
+// Usado quando o cliente chama por uma assistência mas não temos histórico no sistema
+// (ex: serviço antigo, terceirizado, ou cliente novo trazido pelo aplicador).
+app.post('/api/reparos/manual', auth, bigJson, async (req, res) => {
+  try {
+    await connectDB();
+    const {
+      cliente, endereco, bairro, cidade, celular,
+      tipoReparo, equipeId, dataInicio, obs, fotosReparo,
+      consumoEstimado,
+    } = req.body;
+    if (!cliente?.trim()) return res.status(400).json({ error: 'cliente obrigatório' });
+    if (!tipoReparo?.trim()) return res.status(400).json({ error: 'tipoReparo obrigatório' });
+
+    let equipeNome = '';
+    if (equipeId) {
+      try {
+        const eq = isConnected ? await Equipe.findOne({ _id: equipeId }).lean() : memStore.equipes.find(e => (e._id || e.id) === equipeId);
+        if (eq) equipeNome = eq.nome;
+      } catch {}
+    }
+
+    // Próximo número de OS (avulso — não herda de OS mãe)
+    const numero = isConnected ? (await OS.countDocuments()) + 1 : memStore.ordens.length + 1;
+
+    const novaOS = {
+      _id: uuidv4(),
+      numero,
+      tipo: 'reparo',
+      origem: 'manual',
+      tipoReparo: tipoReparo.trim(),
+      cliente: cliente.trim(),
+      endereco: endereco || '',
+      bairro: bairro || '',
+      cidade: cidade || '',
+      celular: celular || '',
+      equipeId: equipeId || '',
+      equipeNome,
+      dataInicio: dataInicio || '',
+      status: 'agendada',
+      pontos: [],
+      obs: obs || '',
+      fotosReparo: Array.isArray(fotosReparo) ? fotosReparo.map(f => ({ data: f })) : [],
+      progresso: 0,
+      consumoProduto: parseFloat(consumoEstimado) || 0,
+      totalConsumoReal: 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      ...creatorInfo(req),
+    };
+
+    if (isConnected) {
+      await OS.create(novaOS);
+      const saved = await OS.findOne({ _id: novaOS._id }).lean();
+      return res.json(saved);
+    }
+    memStore.ordens.push(novaOS);
+    res.json(novaOS);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -8223,6 +8319,37 @@ app.get('/api/aplicador/estoque-summary', authEquipe, async (req, res) => {
       semana: { chave: semanaStr, recebido: r(recebidoSemana), gasto: r(gastoSemana), saldo: r(recebidoSemana - gastoSemana) },
       mes:    { chave: anoMes,    recebido: r(recebidoMes),    gasto: r(gastoMes),    saldo: r(recebidoMes - gastoMes) },
     });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Equipe declara injetores recebidos do encarregado (Edson) ─────────────────
+// Espelha o estoque-recebido (litros) mas pra injetores. Alimenta a comparação
+// "Edson forneceu X / Equipe declarou Y" na aba Injetores do PWA Medidor.
+app.post('/api/aplicador/injetores-recebidos', authEquipe, async (req, res) => {
+  try {
+    await connectDB();
+    const { equipeId, quantidade, semana, membro } = req.body;
+    if (!equipeId || !quantidade || isNaN(parseInt(quantidade, 10))) {
+      return res.status(400).json({ error: 'equipeId e quantidade obrigatórios' });
+    }
+    const qtd = parseInt(quantidade, 10);
+    const semanaStr = semana || getISOWeekStr(new Date());
+    const equipe = await Equipe.findById(equipeId).lean();
+    const equipeNome = equipe ? equipe.nome : '';
+    const current = await EstoqueEquipeSemana.findOne({ equipeId, semana: semanaStr }).lean();
+    const novoTotal = (current?.injetoresRecebidos || 0) + qtd;
+    const novoLancamento = { membro: membro || 'Equipe', injetores: qtd, tipo: 'injetores', ts: new Date() };
+    await EstoqueEquipeSemana.findOneAndUpdate(
+      { equipeId, semana: semanaStr },
+      {
+        equipeId, equipeNome, semana: semanaStr,
+        injetoresRecebidos: novoTotal,
+        updatedAt: new Date(),
+        $push: { lancamentos: novoLancamento },
+      },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, injetoresRecebidos: novoTotal, semana: semanaStr });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -9194,6 +9321,7 @@ app.get('/api/encarregado/dashboard', async (req, res) => {
       const forneceuInjetores = Math.round(fornInjetores.reduce((s, f) => s + (f.quantidade || 0), 0));
       const est = estoques.find(e => e.equipeId === eq._id) || {};
       const equipeDeclarouRecebido = est.recebido || 0;
+      const equipeDeclarouInjetores = est.injetoresRecebidos || 0;
 
       // Saldo anterior de produto (real)
       const semanasAnteriores = todosEstoques.filter(e => e.equipeId === eq._id && e.semana < semana);
@@ -9209,7 +9337,7 @@ app.get('/api/encarregado/dashboard', async (req, res) => {
       const previsto = Math.round(_preverConsumoSemana(todasOS, eq._id, start, end) * 10) / 10;
 
       const discrepanciaProduto = Math.round((forneceuProduto - equipeDeclarouRecebido) * 10) / 10;
-      const discrepanciaInjetores = forneceuInjetores - 0; // sem fonte de "equipe declarou injetores" hoje
+      const discrepanciaInjetores = forneceuInjetores - equipeDeclarouInjetores;
 
       return {
         equipeId: eq._id,
@@ -9225,6 +9353,8 @@ app.get('/api/encarregado/dashboard', async (req, res) => {
         },
         injetores: {
           forneceu: forneceuInjetores,
+          equipeDeclarou: equipeDeclarouInjetores,
+          discrepancia: discrepanciaInjetores,
         },
         lancamentosProduto: fornProduto.map(f => ({ _id: f._id, quantidade: f.quantidade, ts: f.ts })).sort((a,b) => b.ts - a.ts),
         lancamentosInjetores: fornInjetores.map(f => ({ _id: f._id, quantidade: f.quantidade, ts: f.ts })).sort((a,b) => b.ts - a.ts),
@@ -9296,7 +9426,7 @@ app.get('/api/encarregado/agenda-equipes', async (req, res) => {
         { dataTermino: { $gte: start, $lte: end } },
         { $and: [{ dataInicio: { $lte: start } }, { dataTermino: { $gte: end } }] },
       ],
-    }, 'equipeId equipeNome cliente endereco bairro cidade dataInicio dataTermino status numero tipo consumoProduto diasAtivos').lean();
+    }, 'equipeId equipeNome cliente endereco bairro cidade dataInicio dataTermino status numero tipo consumoProduto qtdInjetores diasAtivos').lean();
 
     const result = equipes.map(eq => ({
       equipeId: eq._id,

@@ -111,6 +111,7 @@ export const api = {
   getReparos: () => request('GET', '/ordens-servico?tipo=reparo'),
   createReparo: (data) => request('POST', '/ordens-servico', data),
   createReparoFromOS: (data) => request('POST', '/reparos/from-os', data),
+  createReparoManual: (data) => request('POST', '/reparos/manual', data),
 
   // Equipes — desempenho e ranking
   getEquipeDesempenho: (equipeId, inicio, fim) => request('GET', `/equipes/desempenho?equipeId=${equipeId}&inicio=${inicio}&fim=${fim}`),

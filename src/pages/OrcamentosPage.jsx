@@ -234,6 +234,11 @@ export default function OrcamentosPage() {
                   </span>
                   <span className="font-semibold text-gray-800 flex-1 min-w-0 truncate">
                     {o.cliente || '—'}
+                    {o.criadoPor && (
+                      <span className="ml-2 text-[10px] font-normal text-gray-400 whitespace-nowrap" title={`Criado por ${o.criadoPor}`}>
+                        👤 {o.criadoPor.split('@')[0]}
+                      </span>
+                    )}
                   </span>
                   <span className="text-sm text-gray-500 w-28 flex-shrink-0 truncate hidden lg:block">
                     {o.cidade || '—'}

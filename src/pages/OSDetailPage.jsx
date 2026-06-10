@@ -312,7 +312,23 @@ export default function OSDetailPage() {
     setSaving(true)
     setError('')
     try {
-      const updated = await api.updateOrdemServico(id, editData)
+      // Só envia campos editáveis no form — sem fotos/pontos (estoura 1MB body limit).
+      const payload = {
+        numero: editData.numero,
+        cliente: editData.cliente,
+        endereco: editData.endereco,
+        cidade: editData.cidade,
+        celular: editData.celular,
+        equipeId: editData.equipeId,
+        equipeNome: editData.equipeNome,
+        dataInicio: editData.dataInicio,
+        dataTermino: editData.dataTermino,
+        diasAtivos: editData.diasAtivos,
+        tecnicoResponsavel: editData.tecnicoResponsavel,
+        status: editData.status,
+        obs: editData.obs,
+      }
+      const updated = await api.updateOrdemServico(id, payload)
       setOs(updated)
       setEditData(updated)
       setEditing(false)

@@ -795,7 +795,14 @@ export default function OrdensServicoPage() {
                         </span>
                       )}
                     </div>
-                    <p className="font-medium text-gray-800 truncate">{os.cliente}</p>
+                    <p className="font-medium text-gray-800 truncate">
+                      {os.cliente}
+                      {os.criadoPor && (
+                        <span className="ml-2 text-[10px] font-normal text-gray-400 whitespace-nowrap" title={`Criado por ${os.criadoPor}`}>
+                          👤 {os.criadoPor.split('@')[0]}
+                        </span>
+                      )}
+                    </p>
                     {os.endereco && <p className="text-sm text-gray-500 truncate">{os.endereco}{os.cidade ? ` — ${os.cidade}` : ''}</p>}
                     <div className="flex gap-3 mt-2 flex-wrap">
                       {os.dataInicio && (

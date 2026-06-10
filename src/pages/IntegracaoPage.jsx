@@ -341,10 +341,127 @@ export default function IntegracaoPage() {
     return data
   }
 
+  // Limite do Vercel: ~4.5 MB pro request body. Base64 infla ~33%, então PDF bruto
+  // precisa ficar abaixo de ~3 MB. Pra .docx isso não vale: agora a gente processa
+  // no cliente (mammoth.browser + compressão) e manda só JSON pequeno.
+  const MAX_UPLOAD_BYTES = 3 * 1024 * 1024
+  function validarTamanho(file) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      const mb = (file.size / 1024 / 1024).toFixed(1)
+      throw new Error(`Arquivo muito grande (${mb} MB). Limite: 3 MB. Salve o PDF em qualidade reduzida e tente novamente.`)
+    }
+  }
+
+  // Carrega mammoth.browser.min.js sob demanda (635 KB — não vale incluir no bundle principal)
+  let _mammothPromise = null
+  function carregarMammoth() {
+    if (window.mammoth) return Promise.resolve(window.mammoth)
+    if (_mammothPromise) return _mammothPromise
+    _mammothPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script')
+      s.src = '/mammoth.browser.min.js'
+      s.onload = () => resolve(window.mammoth)
+      s.onerror = () => reject(new Error('Falha ao carregar mammoth.browser.min.js'))
+      document.head.appendChild(s)
+    })
+    return _mammothPromise
+  }
+
+  // Comprime imagem base64 via canvas: redimensiona pra MAX_DIM e exporta JPEG.
+  // Fotos de relatório vêm com 3000-5000 px e ~3 MB — depois disso ficam ~150 KB.
+  function comprimirImagem(srcBase64, { maxDim = 1280, quality = 0.72 } = {}) {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        let { width: w, height: h } = img
+        if (w > h && w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim }
+        else if (h >= w && h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim }
+        const canvas = document.createElement('canvas')
+        canvas.width = w; canvas.height = h
+        const ctx = canvas.getContext('2d')
+        ctx.fillStyle = '#FFFFFF'
+        ctx.fillRect(0, 0, w, h)
+        ctx.drawImage(img, 0, 0, w, h)
+        try {
+          resolve(canvas.toDataURL('image/jpeg', quality))
+        } catch {
+          resolve(srcBase64) // fallback: mantém original se o canvas falhar (CORS/etc)
+        }
+      }
+      img.onerror = () => resolve(srcBase64)
+      img.src = srcBase64
+    })
+  }
+
+  // Processa .docx no cliente: extrai HTML com fotos inline via mammoth,
+  // aplica o mesmo parser que estava no servidor (texto antes de img = nome do local),
+  // comprime cada foto e retorna { locais, totalFotos }.
+  async function processarDocxNoCliente(file) {
+    const mammoth = await carregarMammoth()
+    const arrayBuffer = await file.arrayBuffer()
+    const result = await mammoth.convertToHtml({ arrayBuffer })
+    const html = result.value
+
+    // Tokeniza HTML em blocos texto/img (mesmo regex do server.js:8356)
+    const tokens = []
+    const blockRe = /<(?:h[1-6]|p|img)[^>]*>(?:[\s\S]*?)<\/(?:h[1-6]|p)>|<img[^>]+>/gi
+    const decodHtml = s => s
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ').replace(/&#\d+;/g, '').trim()
+    let m
+    while ((m = blockRe.exec(html)) !== null) {
+      const tag = m[0]
+      if (tag.startsWith('<img')) {
+        const srcM = /src="([^"]+)"/.exec(tag)
+        if (srcM) tokens.push({ type: 'img', src: srcM[1] })
+      } else {
+        const text = decodHtml(tag)
+        if (text.length > 1) tokens.push({ type: 'text', text })
+      }
+    }
+
+    // Agrupa: texto seguido de imagens = local
+    const locaisExtraidos = []
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i]
+      if (tok.type !== 'text') continue
+      const nextImgs = []
+      let j = i + 1
+      while (j < tokens.length && tokens[j].type === 'img') { nextImgs.push(tokens[j].src); j++ }
+      if (nextImgs.length > 0) {
+        const nomeNorm = tok.text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+        const existing = locaisExtraidos.find(l => {
+          const en = l.nome.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+          return en === nomeNorm || en.includes(nomeNorm) || nomeNorm.includes(en)
+        })
+        if (existing) existing.fotos.push(...nextImgs)
+        else locaisExtraidos.push({ nome: tok.text, fotos: nextImgs })
+        i = j - 1
+      }
+    }
+
+    // Comprime todas as fotos em paralelo (4 por vez pra não travar o browser)
+    let totalFotos = 0
+    for (const loc of locaisExtraidos) {
+      const comprimidas = []
+      for (let i = 0; i < loc.fotos.length; i += 4) {
+        const batch = loc.fotos.slice(i, i + 4)
+        const r = await Promise.all(batch.map(src => comprimirImagem(src)))
+        comprimidas.push(...r)
+      }
+      loc.fotos = comprimidas
+      totalFotos += comprimidas.length
+    }
+
+    return { locais: locaisExtraidos, totalFotos }
+  }
+
   // ── Step 1: extrair orçamento ─────────────────────────────────────────────
   async function extrairOrcamento(file) {
     setOrcFile(file); setOrcError(''); setOrcLoading(true)
     try {
+      validarTamanho(file)
       const base64 = await fileToBase64(file)
       const data = await apiFetch(`${API}/integracao/extrair-orcamento`, { pdf: base64 })
       if (!data.dados || typeof data.dados !== 'object') throw new Error('Resposta inválida do servidor')
@@ -381,8 +498,10 @@ export default function IntegracaoPage() {
   async function extrairRelatorio(file) {
     setRelFile(file); setRelError(''); setRelLoading(true); setRelInfo(null)
     try {
-      const base64 = await fileToBase64(file)
-      const data = await apiFetch(`${API}/integracao/extrair-relatorio`, { docx: base64 })
+      // Processa .docx 100% no cliente: mammoth extrai HTML+fotos, a gente comprime
+      // cada foto (resize 1280px + JPEG 72%) e nem precisa mandar o arquivo pro servidor.
+      // Sem limite de 4.5 MB porque o JSON final fica em ~1-2 MB.
+      const data = await processarDocxNoCliente(file)
       if (!data.locais || data.locais.length === 0) {
         throw new Error('Nenhum local com fotos encontrado no arquivo')
       }
@@ -437,8 +556,10 @@ export default function IntegracaoPage() {
 
   // ── Step 2: extrair contrato ──────────────────────────────────────────────
   async function extrairContrato(file) {
+    // validação de tamanho aplicada no try abaixo
     setCttFile(file); setCttError(''); setCttLoading(true)
     try {
+      validarTamanho(file)
       const base64 = await fileToBase64(file)
       const data = await apiFetch(`${API}/integracao/extrair-contrato`, { pdf: base64 })
       setCttDados(data.dados)

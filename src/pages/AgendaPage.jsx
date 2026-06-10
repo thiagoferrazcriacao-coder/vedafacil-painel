@@ -229,16 +229,16 @@ export default function AgendaPage() {
   )
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto">
+    <div className="p-3 sm:p-4 md:p-6 max-w-7xl mx-auto">
 
       {/* ── Abas: Obras / Visitas ────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 mb-6 border-b border-gray-200">
+      <div className="flex items-center gap-1 mb-4 sm:mb-6 border-b border-gray-200 overflow-x-auto">
         {[
-          { key: 'obras',   label: '🏗️ Agenda de Obras',   desc: 'Obras em andamento e agendadas por equipe' },
-          { key: 'visitas', label: '📅 Agenda de Visitas',  desc: 'Visitas de medição agendadas pelos operadores' },
+          { key: 'obras',   label: '🏗️ Obras',    desc: 'Obras em andamento e agendadas por equipe' },
+          { key: 'visitas', label: '📅 Visitas',  desc: 'Visitas de medição agendadas pelos operadores' },
         ].map(({ key, label }) => (
           <button key={key} onClick={() => setAbaAtiva(key)}
-            className={`px-5 py-2.5 text-sm font-semibold rounded-t-lg transition-colors border-b-2 -mb-px ${
+            className={`px-3 sm:px-5 py-2.5 text-sm font-semibold rounded-t-lg transition-colors border-b-2 -mb-px whitespace-nowrap ${
               abaAtiva === key
                 ? 'border-primary text-primary bg-white'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
@@ -274,15 +274,15 @@ export default function AgendaPage() {
 
       {/* ── Filtros ─────────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-2 mb-4 items-center">
-        <select className="input text-sm py-1.5 w-40" value={filtroEquipe} onChange={e => setFiltroEquipe(e.target.value)}>
+        <select className="input text-sm py-1.5 w-full sm:w-40" value={filtroEquipe} onChange={e => setFiltroEquipe(e.target.value)}>
           <option value="">Todas as equipes</option>
           {equipes.map(eq => <option key={eq.id||eq._id} value={eq.id||eq._id}>{eq.nome}</option>)}
         </select>
-        <select className="input text-sm py-1.5 w-36" value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}>
+        <select className="input text-sm py-1.5 w-[calc(50%-0.25rem)] sm:w-36" value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}>
           <option value="todos">Todos os status</option>
           {Object.entries(STATUS_LABEL).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <select className="input text-sm py-1.5 w-28" value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
+        <select className="input text-sm py-1.5 w-[calc(50%-0.25rem)] sm:w-28" value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
           <option value="todos">Todos tipos</option>
           <option value="normal">Obra</option>
           <option value="reparo">Reparo</option>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth, setupPush } from '../App.jsx'
+import DevocionalModal from './DevocionalModal.jsx'
 
 // ── Badges Context ────────────────────────────────────────────────────────────
 const BadgesContext = createContext({ medicoesSemOrcamento: 0, orcamentosNaoEnviados: 0, orcamentosAprovados: 0, osPendentesEquipe: 0, refreshBadges: () => {} })
@@ -340,6 +341,7 @@ export default function Layout({ children }) {
 
   return (
     <BadgesContext.Provider value={{ ...badges, refreshBadges: fetchBadges }}>
+      <DevocionalModal />
       <div className="flex h-screen bg-gray-50">
         {/* Desktop Sidebar */}
         <aside className="hidden md:flex flex-col w-56 flex-shrink-0" style={{ background: 'linear-gradient(180deg, #2d1106 0%, #5a2209 55%, #8b3812 100%)' }}>
