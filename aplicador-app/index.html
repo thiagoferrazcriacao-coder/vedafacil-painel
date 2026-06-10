@@ -520,6 +520,16 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
         <div id="prod-add-error" class="alert alert-error" style="display:none;margin-bottom:10px"></div>
         <button class="btn btn-primary" style="font-size:16px" onclick="confirmarAdicionarProduto()">+ Adicionar produto</button>
       </div>
+
+      <!-- Declarar injetores recebidos do encarregado -->
+      <div class="card" style="margin-top:8px">
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:4px;color:#1a202c">💉 Recebeu injetores?</h3>
+        <p style="font-size:13px;color:#6b7280;margin-bottom:14px">Toda vez que o encarregado entregar injetores, lance aqui pra bater com o controle dele.</p>
+        <label class="label">Quantidade de injetores *</label>
+        <input id="inj-add-qtd" class="input" type="number" min="1" step="1" placeholder="Ex: 50" style="margin-bottom:10px;font-size:18px;text-align:center;font-weight:700">
+        <div id="inj-add-error" class="alert alert-error" style="display:none;margin-bottom:10px"></div>
+        <button class="btn btn-primary" style="font-size:16px;background:#7c3aed" onclick="confirmarAdicionarInjetores()">+ Lançar injetores</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2948,6 +2958,30 @@ async function abrirTelaProduto() {
     document.getElementById('produto-spinner').style.display = 'none';
     showToast('⚠️ Erro de conexão');
     irParaHome();
+  }
+}
+
+async function confirmarAdicionarInjetores() {
+  const qtd = parseInt(document.getElementById('inj-add-qtd').value, 10);
+  const errEl = document.getElementById('inj-add-error');
+  if (!qtd || qtd <= 0) { errEl.textContent = 'Informe uma quantidade válida'; errEl.style.display = ''; return; }
+  errEl.style.display = 'none';
+  showLoading('Registrando injetores...');
+  try {
+    const res = await apiFetch(`${API}/injetores-recebidos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ equipeId: S.equipeId, quantidade: qtd, membro: S.membro || 'Equipe' })
+    });
+    const data = await res.json();
+    hideLoading();
+    if (!res.ok) { errEl.textContent = data.error || 'Erro ao registrar'; errEl.style.display = ''; return; }
+    showToast(`💉 +${qtd} injetores! Semana: ${data.injetoresRecebidos}`);
+    document.getElementById('inj-add-qtd').value = '';
+  } catch (e) {
+    hideLoading();
+    errEl.textContent = 'Erro de conexão';
+    errEl.style.display = '';
   }
 }
 
