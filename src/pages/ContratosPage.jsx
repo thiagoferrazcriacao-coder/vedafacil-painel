@@ -226,7 +226,7 @@ export default function ContratosPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-3 sm:p-6 max-w-6xl mx-auto">
       {editorContratoId && (
         <ContratoEditorModal
           contratoId={editorContratoId}
@@ -237,11 +237,11 @@ export default function ContratosPage() {
           }}
         />
       )}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-5 gap-3">
         <div className="flex items-center gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Contratos</h1>
-            <p className="text-gray-500 text-sm mt-0.5">{filtered.length} registros</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Contratos</h1>
+            <p className="text-gray-500 text-xs sm:text-sm mt-0.5">{filtered.length} registros</p>
           </div>
           {isAdmin && checked.size > 0 && (
             <button onClick={handleDeleteSelected} disabled={deleting} className="btn-danger text-sm">

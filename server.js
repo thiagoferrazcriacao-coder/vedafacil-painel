@@ -318,6 +318,9 @@ const userSchema = new mongoose.Schema({
   // agendaPara = lista de e-mails de outros medidores pra quem ele pode agendar (além dele)
   podeAgendar: { type: Boolean, default: false },
   agendaPara:  { type: [String], default: [] },
+  // Gestão de equipes pelo PWA Medidor (encarregado tipo Edson):
+  // podeGerirEquipes = true → vê botão "GESTÃO DE EQUIPES" na home + acessa endpoints /api/encarregado/*
+  podeGerirEquipes: { type: Boolean, default: false },
 }, { _id: false });
 const User = mongoose.model('User', userSchema);
 
@@ -520,6 +523,23 @@ const estoqueEquipeSemanaSchema = new mongoose.Schema({
 });
 estoqueEquipeSemanaSchema.index({ equipeId: 1, semana: 1 }, { unique: true });
 const EstoqueEquipeSemana = mongoose.model('EstoqueEquipeSemana', estoqueEquipeSemanaSchema, 'estoque_equipe_semana');
+
+// Registro de fornecimentos do ENCARREGADO (ex: Edson) pra cada equipe.
+// Edson lança no PWA Medidor "dei 50L pra Equipe B" — comparado com o que
+// a equipe declara via aplicador (EstoqueEquipeSemana.recebido).
+const fornecimentoEncarregadoSchema = new mongoose.Schema({
+  _id:              { type: String, default: () => uuidv4() },
+  semana:           { type: String, required: true }, // "2026-W24"
+  equipeId:         { type: String, required: true },
+  equipeNome:       { type: String, default: '' },
+  tipo:             { type: String, enum: ['produto', 'injetores'], required: true },
+  quantidade:       { type: Number, required: true },
+  encarregadoEmail: { type: String, default: '' },
+  encarregadoNome:  { type: String, default: '' },
+  ts:               { type: Number, default: Date.now },
+});
+fornecimentoEncarregadoSchema.index({ semana: 1, equipeId: 1, tipo: 1 });
+const FornecimentoEncarregado = mongoose.model('FornecimentoEncarregado', fornecimentoEncarregadoSchema, 'fornecimentos_encarregado');
 
 // ── Garantias Standalone (geradas a partir de OS) ─────────────────────────────
 const garantiaDocSchema = new mongoose.Schema({
@@ -848,6 +868,130 @@ async function _collectMongoMetrics() {
     return { error: e.message };
   }
 }
+
+// ── Versículos para o devocional diário dos PWAs ──────────────────────────────
+// Lista cíclica: dia 1 do ano usa índice 0, dia 2 usa índice 1, etc.
+// Quando esgota a lista, recomeça do início. Atualizar versículos = editar array + redeploy.
+const VERSICULOS_DIARIOS = [
+  { texto: 'Posso todas as coisas naquele que me fortalece.', referencia: 'Filipenses 4:13' },
+  { texto: 'O Senhor é o meu pastor; nada me faltará.', referencia: 'Salmos 23:1' },
+  { texto: 'Tudo coopera para o bem daqueles que amam a Deus.', referencia: 'Romanos 8:28' },
+  { texto: 'Não temas, porque eu sou contigo; não te assombres, porque eu sou o teu Deus.', referencia: 'Isaías 41:10' },
+  { texto: 'Confia no Senhor de todo o teu coração e não te estribes no teu próprio entendimento.', referencia: 'Provérbios 3:5' },
+  { texto: 'Porque Deus amou o mundo de tal maneira que deu o seu Filho unigênito.', referencia: 'João 3:16' },
+  { texto: 'Lâmpada para os meus pés é a tua palavra, e luz para o meu caminho.', referencia: 'Salmos 119:105' },
+  { texto: 'Bem-aventurados os mansos, porque herdarão a terra.', referencia: 'Mateus 5:5' },
+  { texto: 'Buscai primeiro o Reino de Deus e a sua justiça, e todas as coisas vos serão acrescentadas.', referencia: 'Mateus 6:33' },
+  { texto: 'A alegria do Senhor é a vossa força.', referencia: 'Neemias 8:10' },
+  { texto: 'Tudo posso, mas nem tudo me convém; tudo me é lícito, mas nem tudo edifica.', referencia: '1 Coríntios 10:23' },
+  { texto: 'Em paz me deitarei e dormirei, porque só tu, Senhor, me fazes habitar em segurança.', referencia: 'Salmos 4:8' },
+  { texto: 'O choro pode durar uma noite, mas a alegria vem pela manhã.', referencia: 'Salmos 30:5' },
+  { texto: 'O Senhor é a minha luz e a minha salvação; a quem temerei?', referencia: 'Salmos 27:1' },
+  { texto: 'Entrega o teu caminho ao Senhor; confia nele, e ele tudo fará.', referencia: 'Salmos 37:5' },
+  { texto: 'A resposta branda desvia o furor, mas a palavra dura suscita a ira.', referencia: 'Provérbios 15:1' },
+  { texto: 'Vinde a mim, todos os que estais cansados e oprimidos, e eu vos aliviarei.', referencia: 'Mateus 11:28' },
+  { texto: 'Eu sou o caminho, e a verdade, e a vida; ninguém vem ao Pai senão por mim.', referencia: 'João 14:6' },
+  { texto: 'A paz vos deixo, a minha paz vos dou; não vo-la dou como o mundo a dá.', referencia: 'João 14:27' },
+  { texto: 'Se Deus é por nós, quem será contra nós?', referencia: 'Romanos 8:31' },
+  { texto: 'O amor é paciente, o amor é bondoso; não inveja, não se vangloria, não se orgulha.', referencia: '1 Coríntios 13:4' },
+  { texto: 'Examinai tudo. Retende o bem.', referencia: '1 Tessalonicenses 5:21' },
+  { texto: 'Não vos amoldeis ao padrão deste mundo, mas transformai-vos pela renovação da vossa mente.', referencia: 'Romanos 12:2' },
+  { texto: 'O Senhor te abençoe e te guarde; faça resplandecer o seu rosto sobre ti.', referencia: 'Números 6:24-25' },
+  { texto: 'Os céus declaram a glória de Deus, e o firmamento anuncia a obra das suas mãos.', referencia: 'Salmos 19:1' },
+  { texto: 'Honra a teu pai e a tua mãe, para que se prolonguem os teus dias.', referencia: 'Êxodo 20:12' },
+  { texto: 'Ama o Senhor, teu Deus, de todo o teu coração, de toda a tua alma e de todo o teu entendimento.', referencia: 'Mateus 22:37' },
+  { texto: 'Amarás o teu próximo como a ti mesmo.', referencia: 'Mateus 22:39' },
+  { texto: 'Sede fortes e corajosos. Não temais nem vos atemorizeis por causa deles.', referencia: 'Deuteronômio 31:6' },
+  { texto: 'O Senhor lutará por vós, e vós vos calareis.', referencia: 'Êxodo 14:14' },
+  { texto: 'A oração feita por um justo pode muito em seus efeitos.', referencia: 'Tiago 5:16' },
+  { texto: 'Aquietai-vos e sabei que eu sou Deus.', referencia: 'Salmos 46:10' },
+  { texto: 'O temor do Senhor é o princípio da sabedoria.', referencia: 'Provérbios 9:10' },
+  { texto: 'Bem-aventurado o homem que põe a sua confiança no Senhor.', referencia: 'Salmos 40:4' },
+  { texto: 'O Senhor é bom; é fortaleza no dia da angústia, e conhece os que confiam nele.', referencia: 'Naum 1:7' },
+  { texto: 'Pedi, e dar-se-vos-á; buscai e achareis; batei, e abrir-se-vos-á.', referencia: 'Mateus 7:7' },
+  { texto: 'Ainda que eu andasse pelo vale da sombra da morte, não temeria mal algum.', referencia: 'Salmos 23:4' },
+  { texto: 'Esforça-te, e tem bom ânimo; não pasmes, nem te espantes, porque o Senhor está contigo.', referencia: 'Josué 1:9' },
+  { texto: 'Tudo tem o seu tempo determinado, e há tempo para todo propósito debaixo do céu.', referencia: 'Eclesiastes 3:1' },
+  { texto: 'A graça do Senhor Jesus Cristo seja com todos vós.', referencia: 'Apocalipse 22:21' },
+  { texto: 'Não andeis ansiosos por coisa alguma; antes, em tudo, sejam conhecidas as vossas petições.', referencia: 'Filipenses 4:6' },
+  { texto: 'A paz de Deus, que excede todo o entendimento, guardará o vosso coração e a vossa mente.', referencia: 'Filipenses 4:7' },
+  { texto: 'Tudo o que é verdadeiro, tudo o que é respeitável, tudo o que é justo... nisso pensai.', referencia: 'Filipenses 4:8' },
+  { texto: 'Alegrai-vos sempre no Senhor; outra vez digo: alegrai-vos.', referencia: 'Filipenses 4:4' },
+  { texto: 'Os que esperam no Senhor renovarão as suas forças.', referencia: 'Isaías 40:31' },
+  { texto: 'O Senhor é a minha rocha, a minha fortaleza e o meu libertador.', referencia: 'Salmos 18:2' },
+  { texto: 'Provai e vede que o Senhor é bom; bem-aventurado o homem que nele se refugia.', referencia: 'Salmos 34:8' },
+  { texto: 'Aquele que habita no esconderijo do Altíssimo descansará à sombra do Onipotente.', referencia: 'Salmos 91:1' },
+  { texto: 'Crie em mim, ó Deus, um coração puro, e renova dentro de mim um espírito reto.', referencia: 'Salmos 51:10' },
+  { texto: 'O sacrifício aceitável a Deus é o espírito quebrantado.', referencia: 'Salmos 51:17' },
+  { texto: 'A boca do justo é manancial de vida.', referencia: 'Provérbios 10:11' },
+  { texto: 'O homem que tem amigos deve mostrar-se amigável; e há amigo mais chegado do que um irmão.', referencia: 'Provérbios 18:24' },
+  { texto: 'Ensina a criança no caminho em que deve andar, e, ainda quando for velho, não se desviará.', referencia: 'Provérbios 22:6' },
+  { texto: 'Levanto os meus olhos para os montes; de onde me virá o socorro?', referencia: 'Salmos 121:1' },
+  { texto: 'O meu socorro vem do Senhor, que fez os céus e a terra.', referencia: 'Salmos 121:2' },
+  { texto: 'Cantai ao Senhor um cântico novo; cantai ao Senhor, todos os habitantes da terra.', referencia: 'Salmos 96:1' },
+  { texto: 'Cada manhã renovam-se as misericórdias do Senhor; grande é a tua fidelidade.', referencia: 'Lamentações 3:23' },
+  { texto: 'Bem-aventurados os que choram, porque serão consolados.', referencia: 'Mateus 5:4' },
+  { texto: 'Bem-aventurados os pacificadores, porque serão chamados filhos de Deus.', referencia: 'Mateus 5:9' },
+  { texto: 'Sois a luz do mundo; não se pode esconder uma cidade edificada sobre um monte.', referencia: 'Mateus 5:14' },
+  { texto: 'Onde está o vosso tesouro, aí estará também o vosso coração.', referencia: 'Mateus 6:21' },
+  { texto: 'Tudo, pois, quanto vós quereis que os homens vos façam, fazei-lho também vós a eles.', referencia: 'Mateus 7:12' },
+  { texto: 'O que aproveita ao homem ganhar o mundo inteiro e perder a sua alma?', referencia: 'Marcos 8:36' },
+  { texto: 'Tudo é possível ao que crê.', referencia: 'Marcos 9:23' },
+  { texto: 'No princípio era o Verbo, e o Verbo estava com Deus, e o Verbo era Deus.', referencia: 'João 1:1' },
+  { texto: 'A luz resplandece nas trevas, e as trevas não a compreenderam.', referencia: 'João 1:5' },
+  { texto: 'Conhecereis a verdade, e a verdade vos libertará.', referencia: 'João 8:32' },
+  { texto: 'Eu vim para que tenham vida, e a tenham com abundância.', referencia: 'João 10:10' },
+  { texto: 'Nisto conhecerão todos que sois meus discípulos: se vos amardes uns aos outros.', referencia: 'João 13:35' },
+  { texto: 'Levantai os vossos olhos e vede os campos, porque já estão brancos para a ceifa.', referencia: 'João 4:35' },
+  { texto: 'Sede vós misericordiosos, como também vosso Pai é misericordioso.', referencia: 'Lucas 6:36' },
+  { texto: 'Toda Escritura é inspirada por Deus e útil para o ensino.', referencia: '2 Timóteo 3:16' },
+  { texto: 'Combati o bom combate, completei a carreira, guardei a fé.', referencia: '2 Timóteo 4:7' },
+  { texto: 'Pela graça sois salvos, mediante a fé; e isto não vem de vós; é dom de Deus.', referencia: 'Efésios 2:8' },
+  { texto: 'Sêde uns para com os outros benignos, misericordiosos, perdoando-vos uns aos outros.', referencia: 'Efésios 4:32' },
+  { texto: 'Sêde imitadores de Deus, como filhos amados.', referencia: 'Efésios 5:1' },
+  { texto: 'Sede fortes no Senhor e na força do seu poder.', referencia: 'Efésios 6:10' },
+  { texto: 'Tudo o que fizerdes, fazei-o de todo o coração, como ao Senhor e não aos homens.', referencia: 'Colossenses 3:23' },
+  { texto: 'Orai sem cessar. Em tudo dai graças.', referencia: '1 Tessalonicenses 5:17-18' },
+  { texto: 'Deus é amor; e quem permanece no amor permanece em Deus, e Deus, nele.', referencia: '1 João 4:16' },
+  { texto: 'Maior é aquele que está em vós do que o que está no mundo.', referencia: '1 João 4:4' },
+  { texto: 'Lançando sobre ele toda a vossa ansiedade, porque ele tem cuidado de vós.', referencia: '1 Pedro 5:7' },
+  { texto: 'Humilhai-vos sob a poderosa mão de Deus, para que ele vos exalte a seu tempo.', referencia: '1 Pedro 5:6' },
+  { texto: 'Toda boa dádiva e todo dom perfeito vêm do alto, descendo do Pai das luzes.', referencia: 'Tiago 1:17' },
+  { texto: 'Bem-aventurado o homem que suporta com perseverança a provação.', referencia: 'Tiago 1:12' },
+  { texto: 'Não tenhamos um amor de palavra nem de língua, mas em obras e em verdade.', referencia: '1 João 3:18' },
+  { texto: 'O Senhor é o meu Deus e a minha força.', referencia: 'Habacuque 3:19' },
+  { texto: 'Direi do Senhor: ele é o meu refúgio e a minha fortaleza, o meu Deus, em quem confio.', referencia: 'Salmos 91:2' },
+  { texto: 'Aquele que começou boa obra em vós há de completá-la até o Dia de Cristo Jesus.', referencia: 'Filipenses 1:6' },
+  { texto: 'Para mim, o viver é Cristo e o morrer é lucro.', referencia: 'Filipenses 1:21' },
+  { texto: 'O Senhor estende a sua mão sobre os justos.', referencia: 'Salmos 125:3' },
+  { texto: 'Glorifica ao Senhor com a tua substância e com as primícias de toda a tua renda.', referencia: 'Provérbios 3:9' },
+  { texto: 'Onde está o Espírito do Senhor, aí há liberdade.', referencia: '2 Coríntios 3:17' },
+  { texto: 'Andamos por fé, não pelo que vemos.', referencia: '2 Coríntios 5:7' },
+  { texto: 'A nossa luta não é contra a carne e o sangue, mas contra os principados e potestades.', referencia: 'Efésios 6:12' },
+  { texto: 'O coração alegre serve de bom remédio, mas o espírito abatido faz secar os ossos.', referencia: 'Provérbios 17:22' },
+  { texto: 'Misericordioso e compassivo é o Senhor; longânimo e grande em benignidade.', referencia: 'Salmos 145:8' },
+  { texto: 'Não retém o seu amor para sempre, porque ele tem prazer na misericórdia.', referencia: 'Miqueias 7:18' },
+  { texto: 'Ainda que a figueira não floresça, eu me alegrarei no Senhor.', referencia: 'Habacuque 3:17-18' },
+  { texto: 'A santidade é a beleza do Senhor.', referencia: 'Salmos 96:9' },
+  { texto: 'Deleita-te no Senhor, e ele te concederá o que deseja o teu coração.', referencia: 'Salmos 37:4' },
+  { texto: 'Bem-aventurado aquele que tem o Deus de Jacó por seu auxílio.', referencia: 'Salmos 146:5' },
+];
+
+// GET /api/devocional/hoje — versículo do dia (selecionado por dayOfYear).
+// Pública, leve, cacheável. Cada PWA chama 1x por dia.
+app.get('/api/devocional/hoje', (req, res) => {
+  const agora = new Date();
+  // Calcula o dayOfYear em fuso de Brasília
+  const ssp = agora.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }); // YYYY-MM-DD
+  const [y, m, d] = ssp.split('-').map(Number);
+  const inicioAno = new Date(Date.UTC(y, 0, 1));
+  const hojeUTC = new Date(Date.UTC(y, m - 1, d));
+  const dayOfYear = Math.floor((hojeUTC - inicioAno) / 86400000) + 1;
+  const idx = (dayOfYear - 1) % VERSICULOS_DIARIOS.length;
+  const v = VERSICULOS_DIARIOS[idx];
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.json({ texto: v.texto, referencia: v.referencia, data: ssp, dayOfYear });
+});
 
 // ── /api/health: termômetro público para monitoramento externo ────────────────
 app.get('/api/health', async (req, res) => {
@@ -4921,6 +5065,7 @@ app.get('/api/usuarios', auth, adminOnly, async (req, res) => {
       setores: u.setores || [],
       podeAgendar: !!u.podeAgendar,
       agendaPara: u.agendaPara || [],
+      podeGerirEquipes: !!u.podeGerirEquipes,
     });
     if (isConnected) {
       const users = await User.find().select('-googleAccessToken -googleRefreshToken -googleTokenExpiry');
@@ -4959,7 +5104,7 @@ app.put('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
   try {
     await connectDB();
     const { email } = req.params;
-    const { name, role, setores, podeAgendar, agendaPara } = req.body;
+    const { name, role, setores, podeAgendar, agendaPara, podeGerirEquipes } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (role !== undefined) updates.role = role;
@@ -4971,6 +5116,8 @@ app.put('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
         ? agendaPara.filter(e => typeof e === 'string' && e.trim()).map(e => e.trim().toLowerCase())
         : [];
     }
+    // Permissão de gestão de equipes (encarregado vê aba "Gestão de Equipes" no PWA Medidor)
+    if (podeGerirEquipes !== undefined) updates.podeGerirEquipes = !!podeGerirEquipes;
     if (isConnected) {
       const updated = await User.findByIdAndUpdate(email, updates, { new: true });
       if (!updated) return res.status(404).json({ error: 'Usuário não encontrado' });
@@ -4979,6 +5126,7 @@ app.put('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
         setores: updated.setores || [],
         podeAgendar: !!updated.podeAgendar,
         agendaPara: updated.agendaPara || [],
+        podeGerirEquipes: !!updated.podeGerirEquipes,
       });
     }
     const u = memStore.users.find(x => x._id === email || x.email === email);
@@ -4989,6 +5137,7 @@ app.put('/api/usuarios/:email', auth, adminOnly, async (req, res) => {
       setores: u.setores || [],
       podeAgendar: !!u.podeAgendar,
       agendaPara: u.agendaPara || [],
+      podeGerirEquipes: !!u.podeGerirEquipes,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -7412,7 +7561,10 @@ The result must look like a professional CAD drawing, NOT hand-drawn.`;
       ]}]
     };
 
-    const SVG_MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash-latest'];
+    // Cascade de modelos Gemini para SVG (texto+visão).
+    // gemini-1.5-flash-latest foi descontinuado pelo Google em 2026 — removido daqui.
+    // Mantemos cadeia: 2.5-flash (preferido) → 2.0-flash → flash-latest (alias).
+    const SVG_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
     let svgErr = null;
     for (const model of SVG_MODELS) {
       try {
@@ -7445,11 +7597,14 @@ The result must look like a professional CAD drawing, NOT hand-drawn.`;
       generationConfig: { responseModalities: modalities }
     });
 
+    // Modelos com geração de imagem (responseModalities: ['IMAGE','TEXT']).
+    // Mantemos várias variações pois Google muda nomes/disponibilidade frequentemente.
     const IMG_ATTEMPTS = [
+      { apiVer: 'v1beta',  model: 'gemini-2.5-flash-image-preview' },
+      { apiVer: 'v1beta',  model: 'gemini-2.0-flash-preview-image-generation' },
       { apiVer: 'v1beta',  model: 'gemini-2.0-flash-exp-image-generation' },
       { apiVer: 'v1alpha', model: 'gemini-2.0-flash-exp-image-generation' },
       { apiVer: 'v1beta',  model: 'gemini-2.0-flash-exp' },
-      { apiVer: 'v1alpha', model: 'gemini-2.0-flash-exp' },
     ];
     let imgErr = null;
     for (const { apiVer, model } of IMG_ATTEMPTS) {
@@ -7767,38 +7922,171 @@ app.get('/api/produtos/injetores/dashboard', auth, async (req, res) => {
 });
 
 // ── Estoque por Equipe / Semana (painel — auth) ───────────────────────────────
+// Helper: soma consumo real (fechamentosDia.litros) por equipe num intervalo de datas YYYY-MM-DD
+function _somarConsumoReal(todasOS, equipeId, dataInicio, dataFim) {
+  let total = 0;
+  for (const os of todasOS) {
+    if (os.equipeId !== equipeId) continue;
+    for (const f of (os.fechamentosDia || [])) {
+      if (f.data >= dataInicio && f.data <= dataFim) total += (f.litros || 0);
+    }
+  }
+  return total;
+}
+
+// Helper: previsão de consumo da semana pra uma equipe.
+// Distribui o `consumoProduto` da OS proporcionalmente aos `diasAtivos` (dias de
+// trabalho efetivos que o operador agendou via WorkdayPicker).
+// Exemplo: OS 100L em 10 dias agendados; semana atual tem 5 desses dias → 50L.
+// Fallback: se a OS não tem diasAtivos (foi criada antes da feature), usa o
+// intervalo dataInicio–dataTermino contando dias úteis.
+function _preverConsumoSemana(todasOS, equipeId, weekStart, weekEnd) {
+  let total = 0;
+  for (const os of todasOS) {
+    if (os.equipeId !== equipeId) continue;
+    if (!os.consumoProduto || os.consumoProduto <= 0) continue;
+
+    // Caminho preferido: diasAtivos definidos
+    if (Array.isArray(os.diasAtivos) && os.diasAtivos.length > 0) {
+      const consumoPorDia = os.consumoProduto / os.diasAtivos.length;
+      const diasNaSemana = os.diasAtivos.filter(d => d >= weekStart && d <= weekEnd).length;
+      total += consumoPorDia * diasNaSemana;
+      continue;
+    }
+
+    // Fallback: dataInicio–dataTermino com contagem de dias úteis (seg-sex)
+    if (!os.dataInicio || !os.dataTermino) continue;
+    const ini = os.dataInicio > weekStart ? os.dataInicio : weekStart;
+    const fim = os.dataTermino < weekEnd ? os.dataTermino : weekEnd;
+    if (ini > fim) continue;
+
+    const _contarDiasUteis = (a, b) => {
+      let count = 0;
+      const start = new Date(a + 'T00:00:00Z');
+      const end = new Date(b + 'T00:00:00Z');
+      for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+        const wd = d.getUTCDay(); // 0=dom, 6=sab
+        if (wd !== 0 && wd !== 6) count++;
+      }
+      return Math.max(1, count);
+    };
+    const diasUteisSemana = _contarDiasUteis(ini, fim);
+    const diasUteisObra = _contarDiasUteis(os.dataInicio, os.dataTermino);
+    total += os.consumoProduto * (diasUteisSemana / diasUteisObra);
+  }
+  return total;
+}
+
 app.get('/api/estoque-equipes', auth, async (req, res) => {
   try {
     await connectDB();
     const semana = req.query.semana || getISOWeekStr(new Date());
     const { start, end } = getWeekDateRange(semana);
     const equipes = await Equipe.find().lean();
-    const estoques = await EstoqueEquipeSemana.find({ semana }).lean();
-    // calc consumido from fechamentosDia across all OSes for that week per equipe
-    const todasOS = await OS.find({}, 'equipeId fechamentosDia').lean();
-    const consumidoPorEquipe = {};
-    for (const os of todasOS) {
-      for (const f of (os.fechamentosDia || [])) {
-        if (os.equipeId && f.data >= start && f.data <= end) {
-          consumidoPorEquipe[os.equipeId] = (consumidoPorEquipe[os.equipeId] || 0) + (f.litros || 0);
-        }
-      }
-    }
+    // Estoques TODA HISTÓRICO da equipe (precisamos do saldo anterior)
+    const todosEstoques = await EstoqueEquipeSemana.find().lean();
+    // OSes — precisamos pra calcular consumo real (fechamentosDia) e previsão (consumoProduto, datas)
+    const todasOS = await OS.find({}, 'equipeId fechamentosDia consumoProduto dataInicio dataTermino status').lean();
+
     const result = equipes.map(eq => {
-      const est = estoques.find(e => e.equipeId === eq._id) || {};
-      const recebido = est.recebido || 0;
-      const consumido = Math.round((consumidoPorEquipe[eq._id] || 0) * 10) / 10;
+      const estDaSemana = todosEstoques.find(e => e.equipeId === eq._id && e.semana === semana) || {};
+      const recebidoSemana = estDaSemana.recebido || 0;
+      const consumidoReal = Math.round(_somarConsumoReal(todasOS, eq._id, start, end) * 10) / 10;
+      const consumidoPrevisto = Math.round(_preverConsumoSemana(todasOS, eq._id, start, end) * 10) / 10;
+
+      // Saldo anterior: soma de (recebido - consumido real) de TODAS as semanas anteriores
+      const semanasAnteriores = todosEstoques.filter(e => e.equipeId === eq._id && e.semana < semana);
+      let saldoAnterior = 0;
+      for (const est of semanasAnteriores) {
+        const { start: s, end: en } = getWeekDateRange(est.semana);
+        saldoAnterior += (est.recebido || 0) - _somarConsumoReal(todasOS, eq._id, s, en);
+      }
+      saldoAnterior = Math.round(saldoAnterior * 10) / 10;
+      // Não permitir saldo anterior negativo — significa que a equipe lançou consumo sem ter recebido,
+      // o que é um erro de registro (mostraríamos como dívida confusa pro operador).
+      if (saldoAnterior < 0) saldoAnterior = 0;
+
+      const disponivel = Math.round((saldoAnterior + recebidoSemana) * 10) / 10;
+      const restante = Math.round((disponivel - consumidoReal) * 10) / 10;
+      // Risco de falta: previsão > disponível
+      const faltaPrevista = Math.round(Math.max(0, consumidoPrevisto - disponivel) * 10) / 10;
+
       return {
         equipeId: eq._id,
         equipeNome: eq.nome,
         semana,
-        recebido,
-        consumido,
-        restante: Math.max(0, Math.round((recebido - consumido) * 10) / 10),
-        lancamentos: est.lancamentos || [], // histórico: quem lançou, quando, quanto
+        saldoAnterior,             // litros que sobraram de semanas anteriores
+        recebido: recebidoSemana,  // litros recebidos NESTA semana
+        disponivel,                // saldoAnterior + recebido (total que tem pra consumir)
+        consumido: consumidoReal,  // gasto REAL (fechamentosDia)
+        consumidoPrevisto,         // previsão baseada nas OSes
+        restante,                  // disponivel - consumido (pode ser negativo se gastou mais que tinha)
+        faltaPrevista,             // se previsão > disponível, alerta de quanto pode faltar
+        riscoFalta: faltaPrevista > 0,
+        lancamentos: estDaSemana.lancamentos || [],
       };
     });
     res.json({ semana, semanaRange: { start, end }, equipes: result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/estoque-equipes/mes?mes=2026-06 — visão consolidada do mês
+// Lista TODAS as semanas que tocam o mês (segunda-feira dessa semana cai no mês).
+// Por equipe: arrays de semanas + totais do mês (recebido, consumido real, previsto, diferença).
+app.get('/api/estoque-equipes/mes', auth, async (req, res) => {
+  try {
+    await connectDB();
+    // Default: mês atual no SP
+    const hojeSP = new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 7);
+    const mes = req.query.mes || hojeSP; // "YYYY-MM"
+    if (!/^\d{4}-\d{2}$/.test(mes)) return res.status(400).json({ error: 'mes inválido (use YYYY-MM)' });
+    const [year, month] = mes.split('-').map(Number);
+    const mesStart = `${mes}-01`;
+    const ultimoDia = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const mesEnd = `${mes}-${String(ultimoDia).padStart(2, '0')}`;
+
+    // Lista de semanas ISO que TOCAM esse mês (segunda da semana entre mesStart e mesEnd)
+    const semanas = [];
+    let cursor = new Date(Date.UTC(year, month - 1, 1));
+    // recua pra segunda da semana do dia 1
+    const dia = cursor.getUTCDay() || 7;
+    cursor.setUTCDate(cursor.getUTCDate() - dia + 1);
+    while (cursor.toISOString().slice(0, 10) <= mesEnd) {
+      const sIso = getISOWeekStr(cursor);
+      if (!semanas.includes(sIso)) semanas.push(sIso);
+      cursor.setUTCDate(cursor.getUTCDate() + 7);
+    }
+
+    const equipes = await Equipe.find().lean();
+    const todosEstoques = await EstoqueEquipeSemana.find({ semana: { $in: semanas } }).lean();
+    const todasOS = await OS.find({}, 'equipeId fechamentosDia consumoProduto dataInicio dataTermino').lean();
+
+    const result = equipes.map(eq => {
+      const linhasSemana = semanas.map(s => {
+        const est = todosEstoques.find(e => e.equipeId === eq._id && e.semana === s) || {};
+        const { start, end } = getWeekDateRange(s);
+        const recebido = est.recebido || 0;
+        const consumido = Math.round(_somarConsumoReal(todasOS, eq._id, start, end) * 10) / 10;
+        const previsto = Math.round(_preverConsumoSemana(todasOS, eq._id, start, end) * 10) / 10;
+        return { semana: s, start, end, recebido, consumido, previsto };
+      });
+      const totaisMes = linhasSemana.reduce(
+        (acc, l) => ({
+          recebido: Math.round((acc.recebido + l.recebido) * 10) / 10,
+          consumido: Math.round((acc.consumido + l.consumido) * 10) / 10,
+          previsto: Math.round((acc.previsto + l.previsto) * 10) / 10,
+        }),
+        { recebido: 0, consumido: 0, previsto: 0 }
+      );
+      totaisMes.diferenca = Math.round((totaisMes.consumido - totaisMes.previsto) * 10) / 10;
+      return {
+        equipeId: eq._id,
+        equipeNome: eq.nome,
+        semanas: linhasSemana,
+        totaisMes,
+      };
+    });
+    res.json({ mes, mesRange: { start: mesStart, end: mesEnd }, semanas, equipes: result });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -8547,8 +8835,37 @@ app.put('/api/visitas/:id', auth, bigJson, async (req, res) => {
   try {
     await connectDB();
     if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+
     const updates = { ...req.body, updatedAt: Date.now() };
-    const v = await Visita.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true });
+
+    // ── REAGENDAMENTO de visita já CONCLUÍDA ────────────────────────────────
+    // Se o operador mudou a dataHora pra uma data futura E a visita estava 'concluido',
+    // entendemos como reagendamento: limpa a marca de conclusão e volta pra 'confirmado'
+    // (caso contrário a visita ficava acinzentada no painel e nao aparecia pro medidor).
+    // A medição original NÃO é deletada — ficamos com o histórico, mas o vínculo é cortado.
+    let unsets = null;
+    if (updates.dataHora) {
+      const atual = await Visita.findById(req.params.id).lean();
+      if (atual && atual.status === 'concluido') {
+        // Compara em horário de Brasília (visitas são salvas como "YYYY-MM-DDTHH:mm" local)
+        const agoraSP = new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).replace(' ', 'T').slice(0, 16);
+        if (String(updates.dataHora) >= agoraSP) {
+          updates.status = 'confirmado';
+          unsets = { concluidaEm: '', medicaoId: '', numeroMedicao: '' };
+          // IMPORTANTE: remove esses campos do $set pra evitar conflito Mongo
+          // ("Updating the path 'concluidaEm' would create a conflict at 'concluidaEm'")
+          delete updates.concluidaEm;
+          delete updates.medicaoId;
+          delete updates.numeroMedicao;
+          log('info', `Visita ${req.params.id} reagendada: ${atual.dataHora} → ${updates.dataHora} (status concluido → confirmado)`);
+        }
+      }
+    }
+
+    const updateOp = unsets
+      ? { $set: updates, $unset: unsets }
+      : { $set: updates };
+    const v = await Visita.findByIdAndUpdate(req.params.id, updateOp, { new: true });
     if (!v) return res.status(404).json({ error: 'Visita não encontrada' });
     res.json(v);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -8629,7 +8946,12 @@ app.get('/api/visitas/medidor', async (req, res) => {
 
     // Usa horário de Brasília — visitas são salvas em horário local (YYYY-MM-DDTHH:mm)
     const fmtLocal = (d) => d.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).replace(' ', 'T').slice(0, 16);
-    const agora = fmtLocal(new Date(Date.now() - 60 * 60 * 1000));
+    // Mostra TODAS as visitas a partir do início do dia atual (00:00 SP) — incluindo
+    // as que já passaram do horário (o medidor pode chegar atrasado, ou ainda não ter
+    // concluído a medição). Antes filtrava `agora - 1h` e as visitas da manhã sumiam à tarde.
+    const hoje0h = new Date();
+    const hoje0hSP = hoje0h.toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10);
+    const agora = hoje0hSP + 'T00:00';
     const limite = fmtLocal(new Date(Date.now() + 30 * 86400000));
 
     const visitas = await Visita.find({
@@ -8668,8 +8990,8 @@ app.get('/api/medidor/agenda-para', async (req, res) => {
     await connectDB();
     if (!isConnected) return res.json({ podeAgendar: false, agendaPara: [] });
 
-    const usr = await User.findOne({ email: id.medidorEmail }).select('podeAgendar agendaPara name').lean();
-    if (!usr) return res.json({ podeAgendar: false, agendaPara: [] });
+    const usr = await User.findOne({ email: id.medidorEmail }).select('podeAgendar agendaPara name podeGerirEquipes').lean();
+    if (!usr) return res.json({ podeAgendar: false, agendaPara: [], podeGerirEquipes: false });
 
     // Resolve nomes dos emails em agendaPara
     const emailsExtra = Array.isArray(usr.agendaPara) ? usr.agendaPara.filter(e => e && e !== id.medidorEmail) : [];
@@ -8681,6 +9003,7 @@ app.get('/api/medidor/agenda-para', async (req, res) => {
 
     res.json({
       podeAgendar: !!usr.podeAgendar,
+      podeGerirEquipes: !!usr.podeGerirEquipes,
       meuEmail: id.medidorEmail,
       meuNome: usr.name || id.medidorEmail,
       agendaPara: outros,
@@ -8825,6 +9148,166 @@ app.delete('/api/medidor/visitas/:id', async (req, res) => {
       await Visita.findByIdAndUpdate(req.params.id, { status: 'cancelado', updatedAt: Date.now() });
     }
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ENCARREGADO (Gestão de Equipes pelo PWA Medidor) — usado pelo Edson
+// Todos exigem User.podeGerirEquipes === true
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Helper: identifica o medidor encarregado e valida permissão
+async function _identifyEncarregado(req) {
+  const id = await _identifyMedidor(req);
+  if (id.error) return id;
+  if (!id.medidorEmail) return { error: 'Não foi possível identificar o medidor', status: 401 };
+  const usr = await User.findOne({ email: id.medidorEmail }).select('podeGerirEquipes name').lean();
+  if (!usr || !usr.podeGerirEquipes) {
+    return { error: 'Você não tem permissão para gerir equipes.', status: 403 };
+  }
+  return { medidorEmail: id.medidorEmail, nome: usr.name || id.medidorEmail };
+}
+
+// GET /api/encarregado/dashboard?semana=YYYY-Www — visão geral por equipe
+app.get('/api/encarregado/dashboard', async (req, res) => {
+  try {
+    const enc = await _identifyEncarregado(req);
+    if (enc.error) return res.status(enc.status).json({ error: enc.error });
+
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+
+    const semana = req.query.semana || getISOWeekStr(new Date());
+    const { start, end } = getWeekDateRange(semana);
+
+    const equipes = await Equipe.find().lean();
+    const fornecimentos = await FornecimentoEncarregado.find({ semana }).lean();
+    const estoques = await EstoqueEquipeSemana.find({ semana }).lean();
+    const todasOS = await OS.find({}, 'equipeId fechamentosDia consumoProduto qtdInjetores dataInicio dataTermino diasAtivos').lean();
+    // Estoques histórico (saldo anterior)
+    const todosEstoques = await EstoqueEquipeSemana.find().lean();
+
+    const result = equipes.map(eq => {
+      const fornProduto    = fornecimentos.filter(f => f.equipeId === eq._id && f.tipo === 'produto');
+      const fornInjetores  = fornecimentos.filter(f => f.equipeId === eq._id && f.tipo === 'injetores');
+      const forneceuProduto   = Math.round(fornProduto.reduce((s, f) => s + (f.quantidade || 0), 0) * 10) / 10;
+      const forneceuInjetores = Math.round(fornInjetores.reduce((s, f) => s + (f.quantidade || 0), 0));
+      const est = estoques.find(e => e.equipeId === eq._id) || {};
+      const equipeDeclarouRecebido = est.recebido || 0;
+
+      // Saldo anterior de produto (real)
+      const semanasAnteriores = todosEstoques.filter(e => e.equipeId === eq._id && e.semana < semana);
+      let saldoAnteriorProduto = 0;
+      for (const e of semanasAnteriores) {
+        const { start: s, end: en } = getWeekDateRange(e.semana);
+        saldoAnteriorProduto += (e.recebido || 0) - _somarConsumoReal(todasOS, eq._id, s, en);
+      }
+      if (saldoAnteriorProduto < 0) saldoAnteriorProduto = 0;
+      saldoAnteriorProduto = Math.round(saldoAnteriorProduto * 10) / 10;
+
+      const consumidoRealProduto = Math.round(_somarConsumoReal(todasOS, eq._id, start, end) * 10) / 10;
+      const previsto = Math.round(_preverConsumoSemana(todasOS, eq._id, start, end) * 10) / 10;
+
+      const discrepanciaProduto = Math.round((forneceuProduto - equipeDeclarouRecebido) * 10) / 10;
+      const discrepanciaInjetores = forneceuInjetores - 0; // sem fonte de "equipe declarou injetores" hoje
+
+      return {
+        equipeId: eq._id,
+        equipeNome: eq.nome,
+        semana,
+        produto: {
+          forneceu: forneceuProduto,
+          equipeDeclarou: equipeDeclarouRecebido,
+          saldoAnterior: saldoAnteriorProduto,
+          consumidoReal: consumidoRealProduto,
+          previsto,
+          discrepancia: discrepanciaProduto,
+        },
+        injetores: {
+          forneceu: forneceuInjetores,
+        },
+        lancamentosProduto: fornProduto.map(f => ({ _id: f._id, quantidade: f.quantidade, ts: f.ts })).sort((a,b) => b.ts - a.ts),
+        lancamentosInjetores: fornInjetores.map(f => ({ _id: f._id, quantidade: f.quantidade, ts: f.ts })).sort((a,b) => b.ts - a.ts),
+      };
+    });
+
+    res.json({ semana, semanaRange: { start, end }, equipes: result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/encarregado/fornecimento — { semana, equipeId, tipo, quantidade }
+app.post('/api/encarregado/fornecimento', bigJson, async (req, res) => {
+  try {
+    const enc = await _identifyEncarregado(req);
+    if (enc.error) return res.status(enc.status).json({ error: enc.error });
+
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+
+    const { semana, equipeId, tipo, quantidade } = req.body || {};
+    if (!semana || !equipeId || !tipo || quantidade == null) {
+      return res.status(400).json({ error: 'semana, equipeId, tipo e quantidade obrigatórios' });
+    }
+    if (!['produto', 'injetores'].includes(tipo)) {
+      return res.status(400).json({ error: 'tipo deve ser produto ou injetores' });
+    }
+    const eq = await Equipe.findById(equipeId).select('nome').lean();
+    if (!eq) return res.status(404).json({ error: 'Equipe não encontrada' });
+
+    const f = await FornecimentoEncarregado.create({
+      semana, equipeId, equipeNome: eq.nome, tipo,
+      quantidade: parseFloat(quantidade),
+      encarregadoEmail: enc.medidorEmail,
+      encarregadoNome: enc.nome,
+    });
+    res.status(201).json(f);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/encarregado/fornecimento/:id
+app.delete('/api/encarregado/fornecimento/:id', async (req, res) => {
+  try {
+    const enc = await _identifyEncarregado(req);
+    if (enc.error) return res.status(enc.status).json({ error: enc.error });
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    const r = await FornecimentoEncarregado.findByIdAndDelete(req.params.id);
+    if (!r) return res.status(404).json({ error: 'Lançamento não encontrado' });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/encarregado/agenda-equipes?semana=YYYY-Www — OSes da semana por equipe
+app.get('/api/encarregado/agenda-equipes', async (req, res) => {
+  try {
+    const enc = await _identifyEncarregado(req);
+    if (enc.error) return res.status(enc.status).json({ error: enc.error });
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+
+    const semana = req.query.semana || getISOWeekStr(new Date());
+    const { start, end } = getWeekDateRange(semana);
+
+    const equipes = await Equipe.find().lean();
+    // OSes que TOCAM essa semana
+    const oses = await OS.find({
+      $or: [
+        { dataInicio: { $gte: start, $lte: end } },
+        { dataTermino: { $gte: start, $lte: end } },
+        { $and: [{ dataInicio: { $lte: start } }, { dataTermino: { $gte: end } }] },
+      ],
+    }, 'equipeId equipeNome cliente endereco bairro cidade dataInicio dataTermino status numero tipo consumoProduto diasAtivos').lean();
+
+    const result = equipes.map(eq => ({
+      equipeId: eq._id,
+      equipeNome: eq.nome,
+      cor: eq.cor || '#888',
+      oses: oses
+        .filter(os => os.equipeId === eq._id)
+        .sort((a, b) => (a.dataInicio || '').localeCompare(b.dataInicio || '')),
+    }));
+
+    res.json({ semana, semanaRange: { start, end }, equipes: result });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

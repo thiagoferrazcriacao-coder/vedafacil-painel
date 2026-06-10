@@ -33,8 +33,10 @@ function semanaLabel(semana) {
   return `Semana ${w} · ${fmtD(monday)} – ${fmtD(sunday)}`
 }
 
-// ─── Estoque Semanal Tab ──────────────────────────────────────────────────────
+// ─── Estoque (Semanal + Mensal) Tab ──────────────────────────────────────────
 function EstoqueSemanalTab() {
+  // Visão: 'semana' (dia-a-dia) ou 'mes' (consolidado mensal)
+  const [visao, setVisao] = useState('semana')
   const [semana, setSemana] = useState(() => getISOWeekStr(new Date()))
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -72,6 +74,21 @@ function EstoqueSemanalTab() {
   return (
     <div className="space-y-4">
       {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
+
+      {/* Toggle Semana / Mês */}
+      <div className="flex gap-2">
+        <button onClick={() => setVisao('semana')}
+          className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${visao === 'semana' ? 'bg-orange-500 text-white shadow' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+          📅 Semana
+        </button>
+        <button onClick={() => setVisao('mes')}
+          className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${visao === 'mes' ? 'bg-orange-500 text-white shadow' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+          📆 Mês
+        </button>
+      </div>
+
+      {visao === 'mes' && <EstoqueMensalView />}
+      {visao === 'semana' && <>
 
       {/* Week navigation */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
@@ -165,25 +182,61 @@ function EstoqueSemanalTab() {
                   </div>
                 )}
 
-                {/* Stats */}
-                <div className="grid grid-cols-3 gap-2 text-center">
+                {/* Saldo de semanas anteriores (carry-over) */}
+                {(eq.saldoAnterior || 0) > 0 && (
+                  <div className="mb-2 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 flex items-center justify-between text-xs">
+                    <span className="text-purple-800">
+                      📦 <strong>Saldo de semanas anteriores</strong> (não consumido)
+                    </span>
+                    <span className="font-bold text-purple-700 text-sm">+{fmt(eq.saldoAnterior)}L</span>
+                  </div>
+                )}
+
+                {/* Stats — 4 colunas agora (Recebido / Disponível / Consumido / Restante) */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center">
                   <div className="bg-blue-50 rounded-lg py-2">
                     <div className="text-base font-bold text-blue-700">{fmt(eq.recebido)}L</div>
                     <div className="text-xs text-blue-500 mt-0.5">Recebido</div>
+                  </div>
+                  <div className="bg-indigo-50 rounded-lg py-2" title="Saldo anterior + Recebido nesta semana">
+                    <div className="text-base font-bold text-indigo-700">{fmt(eq.disponivel)}L</div>
+                    <div className="text-xs text-indigo-500 mt-0.5">Disponível</div>
                   </div>
                   <div className="bg-orange-50 rounded-lg py-2">
                     <div className="text-base font-bold text-orange-700">{fmt(eq.consumido)}L</div>
                     <div className="text-xs text-orange-500 mt-0.5">Consumido</div>
                   </div>
-                  <div className={`rounded-lg py-2 ${isOver ? 'bg-red-50' : 'bg-emerald-50'}`}>
-                    <div className={`text-base font-bold ${isOver ? 'text-red-700' : 'text-emerald-700'}`}>
-                      {isOver ? '-' : ''}{fmt(eq.restante)}L
+                  <div className={`rounded-lg py-2 ${(eq.restante || 0) < 0 ? 'bg-red-50' : 'bg-emerald-50'}`}>
+                    <div className={`text-base font-bold ${(eq.restante || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                      {fmt(eq.restante)}L
                     </div>
-                    <div className={`text-xs mt-0.5 ${isOver ? 'text-red-500' : 'text-emerald-500'}`}>
-                      {isOver ? 'Excedeu!' : 'Restante'}
+                    <div className={`text-xs mt-0.5 ${(eq.restante || 0) < 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                      {(eq.restante || 0) < 0 ? 'Excedeu' : 'Restante'}
                     </div>
                   </div>
                 </div>
+
+                {/* Previsão da semana + alerta de falta */}
+                {(eq.consumidoPrevisto > 0 || eq.faltaPrevista > 0) && (
+                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    {eq.consumidoPrevisto > 0 && (
+                      <div className="bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 flex items-center justify-between">
+                        <span className="text-sky-800">
+                          🔮 <strong>Previsão da semana</strong> (pela agenda)
+                        </span>
+                        <span className="font-bold text-sky-700">{fmt(eq.consumidoPrevisto)}L</span>
+                      </div>
+                    )}
+                    {eq.riscoFalta && (
+                      <div className="bg-red-50 border border-red-300 rounded-lg px-3 py-2 flex items-center justify-between">
+                        <span className="text-red-800">
+                          ⚠️ <strong>Pode faltar produto</strong> nesta semana
+                        </span>
+                        <span className="font-bold text-red-700">−{fmt(eq.faltaPrevista)}L</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Histórico de lançamentos */}
                 <div className="mt-3 pt-3 border-t border-gray-100">
@@ -235,7 +288,149 @@ function EstoqueSemanalTab() {
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-700">
         <strong>ℹ️ Como funciona:</strong> Os aplicadores lançam o estoque recebido diretamente pelo app.
         O consumido é calculado automaticamente a partir dos fechamentos de dia.
-        O operador pode ajustar o valor recebido manualmente se necessário.
+        O <strong>saldo de semanas anteriores</strong> (o que sobrou) é somado automaticamente ao recebido desta semana.
+        A <strong>previsão de consumo</strong> é calculada com base nas OSes da agenda da equipe.
+      </div>
+      </>}
+    </div>
+  )
+}
+
+// ─── Visão Mensal: consolidado por mês com semanas + totais por equipe ─────────
+function EstoqueMensalView() {
+  const [mes, setMes] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async (m) => {
+    setLoading(true); setError('')
+    try {
+      const d = await api.getEstoqueEquipesMes(m)
+      setData(d)
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { load(mes) }, [load, mes])
+
+  const mesAtual = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })()
+  const isCurrentMonth = mes === mesAtual
+
+  const mesLabel = (m) => {
+    const [y, mo] = m.split('-')
+    const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
+    return `${meses[parseInt(mo, 10) - 1]} de ${y}`
+  }
+
+  const navMes = (delta) => {
+    const [y, mo] = mes.split('-').map(Number)
+    const d = new Date(y, mo - 1 + delta, 1)
+    setMes(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
+
+      {/* Navegação de mês */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <button onClick={() => navMes(-1)}
+            className="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 font-bold">‹</button>
+          <div className="text-center flex-1">
+            <div className="font-bold text-gray-800 text-sm">{mesLabel(mes)}</div>
+            {isCurrentMonth && <div className="text-xs text-orange-500 font-medium mt-0.5">Mês atual</div>}
+          </div>
+          <button onClick={() => navMes(1)}
+            className="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 font-bold">›</button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center h-32">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500" />
+        </div>
+      ) : !data?.equipes?.length ? (
+        <div className="bg-white rounded-xl p-8 text-center text-gray-400 text-sm">Nenhuma equipe cadastrada</div>
+      ) : (
+        <div className="space-y-4">
+          {data.equipes.map(eq => {
+            const t = eq.totaisMes
+            const diferenca = t.diferenca // consumido - previsto: positivo = gastou MAIS, negativo = gastou MENOS
+            return (
+              <div key={eq.equipeId} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <div className="font-bold text-gray-800 mb-3">{eq.equipeNome}</div>
+
+                {/* Totais do mês */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center mb-3">
+                  <div className="bg-blue-50 rounded-lg py-2">
+                    <div className="text-base font-bold text-blue-700">{fmt(t.recebido)}L</div>
+                    <div className="text-xs text-blue-500 mt-0.5">Recebido (mês)</div>
+                  </div>
+                  <div className="bg-orange-50 rounded-lg py-2">
+                    <div className="text-base font-bold text-orange-700">{fmt(t.consumido)}L</div>
+                    <div className="text-xs text-orange-500 mt-0.5">Gasto real</div>
+                  </div>
+                  <div className="bg-sky-50 rounded-lg py-2">
+                    <div className="text-base font-bold text-sky-700">{fmt(t.previsto)}L</div>
+                    <div className="text-xs text-sky-500 mt-0.5">Previsto</div>
+                  </div>
+                  <div className={`rounded-lg py-2 ${diferenca > 0 ? 'bg-red-50' : 'bg-emerald-50'}`}>
+                    <div className={`text-base font-bold ${diferenca > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                      {diferenca > 0 ? '+' : ''}{fmt(diferenca)}L
+                    </div>
+                    <div className={`text-xs mt-0.5 ${diferenca > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                      {diferenca > 0 ? 'Acima do previsto' : diferenca < 0 ? 'Abaixo do previsto' : 'No previsto'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabela semana a semana */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-500 uppercase tracking-wide">
+                        <th className="text-left px-2 py-1.5 font-semibold">Semana</th>
+                        <th className="text-right px-2 py-1.5 font-semibold">Recebido</th>
+                        <th className="text-right px-2 py-1.5 font-semibold">Gasto real</th>
+                        <th className="text-right px-2 py-1.5 font-semibold">Previsto</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {eq.semanas.map(l => {
+                        const inicioCurto = l.start ? l.start.slice(8, 10) + '/' + l.start.slice(5, 7) : ''
+                        const fimCurto    = l.end   ? l.end.slice(8, 10)   + '/' + l.end.slice(5, 7)   : ''
+                        return (
+                          <tr key={l.semana} className="hover:bg-gray-50">
+                            <td className="px-2 py-1.5 text-gray-700">
+                              <div className="font-medium">{l.semana.replace(/-W/, ' · S')}</div>
+                              <div className="text-gray-400 text-[10px]">{inicioCurto} – {fimCurto}</div>
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-medium text-blue-700">{fmt(l.recebido)}L</td>
+                            <td className="px-2 py-1.5 text-right font-medium text-orange-700">{fmt(l.consumido)}L</td>
+                            <td className="px-2 py-1.5 text-right font-medium text-sky-700">{fmt(l.previsto)}L</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-700">
+        <strong>ℹ️ Como ler:</strong> A <strong>Diferença</strong> compara gasto real × previsão (baseada nas OSes da equipe).
+        Positiva = a equipe gastou mais que o previsto. Negativa = sobrou produto.
       </div>
     </div>
   )

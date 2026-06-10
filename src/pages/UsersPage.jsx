@@ -5,7 +5,7 @@ const ROLE_LABELS = { admin: 'Admin', medidor: 'Medidor', operador: 'Operador' }
 
 const DEFAULT_SETORES = ['Administrativo', 'Financeiro', 'Orçamentos', 'Comercial', 'Adm. de Obras', 'Operacional de Obras']
 
-const emptyForm = { email: '', name: '', role: 'operador', setores: [], podeAgendar: false, agendaPara: [] }
+const emptyForm = { email: '', name: '', role: 'operador', setores: [], podeAgendar: false, agendaPara: [], podeGerirEquipes: false }
 
 export default function UsersPage() {
   const [users, setUsers] = useState([])
@@ -48,6 +48,7 @@ export default function UsersPage() {
       setores: user.setores || [],
       podeAgendar: !!user.podeAgendar,
       agendaPara: user.agendaPara || [],
+      podeGerirEquipes: !!user.podeGerirEquipes,
     })
     setEditingEmail(user.email)
     setShowForm(true)
@@ -73,10 +74,10 @@ export default function UsersPage() {
     setSaving(true)
     setError(null)
     try {
-      // Só envia podeAgendar/agendaPara quando o papel é medidor (irrelevante pros outros)
+      // Só envia podeAgendar/agendaPara/podeGerirEquipes quando o papel é medidor (irrelevante pros outros)
       const extras = form.role === 'medidor'
-        ? { podeAgendar: !!form.podeAgendar, agendaPara: form.agendaPara || [] }
-        : { podeAgendar: false, agendaPara: [] }
+        ? { podeAgendar: !!form.podeAgendar, agendaPara: form.agendaPara || [], podeGerirEquipes: !!form.podeGerirEquipes }
+        : { podeAgendar: false, agendaPara: [], podeGerirEquipes: false }
       if (editingEmail) {
         await api.updateUsuario(editingEmail, { name: form.name, role: form.role, setores: form.setores, ...extras })
       } else {
@@ -254,6 +255,27 @@ export default function UsersPage() {
               </div>
             )}
 
+            {/* Permissão de gestão de equipes (encarregado) */}
+            {form.role === 'medidor' && (
+              <div className="rounded-lg border-2 border-green-200 bg-green-50 p-4 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={!!form.podeGerirEquipes}
+                    onChange={e => setForm(f => ({ ...f, podeGerirEquipes: e.target.checked }))}
+                    className="rounded border-green-300 text-green-600 focus:ring-green-300"
+                  />
+                  <span className="text-sm font-semibold text-green-900">
+                    🛠️ Pode gerir equipes (encarregado)
+                  </span>
+                </label>
+                <p className="text-xs text-green-800 ml-6">
+                  Mostra o botão <strong>"GESTÃO DE EQUIPES"</strong> na home do PWA Medidor.
+                  Permite lançar entregas de produto/injetores pras equipes, ver previsão da semana e agenda das equipes.
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <button
                 type="submit"
@@ -336,6 +358,14 @@ export default function UsersPage() {
                           title={`Pode agendar pra ${[u.email, ...(u.agendaPara || [])].length} medidor(es)`}
                         >
                           📅 Agenda
+                        </span>
+                      )}
+                      {u.role === 'medidor' && u.podeGerirEquipes && (
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700"
+                          title="Pode gerir equipes (lançar entregas, ver previsão)"
+                        >
+                          🛠️ Gestor
                         </span>
                       )}
                     </div>

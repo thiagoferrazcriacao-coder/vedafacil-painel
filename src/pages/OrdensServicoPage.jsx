@@ -511,27 +511,27 @@ export default function OrdensServicoPage() {
   )
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+    <div className="p-3 sm:p-6 max-w-5xl mx-auto">
+      {/* Header — em mobile vira coluna */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Ordens de Serviço</h1>
-          <p className="text-gray-500 text-sm mt-1">{ordensFiltradas.length} de {ordens.length} OS</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Ordens de Serviço</h1>
+          <p className="text-gray-500 text-xs sm:text-sm mt-1">{ordensFiltradas.length} de {ordens.length} OS</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setShowFiltros(f => !f)}
             className={`btn-secondary flex items-center gap-2 ${temFiltroAtivo ? 'ring-2 ring-primary text-primary' : ''}`}
           >
-            🔍 Filtros {temFiltroAtivo && <span className="bg-primary text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">!</span>}
+            🔍 <span className="hidden sm:inline">Filtros</span> {temFiltroAtivo && <span className="bg-primary text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">!</span>}
           </button>
           <button onClick={() => setModalOpen(true)} className="btn-primary">
-            + Nova OS
+            + <span className="hidden sm:inline">Nova OS</span><span className="sm:hidden">OS</span>
           </button>
           <button
             onClick={() => { setTipoParam('reparo'); setModalOpen(true) }}
-            className="bg-red-600 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-red-700 transition-colors flex items-center gap-1.5">
-            🔧 Novo Reparo
+            className="bg-red-600 text-white rounded-lg px-3 sm:px-4 py-2 text-sm font-semibold hover:bg-red-700 transition-colors flex items-center gap-1.5">
+            🔧 <span className="hidden sm:inline">Novo</span> Reparo
           </button>
         </div>
       </div>

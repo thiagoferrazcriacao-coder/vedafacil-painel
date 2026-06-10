@@ -154,7 +154,15 @@ export const api = {
 
   // Estoque por Equipe / Semana
   getEstoqueEquipes: (semana) => request('GET', `/estoque-equipes${semana ? '?semana=' + encodeURIComponent(semana) : ''}`),
+  getEstoqueEquipesMes: (mes) => request('GET', `/estoque-equipes/mes${mes ? '?mes=' + encodeURIComponent(mes) : ''}`),
   setEstoqueEquipe: (equipeId, semana, recebido) => request('PUT', `/estoque-equipes/${equipeId}`, { semana, recebido }),
+  // Devocional diário
+  getDevocional: () => request('GET', '/devocional/hoje'),
+  // Encarregado (gestão de equipes) — usado pelo PWA medidor via token Google
+  getEncarregadoDashboard: (semana) => request('GET', `/encarregado/dashboard${semana ? '?semana=' + encodeURIComponent(semana) : ''}`),
+  postEncarregadoFornecimento: (data) => request('POST', '/encarregado/fornecimento', data),
+  deleteEncarregadoFornecimento: (id) => request('DELETE', `/encarregado/fornecimento/${id}`),
+  getEncarregadoAgendaEquipes: (semana) => request('GET', `/encarregado/agenda-equipes${semana ? '?semana=' + encodeURIComponent(semana) : ''}`),
   addLancamentoManual: (equipeId, data) => request('POST', `/estoque-equipes/${equipeId}/lancamento-manual`, data),
   deleteLancamento: (equipeId, idx, semana, descontarTotal) =>
     request('DELETE', `/estoque-equipes/${equipeId}/lancamento/${idx}?semana=${encodeURIComponent(semana)}${descontarTotal ? '&descontarTotal=true' : ''}`),

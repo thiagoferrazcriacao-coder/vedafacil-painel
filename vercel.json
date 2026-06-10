@@ -62,6 +62,8 @@
     { "source": "/api/medidor", "destination": "/api/index.js" },
     { "source": "/api/health", "destination": "/api/index.js" },
     { "source": "/api/admin/:path*", "destination": "/api/index.js" },
+    { "source": "/api/devocional/:path*", "destination": "/api/index.js" },
+    { "source": "/api/encarregado/:path*", "destination": "/api/index.js" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "crons": [
