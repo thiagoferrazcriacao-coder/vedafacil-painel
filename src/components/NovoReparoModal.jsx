@@ -1,5 +1,42 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client.js'
+
+// Tipos de serviço disponíveis nos pontos de reparo
+const TIPOS_SERVICO = [
+  { v: 'Trinca',                l: 'Trinca' },
+  { v: 'Junta Fria',            l: 'Junta Fria' },
+  { v: 'Ralo',                  l: 'Ralo' },
+  { v: 'Junta de Dilatação',    l: 'Junta de Dilatação' },
+  { v: 'Tratamento de Ferragem',l: 'Ferragem' },
+  { v: 'Cortina',               l: 'Cortina' },
+  { v: 'Outro',                 l: 'Outro' },
+]
+
+function compressImgReparo(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = e => {
+      const img = new Image()
+      img.onload = () => {
+        const MAX = 1200
+        let { width, height } = img
+        if (width > MAX || height > MAX) {
+          const r = Math.min(MAX / width, MAX / height)
+          width = Math.round(width * r); height = Math.round(height * r)
+        }
+        const c = document.createElement('canvas')
+        c.width = width; c.height = height
+        const ctx = c.getContext('2d')
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, height)
+        ctx.drawImage(img, 0, 0, width, height)
+        resolve(c.toDataURL('image/jpeg', 0.75))
+      }
+      img.onerror = () => resolve(e.target.result)
+      img.src = e.target.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
 
 const STATUS_CONFIG = {
   agendada:              { label: 'Agendada',           color: 'bg-blue-100 text-blue-700' },
@@ -35,8 +72,23 @@ export default function NovoReparoModal({ onClose, onCreated, preloadOS }) {
     obs: '',
   })
   const [fotos, setFotos] = useState([])
+  // Pontos de serviço: locais com tipos/itens e fotos para descrever o reparo à equipe
+  const [pontosReparo, setPontosReparo] = useState([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // ── Helpers de pontos ──────────────────────────────────────────────────────
+  const addPonto = () => setPontosReparo(p => [...p, { nome: '', itens: [{ tipo: 'Trinca', desc: '' }], fotos: [] }])
+  const removePonto = (i) => setPontosReparo(p => p.filter((_, idx) => idx !== i))
+  const updPontoNome = (i, nome) => setPontosReparo(p => p.map((x, idx) => idx === i ? { ...x, nome } : x))
+  const addItem = (pi) => setPontosReparo(p => p.map((x, idx) => idx === pi ? { ...x, itens: [...x.itens, { tipo: 'Trinca', desc: '' }] } : x))
+  const removeItem = (pi, ii) => setPontosReparo(p => p.map((x, idx) => idx === pi ? { ...x, itens: x.itens.filter((_, i) => i !== ii) } : x))
+  const updItem = (pi, ii, field, value) => setPontosReparo(p => p.map((x, idx) => idx === pi ? { ...x, itens: x.itens.map((it, i) => i === ii ? { ...it, [field]: value } : it) } : x))
+  const addFotosPonto = async (pi, files) => {
+    const compressed = await Promise.all(Array.from(files).map(compressImgReparo))
+    setPontosReparo(p => p.map((x, idx) => idx === pi ? { ...x, fotos: [...x.fotos, ...compressed] } : x))
+  }
+  const removeFotoPonto = (pi, fi) => setPontosReparo(p => p.map((x, idx) => idx === pi ? { ...x, fotos: x.fotos.filter((_, i) => i !== fi) } : x))
 
   const handleFotoAdd = (e) => {
     const files = Array.from(e.target.files)
@@ -87,6 +139,7 @@ export default function NovoReparoModal({ onClose, onCreated, preloadOS }) {
           dataInicio: form.dataInicio || undefined,
           obs: form.obs || undefined,
           fotosReparo: fotos.map(f => f.data),
+          pontosReparo: pontosReparo.filter(p => p.nome.trim() || p.itens.length > 0 || p.fotos.length > 0),
         })
       } else {
         if (!osSelecionada) { setError('Selecione uma OS de origem'); setSaving(false); return }
@@ -108,6 +161,7 @@ export default function NovoReparoModal({ onClose, onCreated, preloadOS }) {
           dataInicio: form.dataInicio || undefined,
           obs: form.obs || undefined,
           fotosReparo: fotos.map(f => f.data),
+          pontosReparo: pontosReparo.filter(p => p.nome.trim() || p.itens.length > 0 || p.fotos.length > 0),
         })
       }
       if (onCreated) onCreated(novaOS)
@@ -389,6 +443,94 @@ export default function NovoReparoModal({ onClose, onCreated, preloadOS }) {
                 <textarea className="input" rows={3} value={form.obs}
                   onChange={e => setForm(f => ({ ...f, obs: e.target.value }))}
                   placeholder="Informações adicionais sobre o reparo..." />
+              </div>
+
+              {/* ── Pontos de Serviço ─────────────────────────────────────── */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="label mb-0">Pontos de serviço <span className="text-gray-400 font-normal">(locais com itens e fotos)</span></label>
+                  <button type="button" onClick={addPonto}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-orange-50 border border-orange-200 text-orange-700 font-semibold hover:bg-orange-100 transition-colors">
+                    + Adicionar local
+                  </button>
+                </div>
+
+                {pontosReparo.length === 0 && (
+                  <div className="text-xs text-gray-400 italic py-2 text-center border border-dashed border-gray-200 rounded-lg">
+                    Nenhum ponto adicionado — clique em "Adicionar local" para detalhar o reparo para a equipe
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  {pontosReparo.map((ponto, pi) => (
+                    <div key={pi} className="border border-orange-200 rounded-lg overflow-hidden">
+                      {/* Header do ponto */}
+                      <div className="bg-orange-50 px-3 py-2 flex items-center gap-2">
+                        <span className="text-orange-600 font-bold text-sm">📍</span>
+                        <input
+                          type="text"
+                          value={ponto.nome}
+                          onChange={e => updPontoNome(pi, e.target.value)}
+                          placeholder={`Local ${pi + 1} — ex: Terraço 3º andar`}
+                          className="flex-1 text-sm font-semibold bg-transparent border-none outline-none placeholder-orange-300 text-orange-900" />
+                        <button type="button" onClick={() => removePonto(pi)}
+                          className="text-red-400 hover:text-red-600 font-bold text-lg leading-none ml-1">×</button>
+                      </div>
+
+                      <div className="p-3 space-y-2">
+                        {/* Itens do ponto */}
+                        <div className="space-y-1.5">
+                          {ponto.itens.map((item, ii) => (
+                            <div key={ii} className="flex items-center gap-2">
+                              <select
+                                value={item.tipo}
+                                onChange={e => updItem(pi, ii, 'tipo', e.target.value)}
+                                className="border border-gray-200 rounded px-2 py-1 text-xs bg-white text-gray-700 flex-shrink-0">
+                                {TIPOS_SERVICO.map(t => (
+                                  <option key={t.v} value={t.v}>{t.l}</option>
+                                ))}
+                              </select>
+                              <input
+                                type="text"
+                                value={item.desc}
+                                onChange={e => updItem(pi, ii, 'desc', e.target.value)}
+                                placeholder="Descrição / obs (opcional)"
+                                className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs text-gray-700" />
+                              {ponto.itens.length > 1 && (
+                                <button type="button" onClick={() => removeItem(pi, ii)}
+                                  className="text-red-400 hover:text-red-600 text-sm font-bold flex-shrink-0">×</button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <button type="button" onClick={() => addItem(pi)}
+                          className="text-xs text-orange-600 hover:text-orange-800 font-semibold">
+                          + item
+                        </button>
+
+                        {/* Fotos do ponto */}
+                        <div>
+                          <div className="text-[10px] text-gray-400 font-semibold mb-1 uppercase tracking-wide">Fotos do local</div>
+                          <div className="flex flex-wrap gap-2">
+                            {ponto.fotos.map((src, fi) => (
+                              <div key={fi} className="relative">
+                                <img src={src} alt="" className="w-16 h-16 object-cover rounded border border-gray-200" />
+                                <button type="button" onClick={() => removeFotoPonto(pi, fi)}
+                                  className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 text-[10px] flex items-center justify-center">×</button>
+                              </div>
+                            ))}
+                            <label className="w-16 h-16 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded cursor-pointer hover:border-orange-400 hover:bg-orange-50 transition-colors">
+                              <span className="text-lg">📷</span>
+                              <span className="text-[10px] text-gray-400">Foto</span>
+                              <input type="file" accept="image/*" multiple className="hidden"
+                                onChange={e => { addFotosPonto(pi, e.target.files); e.target.value = '' }} />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div>

@@ -378,6 +378,7 @@ const osSchema = new mongoose.Schema({
   equipeNome: String,
   dataInicio: String,
   dataTermino: String,
+  horaInicio: String,        // "HH:MM" — exibido no PWA aplicador, usado pra ordenar OSes do dia
   calendarEventId: String,
   diasTrabalho: Number,
   diasAtivos: [String], // dias de trabalho efetivos: ['YYYY-MM-DD', ...]
@@ -550,6 +551,11 @@ const fornecimentoEncarregadoSchema = new mongoose.Schema({
   encarregadoEmail: { type: String, default: '' },
   encarregadoNome:  { type: String, default: '' },
   ts:               { type: Number, default: Date.now },
+  // Confirmação pela equipe
+  confirmado:       { type: Boolean, default: null }, // null=pendente, true=confirmado, false=divergência
+  qtdConfirmada:    { type: Number, default: null },
+  divergenciaDesc:  { type: String, default: '' },
+  tsConfirmado:     { type: Number, default: null },
 });
 fornecimentoEncarregadoSchema.index({ semana: 1, equipeId: 1, tipo: 1 });
 const FornecimentoEncarregado = mongoose.model('FornecimentoEncarregado', fornecimentoEncarregadoSchema, 'fornecimentos_encarregado');
@@ -2399,13 +2405,7 @@ export function buildOrcamentoPdfHtml(o) {
   // Normaliza andaime: aceita 'sim', 'Sim', true, 'true', 1 → true
   const hasAndaime = String(o.andaime || '').trim().toLowerCase() === 'sim' || o.andaime === true;
   const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-  const fmtDate = (d) => {
-    if (!d) return '';
-    const s = String(d);
-    const date = new Date(s.length === 10 && s.includes('-') ? s + 'T12:00:00' : s);
-    if (isNaN(date.getTime())) return d;
-    return date.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' });
-  };
+  const fmtDate = fmtDateBR; // usa helper global — DD/MM/YYYY robusto
   const fmtNum = (n) => (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
   // Formata validade: "30" → "30 dias"; date string → data formatada
   const fmtValidade = (v) => {
@@ -3264,7 +3264,7 @@ ${photoPages}
 
 function buildContratoPdfHtml(c) {
   const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-  const fmtDate = (d) => { if (!d) return '___'; const s = String(d); const date = new Date(s.length === 10 && s.includes('-') ? s + 'T12:00:00' : s); return isNaN(date.getTime()) ? s : date.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' }); };
+  const fmtDate = (d) => fmtDateBR(d) || '___';
   const fmtDateShort = fmtDate;
   const fmtDateExtenso = (d) => { if (!d) return '___'; const s = String(d); const date = new Date(s.length === 10 && s.includes('-') ? s + 'T12:00:00' : s); if (isNaN(date.getTime())) return s; const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']; return `${date.getDate()} de ${meses[date.getMonth()]} de ${date.getFullYear()}`; };
 
@@ -3430,7 +3430,7 @@ table.pay td{border:1px solid #aaa;padding:5px 10px}
 
 <p style="font-size:10.5px;text-align:justify;margin-bottom:8px"><strong>CONTRATADA:</strong> ${contratada} sita à Rua Professora Margarida Fialho Thompson Leite, 670, Residencial Cristo Redentor na cidade de Barra Mansa estado RJ, CEP 27323-755, inscrita no CNPJ sob número 23.606.470/0001-07, representado por Thiago Ramos Ferraz, inscrito no CPF sob n° 104.589.167-30 doravante denominada <strong style="color:#e87722">CONTRATADA</strong>.</p>
 
-<p style="font-size:10.5px;text-align:justify;margin-bottom:8px">E do outro lado <strong>${razaoSocial}</strong>${cnpjCliente ? ', inscrit' + (cnpjCliente.match(/^0{3}/) ? 'o' : 'a') + ' no CNPJ sob número ' + cnpjCliente : ''} sito à ${endereco}, na cidade de ${cidade}${cep ? ', CEP ' + cep : ''}${sindico ? ', presentado por ' + sindico : ''}${cpfResp && cpfResp !== '___' ? ', legalmente instituído em autos e com poderes de firma' : ''}${cpfResp && cpfResp !== '___' ? ', e inscrito no CPF sob n° ' + cpfResp : ''}${rgResp ? ', RG: ' + rgResp : ''}, doravante denominada <strong style="color:#e87722">CONTRATANTE</strong>.</p>
+<p style="font-size:10.5px;text-align:justify;margin-bottom:8px">E do outro lado <strong>${razaoSocial}</strong>${cnpjCliente ? ', inscrit' + (cnpjCliente.match(/^0{3}/) ? 'o' : 'a') + ' no CNPJ sob número ' + cnpjCliente : ''} sito à ${endereco}, na cidade de ${cidade}${cep ? ', CEP ' + cep : ''}${sindico ? ', representado por ' + sindico : ''}${cpfResp && cpfResp !== '___' ? ', legalmente instituído em autos e com poderes de firma' : ''}${cpfResp && cpfResp !== '___' ? ', e inscrito no CPF sob n° ' + cpfResp : ''}${rgResp ? ', RG: ' + rgResp : ''}, doravante denominada <strong style="color:#e87722">CONTRATANTE</strong>.</p>
 
 <p style="font-size:10.5px;text-align:justify">O serviço será executado na garagem do(a) ${razaoSocial} sito à ${endereco}${cidade ? ', ' + cidade : ''}, estado RJ, conforme orçamento anexo.</p>
 
@@ -3441,14 +3441,14 @@ table.pay td{border:1px solid #aaa;padding:5px 10px}
 
 <h2 class="clause-title">Cláusula 2ª - Documentos Integrantes e Forma de Execução</h2>
 <div class="clause">
-<p>2.1 – Os serviços serão executados pela CONTRATADA em estrita conformidade com as Condições indicadas no Orçamento anexo, pontos 1. até o 9. que passa a formar parte deste contrato.</p>
+<p>2.1 – Os serviços serão executados pela CONTRATADA em estrita conformidade com as Condições indicadas no Orçamento anexo, que passa a formar parte deste contrato.</p>
 <p>2.2 – Passarão a integrar este Instrumento Particular, desde que assinadas pelas partes, ou por seus representantes autorizados, as atas de reuniões, novos orçamentos para eventuais extensões dos serviços e outros documentos posteriores à assinatura deste Instrumento.</p>
 </div>
 
 <h2 class="clause-title">Cláusula 3ª - Escopo dos Serviços</h2>
 <div class="clause">
 <p>3.1 - A CONTRATADA deverá realizar os serviços, com aplicação do produto, ora pactuados, observado as disposições contidas no orçamento anexo que dá origem a este Instrumento Particular e que passa a formar parte integrante do mesmo.</p>
-<p>3.2 - Os serviços serão realizados nas regiões delimitadas no ponto 6.- denominado Localização, no orçamento anexo.</p>
+<p>3.2 - Os serviços serão realizados nas regiões delimitadas no ponto 5.- denominado Localização, no orçamento anexo.</p>
 </div>
 
 <h2 class="clause-title">Cláusula 4ª - Valor dos Serviços</h2>
@@ -3524,12 +3524,12 @@ ${cronograma.length > 0 ? `
 
 <h2 class="clause-title">Cláusula 9ª - Garantia</h2>
 <div class="clause">
-<p>9.1 - A CONTRATADA oferece garantia limitada por <strong>${garantia} (${garantia === 1 ? 'um' : extenso(garantia)}) ${garantia === 1 ? 'ano' : 'anos'}</strong>, nos locais tratados e especificados no ponto 6 do orçamento anexo e integrante deste contrato.</p>
+<p>9.1 - A CONTRATADA oferece garantia limitada por <strong>${garantia} (${garantia === 1 ? 'um' : extenso(garantia)}) ${garantia === 1 ? 'ano' : 'anos'}</strong>, nos locais tratados e especificados no ponto 5 do orçamento anexo e integrante deste contrato.</p>
 <p>9.2 - A CONTRATANTE declara estar ciente de que a garantia concedida contempla apenas o local mapeado, conforme orçamento e croqui anexos a este contrato (croqui será enviado após a finalização da obra). Infiltrações próximas ao local trabalhado serão tratadas como ponto novo, o qual a CONTRATANTE deverá solicitar a CONTRATADA novo orçamento.</p>
 <p>9.2.1 - Caso seja identificado infiltrações na área em período de garantia, a CONTRATADA deverá prestar o atendimento necessário para a regularização do problema. Outrossim obriga-se a CONTRATANTE comunicar à CONTRATADA sobre a existência de possível assistência técnica registrado por meio de nossos canais de comunicação como telefone, email, whatsapp. Caso isso não ocorra, a CONTRATANTE isenta a CONTRATADA de quaisquer responsabilidades de danos causados decorrentes do problema.</p>
 <p>9.3 - A CONTRATADA informará a data do agendamento de execução de garantia no prazo de até 5 (cinco) dias úteis, e a mesma se dará mediante disponibilidade de sua programação e agenda, num prazo de até 60 (sessenta) dias para execução.</p>
 <p>9.4 - A CONTRATADA somente executará trabalhos de impermeabilização em áreas de concreto maciço, dentro da área contratada. Caso constate-se, durante a execução, outro tipo de estrutura que seja diferente de concreto maciço, a CONTRATADA ficará isenta de prosseguir qualquer reparo bem como fornecer garantia.</p>
-<p>9.5 - Em ocorrências de assistência técnica, será de responsabilidade da CONTRATANTE, sem ônus a CONTRATADA, providenciar a retirada e recolocação de forro, locação de andaimes ou realização da pintura, caso seja necessário.</p>
+<p>9.5 - Em ocorrências de assistência técnica, será de responsabilidade da CONTRATANTE, sem ônus a CONTRATADA, providenciar a retirada e recolocação de forro e realização da pintura, caso seja necessário.</p>
 <p>9.6 - Caso sejam realizadas obras posteriores ao tratamento, sem anuência da CONTRATADA e estas obras afetem as condições da estrutura, nas regiões especificadas na Cláusula 9ª, a garantia perderá sua validade.</p>
 <p>9.7 - Caso as condições descritas na cláusula 5ª, em especial quanto aos pagamentos convencionados, não sejam devidamente cumpridas e enquanto perdurar o inadimplemento, ficará imediatamente SUSPENSA esta garantia contratual, retornando a vigorar quando do fiel cumprimento da obrigação.</p>
 </div>
@@ -3785,16 +3785,9 @@ function buildGarantiaPdfHtml(c, osPontos = []) {
   // ── helpers ────────────────────────────────────────────────────────────────
   const fmtDate = (d) => {
     if (!d) return '';
-    let dt;
-    if (typeof d === 'number') {
-      if (d < 1000000) return ''; // parece ser 0 ou valor inválido
-      dt = new Date(d);
-    } else {
-      const s = String(d);
-      dt = new Date(s.length === 10 && s.includes('-') ? s + 'T12:00:00' : s);
-    }
-    if (isNaN(dt.getTime()) || dt.getFullYear() < 2000) return '';
-    return dt.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' });
+    if (typeof d === 'number' && d < 1000000) return '';
+    const r = fmtDateBR(d);
+    return r && parseInt(r.slice(-4), 10) >= 2000 ? r : '';
   };
 
   const formatCnpj = (v) => {
@@ -4096,11 +4089,7 @@ app.get('/api/contratos/:id/garantia', async (req, res) => {
 // ── ART PDF ───────────────────────────────────────────────────────────────────
 
 function buildArtPdfHtml(c) {
-  const fmtDate = (d) => {
-    if (!d) return '___';
-    const dt = new Date(d.includes('-') && d.length === 10 ? d + 'T12:00:00' : d);
-    return isNaN(dt.getTime()) ? d : dt.toLocaleDateString('pt-BR');
-  };
+  const fmtDate = (d) => fmtDateBR(d) || '___';
   const fmt = (n) => 'R$ ' + (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
 
   const nContrato = c.numero ? String(c.numero).padStart(4, '0') : '___';
@@ -6452,7 +6441,7 @@ app.patch('/api/ordens-servico/:id/equipe', auth, async (req, res) => {
 // ── PDF Relatório da OS ───────────────────────────────────────────────────────
 
 function buildOSRelatorioPdfHtml(os, contrato) {
-  const fmtDate = (d) => { if (!d) return ''; const s = String(d); const dt = new Date(s.length === 10 && s.includes('-') ? s + 'T12:00:00' : s); return isNaN(dt.getTime()) ? d : dt.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' }); };
+  const fmtDate = fmtDateBR;
   const nOS = os.numero ? String(os.numero).padStart(4, '0') : '___';
   const cliente = os.cliente || '___';
   const endereco = os.endereco || '';
@@ -7364,11 +7353,38 @@ app.get('/api/equipes/ranking', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// POST /api/aplicador/os/:id/ponto — equipe adiciona novo ponto de problema em reparo avulso
+app.post('/api/aplicador/os/:id/ponto', authEquipe, bigJson, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    const os = await OS.findById(req.params.id);
+    if (!os) return res.status(404).json({ error: 'OS não encontrada' });
+    if ((os.tipo || 'normal') !== 'reparo') return res.status(400).json({ error: 'Só permitido em OS de reparo' });
+
+    const { nome, tipoProblema, item, fotos } = req.body || {};
+    if (!nome) return res.status(400).json({ error: 'Nome do local é obrigatório' });
+
+    const novoPonto = {
+      nome: nome.trim(),
+      tipoProblema: tipoProblema || '',
+      item: item || '',
+      fotosAntes: Array.isArray(fotos) ? fotos : [],
+      statusLocal: 'pendente',
+      criadoPeloAplicador: true,
+      subPontos: [],
+    };
+    os.pontos = [...(os.pontos || []), novoPonto];
+    await os.save();
+    res.status(201).json({ pontoIdx: os.pontos.length - 1, os: os.toObject() });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Criar reparo a partir de OS existente ─────────────────────────────────────
 app.post('/api/reparos/from-os', auth, bigJson, async (req, res) => {
   try {
     await connectDB();
-    const { osOriginalId, pontoIdx, pontosIdx, itensSelecionados, tipoReparo, equipeId, dataInicio, obs, fotosReparo } = req.body;
+    const { osOriginalId, pontoIdx, pontosIdx, itensSelecionados, tipoReparo, equipeId, dataInicio, obs, fotosReparo, pontosReparo: pontosReparoNovos } = req.body;
     if (!osOriginalId) return res.status(400).json({ error: 'osOriginalId required' });
     // Suporte a seleção múltipla (pontosIdx) e seleção única legada (pontoIdx)
     const indicesSelecionados = Array.isArray(pontosIdx) && pontosIdx.length > 0
@@ -7469,7 +7485,20 @@ app.post('/api/reparos/from-os', auth, bigJson, async (req, res) => {
       equipeOriginalNome: osOriginal.equipeNome || '',
       dataInicio: dataInicio || '',
       status: 'agendada',
-      pontos: pontosReparo,
+      pontos: [
+        ...pontosReparo,
+        ...(Array.isArray(pontosReparoNovos) ? pontosReparoNovos.map(p => ({
+          nome: p.nome || '',
+          subPontos: (p.itens || []).map(it => ({
+            tipo: it.tipo || 'Outro',
+            desc: [it.tipo, it.desc].filter(Boolean).join(' — '),
+            feito: false,
+          })),
+          fotos: (p.fotos || []).map(f => ({ data: f })),
+          fotosMedicao: [],
+          criadoNoReparo: true,
+        })) : []),
+      ],
       obs: obs || '',
       fotosReparo: Array.isArray(fotosReparo) ? fotosReparo.map(f => ({ data: f })) : [],
       progresso: 0,
@@ -7500,7 +7529,7 @@ app.post('/api/reparos/manual', auth, bigJson, async (req, res) => {
     const {
       cliente, endereco, bairro, cidade, celular,
       tipoReparo, equipeId, dataInicio, obs, fotosReparo,
-      consumoEstimado,
+      consumoEstimado, pontosReparo,
     } = req.body;
     if (!cliente?.trim()) return res.status(400).json({ error: 'cliente obrigatório' });
     if (!tipoReparo?.trim()) return res.status(400).json({ error: 'tipoReparo obrigatório' });
@@ -7531,7 +7560,17 @@ app.post('/api/reparos/manual', auth, bigJson, async (req, res) => {
       equipeNome,
       dataInicio: dataInicio || '',
       status: 'agendada',
-      pontos: [],
+      pontos: Array.isArray(pontosReparo) ? pontosReparo.map(p => ({
+        nome: p.nome || '',
+        subPontos: (p.itens || []).map(it => ({
+          tipo: it.tipo || 'Outro',
+          desc: [it.tipo, it.desc].filter(Boolean).join(' — '),
+          feito: false,
+        })),
+        fotos: (p.fotos || []).map(f => ({ data: f })),
+        fotosMedicao: [],
+        criadoNoReparo: true,
+      })) : [],
       obs: obs || '',
       fotosReparo: Array.isArray(fotosReparo) ? fotosReparo.map(f => ({ data: f })) : [],
       progresso: 0,
@@ -8186,6 +8225,24 @@ app.get('/api/estoque-equipes/mes', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/estoque-equipes/dia?data=YYYY-MM-DD — consumo real de cada equipe num dia específico
+app.get('/api/estoque-equipes/dia', auth, async (req, res) => {
+  try {
+    await connectDB();
+    const hojeSP = new Date().toLocaleString('sv-SE', { timeZone: 'America/Sao_Paulo' }).slice(0, 10);
+    const data = req.query.data || hojeSP;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return res.status(400).json({ error: 'data inválida (use YYYY-MM-DD)' });
+    const equipes = await Equipe.find().lean();
+    const todasOS = await OS.find({}, 'equipeId fechamentosDia').lean();
+    const result = equipes.map(eq => ({
+      equipeId: eq._id,
+      equipeNome: eq.nome,
+      consumido: Math.round(_somarConsumoReal(todasOS, eq._id, data, data) * 10) / 10,
+    }));
+    res.json({ data, equipes: result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.put('/api/estoque-equipes/:equipeId', auth, async (req, res) => {
   try {
     await connectDB();
@@ -8282,42 +8339,57 @@ app.get('/api/aplicador/estoque-summary', authEquipe, async (req, res) => {
     if (!equipeId) return res.status(400).json({ error: 'equipeId obrigatório' });
 
     const now = new Date();
-    const semanaStr  = getISOWeekStr(now);
-    const anoMes     = now.toISOString().slice(0, 7);           // "2026-05"
-    const mesStart   = `${anoMes}-01`;
-    const mesEnd     = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    const semanaStr = getISOWeekStr(now);
     const { start: weekStart, end: weekEnd } = getWeekDateRange(semanaStr);
 
-    // Recebido — semana atual
-    const estSemana = await EstoqueEquipeSemana.findOne({ equipeId, semana: semanaStr }).lean();
-    const recebidoSemana = estSemana?.recebido || 0;
+    // Todos os estoques desta equipe (histórico completo para saldo anterior)
+    const todosEstoques = await EstoqueEquipeSemana.find({ equipeId }).lean();
+    const estSemana = todosEstoques.find(e => e.semana === semanaStr) || {};
+    const recebidoSemana = estSemana.recebido || 0;
 
-    // Recebido — mês atual (soma semanas com sobreposição)
-    const anoStr = anoMes.slice(0, 4);
-    const todasSemanas = await EstoqueEquipeSemana.find({ equipeId, semana: { $regex: `^${anoStr}-W` } }).lean();
-    const recebidoMes = todasSemanas.reduce((sum, doc) => {
-      const { start, end } = getWeekDateRange(doc.semana);
-      if (end >= mesStart && start <= mesEnd) return sum + (doc.recebido || 0);
-      return sum;
-    }, 0);
+    // OSes desta equipe para cálculo de consumo real
+    const osList = await OS.find({ equipeId }, 'equipeId fechamentosDia').lean();
 
-    // Consumido — busca fechamentos de OS desta equipe
-    let gastoSemana = 0, gastoMes = 0;
-    if (isConnected) {
-      const osList = await OS.find({ equipeId }, 'fechamentosDia').lean();
-      for (const os of osList) {
-        for (const f of (os.fechamentosDia || [])) {
-          const data = (f.data || '').slice(0, 10);
-          if (data >= weekStart && data <= weekEnd) gastoSemana += (f.litros || 0);
-          if (data >= mesStart  && data <= mesEnd)  gastoMes    += (f.litros || 0);
-        }
+    // Gasto desta semana
+    let gastoSemana = 0;
+    for (const os of osList) {
+      for (const f of (os.fechamentosDia || [])) {
+        const data = (f.data || '').slice(0, 10);
+        if (data >= weekStart && data <= weekEnd) gastoSemana += (f.litros || 0);
       }
     }
 
+    // Saldo anterior: soma de (recebido - consumido real) de TODAS as semanas anteriores
+    const semanasAnteriores = todosEstoques.filter(e => e.semana < semanaStr);
+    let saldoAnterior = 0;
+    for (const est of semanasAnteriores) {
+      const { start: s, end: en } = getWeekDateRange(est.semana);
+      saldoAnterior += (est.recebido || 0) - _somarConsumoReal(osList, equipeId, s, en);
+    }
+    saldoAnterior = Math.max(0, Math.round(saldoAnterior * 10) / 10);
+
+    // Lista de equipes para a tela de transferência
+    const todasEquipes = await Equipe.find().select('_id nome').lean();
+
     const r = v => Math.round(v * 10) / 10;
+    const disponivel = r(saldoAnterior + recebidoSemana);
+    const saldoAtual = r(disponivel - gastoSemana);
+
+    const anoMes = now.toISOString().slice(0, 7);
     res.json({
-      semana: { chave: semanaStr, recebido: r(recebidoSemana), gasto: r(gastoSemana), saldo: r(recebidoSemana - gastoSemana) },
-      mes:    { chave: anoMes,    recebido: r(recebidoMes),    gasto: r(gastoMes),    saldo: r(recebidoMes - gastoMes) },
+      semana: {
+        chave: semanaStr,
+        saldoAnterior: r(saldoAnterior),
+        recebido: r(recebidoSemana),
+        gasto: r(gastoSemana),
+        disponivel,
+        saldo: saldoAtual,
+      },
+      // Campo mes mantido para compatibilidade com JS antigo em cache
+      mes: { chave: anoMes, recebido: r(recebidoSemana), gasto: r(gastoSemana), saldo: saldoAtual },
+      equipes: todasEquipes
+        .filter(e => String(e._id) !== String(equipeId))
+        .map(e => ({ id: e._id, nome: e.nome })),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -8378,6 +8450,58 @@ app.post('/api/aplicador/estoque-recebido', authEquipe, async (req, res) => {
       { upsert: true, new: true }
     );
     res.json({ success: true, recebido: novoRecebido, semana: semanaStr });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Transferência de produto/injetores entre equipes ─────────────────────────
+app.post('/api/aplicador/transferencia', authEquipe, async (req, res) => {
+  try {
+    await connectDB();
+    const { equipeIdDestino, quantidade, tipo, membro } = req.body;
+    const equipeIdOrigem = req.equipe.equipeId;
+    if (!equipeIdDestino || !quantidade || !tipo) {
+      return res.status(400).json({ error: 'equipeIdDestino, quantidade e tipo obrigatórios' });
+    }
+    if (!['produto', 'injetores'].includes(tipo)) {
+      return res.status(400).json({ error: 'tipo deve ser produto ou injetores' });
+    }
+    const qtd = tipo === 'produto' ? parseFloat(quantidade) : parseInt(quantidade, 10);
+    if (isNaN(qtd) || qtd <= 0) return res.status(400).json({ error: 'quantidade inválida' });
+
+    const semanaStr = getISOWeekStr(new Date());
+    const equipeDestino = await Equipe.findById(equipeIdDestino).lean();
+    const equipeOrigem  = await Equipe.findById(equipeIdOrigem).lean();
+    if (!equipeDestino) return res.status(404).json({ error: 'Equipe destino não encontrada' });
+
+    const campo = tipo === 'produto' ? 'recebido' : 'injetoresRecebidos';
+    const tipoLanc = tipo === 'produto' ? 'produto' : 'injetores';
+    const membroStr = membro || 'Equipe';
+
+    // Debita da equipe origem (registro negativo no lancamentos, sem alterar recebido)
+    // Credita na equipe destino
+    const [origemDoc] = await Promise.all([
+      EstoqueEquipeSemana.findOneAndUpdate(
+        { equipeId: equipeIdOrigem, semana: semanaStr },
+        {
+          $set: { equipeId: equipeIdOrigem, equipeNome: equipeOrigem?.nome || '', semana: semanaStr, updatedAt: new Date() },
+          $inc: { [campo]: -qtd },
+          $push: { lancamentos: { membro: membroStr, [tipo === 'produto' ? 'litros' : 'injetores']: -qtd, tipo: tipoLanc + '_transferido', ts: new Date() } },
+        },
+        { upsert: true, new: true }
+      ),
+      EstoqueEquipeSemana.findOneAndUpdate(
+        { equipeId: equipeIdDestino, semana: semanaStr },
+        {
+          $set: { equipeId: equipeIdDestino, equipeNome: equipeDestino?.nome || '', semana: semanaStr, updatedAt: new Date() },
+          $inc: { [campo]: qtd },
+          $push: { lancamentos: { membro: `transferido de ${equipeOrigem?.nome || equipeIdOrigem}`, [tipo === 'produto' ? 'litros' : 'injetores']: qtd, tipo: tipoLanc + '_recebido', ts: new Date() } },
+        },
+        { upsert: true, new: true }
+      ),
+    ]);
+
+    const novoSaldo = origemDoc[campo] || 0;
+    res.json({ success: true, novoSaldo, semana: semanaStr });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -9014,8 +9138,8 @@ app.patch('/api/visitas/:id/confirmar', auth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE /api/visitas/:id — soft delete (admin)
-app.delete('/api/visitas/:id', auth, adminOnly, async (req, res) => {
+// DELETE /api/visitas/:id — soft delete (admin ou operador)
+app.delete('/api/visitas/:id', auth, async (req, res) => {
   try {
     await connectDB();
     if (!isConnected) return res.status(503).json({ error: 'DB offline' });
@@ -9407,6 +9531,41 @@ app.delete('/api/encarregado/fornecimento/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/aplicador/confirmacoes-pendentes — fornecimentos não confirmados pela equipe
+app.get('/api/aplicador/confirmacoes-pendentes', authEquipe, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    const equipeId = String(req.equipe.equipeId);
+    const pendentes = await FornecimentoEncarregado.find({
+      equipeId,
+      confirmado: null,
+    }).sort({ ts: 1 }).lean();
+    res.json({ pendentes });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/aplicador/confirmacoes-pendentes/:id/responder
+// Body: { aceita: bool, qtdReal?: number, divergenciaDesc?: string }
+app.post('/api/aplicador/confirmacoes-pendentes/:id/responder', authEquipe, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    const { aceita, qtdReal, divergenciaDesc } = req.body || {};
+    const f = await FornecimentoEncarregado.findById(req.params.id);
+    if (!f) return res.status(404).json({ error: 'Não encontrado' });
+    if (String(f.equipeId) !== String(req.equipe.equipeId)) return res.status(403).json({ error: 'Não autorizado' });
+    f.confirmado = !!aceita;
+    f.tsConfirmado = Date.now();
+    if (!aceita) {
+      f.qtdConfirmada = qtdReal != null ? parseFloat(qtdReal) : null;
+      f.divergenciaDesc = divergenciaDesc || '';
+    }
+    await f.save();
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /api/encarregado/agenda-equipes?semana=YYYY-Www — OSes da semana por equipe
 app.get('/api/encarregado/agenda-equipes', async (req, res) => {
   try {
@@ -9437,6 +9596,77 @@ app.get('/api/encarregado/agenda-equipes', async (req, res) => {
         .sort((a, b) => (a.dataInicio || '').localeCompare(b.dataInicio || '')),
     }));
 
+    res.json({ semana, semanaRange: { start, end }, equipes: result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/admin/gestao-equipes?semana=YYYY-Www — espelho do encarregado/dashboard via JWT painel
+app.get('/api/admin/gestao-equipes', auth, async (req, res) => {
+  try {
+    await connectDB();
+    if (!isConnected) return res.status(503).json({ error: 'DB offline' });
+    const semana = req.query.semana || getISOWeekStr(new Date());
+    const { start, end } = getWeekDateRange(semana);
+    const equipes = await Equipe.find().lean();
+    const fornecimentos = await FornecimentoEncarregado.find({ semana }).lean();
+    const estoques = await EstoqueEquipeSemana.find({ semana }).lean();
+    const todasOS = await OS.find({}, 'equipeId fechamentosDia consumoProduto dataInicio dataTermino').lean();
+    const todosEstoques = await EstoqueEquipeSemana.find().lean();
+
+    const result = equipes.map(eq => {
+      const fornProduto = fornecimentos.filter(f => f.equipeId === eq._id && f.tipo === 'produto');
+      const fornInjetores = fornecimentos.filter(f => f.equipeId === eq._id && f.tipo === 'injetores');
+      const forneceuProduto = Math.round(fornProduto.reduce((s, f) => s + (f.quantidade || 0), 0) * 10) / 10;
+      const forneceuInjetores = Math.round(fornInjetores.reduce((s, f) => s + (f.quantidade || 0), 0));
+      const est = estoques.find(e => e.equipeId === eq._id) || {};
+      const equipeDeclarouRecebido = est.recebido || 0;
+
+      const semanasAnteriores = todosEstoques.filter(e => e.equipeId === eq._id && e.semana < semana);
+      let saldoAnterior = 0;
+      for (const e of semanasAnteriores) {
+        const { start: s, end: en } = getWeekDateRange(e.semana);
+        saldoAnterior += (e.recebido || 0) - _somarConsumoReal(todasOS, eq._id, s, en);
+      }
+      if (saldoAnterior < 0) saldoAnterior = 0;
+      saldoAnterior = Math.round(saldoAnterior * 10) / 10;
+
+      const consumidoReal = Math.round(_somarConsumoReal(todasOS, eq._id, start, end) * 10) / 10;
+      const saldoAtual = Math.round((saldoAnterior + forneceuProduto - consumidoReal) * 10) / 10;
+
+      return {
+        equipeId: eq._id,
+        equipeNome: eq.nome,
+        produto: {
+          saldoAnterior,
+          forneceu: forneceuProduto,
+          equipeDeclarou: equipeDeclarouRecebido,
+          consumidoReal,
+          saldoAtual,
+          discrepancia: Math.round((forneceuProduto - equipeDeclarouRecebido) * 10) / 10,
+        },
+        injetores: {
+          forneceu: forneceuInjetores,
+          equipeDeclarou: est.injetoresRecebidos || 0,
+        },
+        lancamentosProduto: [
+          ...fornProduto.map(f => ({
+            _id: f._id, quantidade: f.quantidade, ts: f.ts,
+            confirmado: f.confirmado, qtdConfirmada: f.qtdConfirmada, divergenciaDesc: f.divergenciaDesc,
+            fonte: 'empresa', encarregadoNome: f.encarregadoNome || '',
+          })),
+          ...(est.lancamentos || [])
+            .filter(l => l.tipo === 'produto_recebido' && (l.litros || 0) > 0)
+            .map(l => ({
+              _id: `transf_${new Date(l.ts).getTime()}`,
+              quantidade: l.litros || 0,
+              ts: new Date(l.ts).getTime(),
+              confirmado: null, qtdConfirmada: null, divergenciaDesc: '',
+              fonte: 'transferencia',
+              origemEquipeNome: String(l.membro || '').replace(/^transferido de\s*/i, ''),
+            })),
+        ].sort((a, b) => b.ts - a.ts),
+      };
+    });
     res.json({ semana, semanaRange: { start, end }, equipes: result });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -9614,6 +9844,28 @@ function buildReminderMsg(tipo, nomeExibicao, dataOuDatetime) {
   }
   // tipo === 'dia'
   return `Ola! ☀️ *Hoje, dia ${dia}*, nosso tecnico *${nomeExibicao}* da *Vedafacil* tem visita agendada com voce. Esteja disponivel! 😊\n\nQualquer duvida, entre em contato.`;
+}
+
+// helper: formata data em DD/MM/YYYY (formato brasileiro) — robusto contra
+// strings ambíguas (ex: "12/06/2026" que o new Date() interpretaria como
+// 12 de junho no formato US, virando 06/12/2026 — exatamente o bug do PDF).
+// Aceita: YYYY-MM-DD, DD/MM/YYYY, ISO strings, Date objects, timestamps.
+function fmtDateBR(d) {
+  if (d == null || d === '') return '';
+  const s = String(d).trim();
+  if (!s) return '';
+  // Já em DD/MM/YYYY (com ou sem zeros) — retorna padronizado
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return `${m[1].padStart(2,'0')}/${m[2].padStart(2,'0')}/${m[3]}`;
+  // YYYY-MM-DD — converte direto sem tocar no Date parser (que vira US)
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  // Fallback: deixa o Date parser tentar (ISO completo, timestamp)
+  const dt = new Date(d instanceof Date ? d : s);
+  if (isNaN(dt.getTime())) return s;
+  const dd = String(dt.getDate()).padStart(2, '0');
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${dt.getFullYear()}`;
 }
 
 // helper: retorna YYYY-MM-DD no fuso BRT

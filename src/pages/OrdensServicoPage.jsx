@@ -21,7 +21,7 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
   const [tecnicos, setTecnicos] = useState([])
   const [modo, setModo] = useState('existente') // 'existente' | 'manual' | 'completa'
   const [form, setForm] = useState({
-    contratoId: contratoIdInicial || '', equipeId: '', equipeNome: '', dataInicio: '', dataTermino: '', diasAtivos: [], obs: '', tecnicoResponsavel: '',
+    contratoId: contratoIdInicial || '', equipeId: '', equipeNome: '', dataInicio: '', dataTermino: '', horaInicio: '', diasAtivos: [], obs: '', tecnicoResponsavel: '',
     // campos modo manual
     contratoManualNome: '', contratoManualNumero: '', contratoManualPdfBase64: '',
     cliente: '', endereco: '', cidade: '', celular: ''
@@ -29,6 +29,7 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [pdfLoading, setPdfLoading] = useState(false)
+  const [buscaContrato, setBuscaContrato] = useState('')
 
   useEffect(() => {
     Promise.all([api.getContratos(), api.getEquipes(), api.getPrecos()])
@@ -174,36 +175,97 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
           </div>
 
           {/* ── MODO: Contrato existente ── */}
-          {modo === 'existente' && (
-            <>
-              <div>
-                <label className="label">Contrato *</label>
-                <select className="input" value={form.contratoId} onChange={e => setForm(f => ({ ...f, contratoId: e.target.value }))}>
-                  <option value="">Selecione um contrato...</option>
-                  {contratos.map(c => (
-                    <option key={c.id || c._id} value={c.id || c._id}>
-                      #{String(c.numero || '').padStart(4, '0')} — {c.cliente}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          {modo === 'existente' && (() => {
+            // Filtro: número, cliente, endereço ou cidade. Normaliza acento.
+            const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+            const q = norm(buscaContrato.trim())
+            const contratosFiltrados = q
+              ? contratos.filter(c =>
+                  norm(c.cliente).includes(q) ||
+                  norm(c.endereco).includes(q) ||
+                  norm(c.cidade).includes(q) ||
+                  String(c.numero || '').includes(q)
+                )
+              : contratos
+            return (
+              <>
+                <div>
+                  <label className="label">Contrato *</label>
+                  {/* Campo de busca com lupa */}
+                  <div className="relative mb-2">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">🔍</span>
+                    <input
+                      className="input pl-9"
+                      placeholder="Buscar por número, cliente, endereço ou cidade..."
+                      value={buscaContrato}
+                      onChange={e => setBuscaContrato(e.target.value)}
+                    />
+                    {buscaContrato && (
+                      <button
+                        type="button"
+                        onClick={() => setBuscaContrato('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
+                        title="Limpar"
+                      >✕</button>
+                    )}
+                  </div>
 
-              {contratoSel && (
-                <div className="bg-blue-50 rounded-lg p-3 text-sm">
-                  <p className="font-medium text-blue-800">{contratoSel.cliente}</p>
-                  <p className="text-blue-600">{contratoSel.endereco}{contratoSel.cidade ? ` — ${contratoSel.cidade}` : ''}</p>
-                  {(contratoSel.locais || []).length > 0 && (
-                    <p className="text-blue-500 mt-1">{contratoSel.locais.length} local(is) · {contratoSel.prazoExecucao || contratoSel.diasTrabalho || 0} dia(s) úteis</p>
-                  )}
-                  {(contratoSel.dataInicio || contratoSel.dataTermino) && (
-                    <p className="text-blue-400 mt-1 text-xs">
-                      📅 Datas do contrato: {contratoSel.dataInicio || '—'} → {contratoSel.dataTermino || '—'}
-                    </p>
-                  )}
+                  {/* Lista de contratos filtrados — clica pra selecionar */}
+                  <div className="border border-gray-200 rounded-lg max-h-60 overflow-y-auto bg-white">
+                    {contratosFiltrados.length === 0 ? (
+                      <div className="p-4 text-center text-sm text-gray-400">
+                        {contratos.length === 0 ? 'Nenhum contrato cadastrado' : 'Nenhum contrato encontrado'}
+                      </div>
+                    ) : contratosFiltrados.map(c => {
+                      const id = c.id || c._id
+                      const selecionado = form.contratoId === id
+                      return (
+                        <button
+                          type="button"
+                          key={id}
+                          onClick={() => setForm(f => ({ ...f, contratoId: id }))}
+                          className={`w-full text-left px-3 py-2.5 border-b last:border-b-0 transition-colors ${selecionado ? 'bg-primary/10 border-l-4 border-l-primary' : 'hover:bg-gray-50'}`}
+                        >
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-xs font-bold text-primary">
+                              #{String(c.numero || '').padStart(4, '0')}
+                            </span>
+                            <span className="font-medium text-sm text-gray-800 truncate flex-1 min-w-0">
+                              {c.cliente || '—'}
+                            </span>
+                            {selecionado && <span className="text-primary text-xs font-bold">✓</span>}
+                          </div>
+                          {(c.endereco || c.cidade) && (
+                            <div className="text-xs text-gray-500 mt-0.5 truncate">
+                              {[c.endereco, c.cidade].filter(Boolean).join(' — ')}
+                            </div>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {contratosFiltrados.length} de {contratos.length} contrato(s){q ? ' filtrado(s)' : ''}
+                  </p>
                 </div>
-              )}
-            </>
-          )}
+
+                {contratoSel && (
+                  <div className="bg-blue-50 rounded-lg p-3 text-sm">
+                    <p className="font-medium text-blue-800">{contratoSel.cliente}</p>
+                    <p className="text-blue-600">{contratoSel.endereco}{contratoSel.cidade ? ` — ${contratoSel.cidade}` : ''}</p>
+                    {(contratoSel.locais || []).length > 0 && (
+                      <p className="text-blue-500 mt-1">{contratoSel.locais.length} local(is) · {contratoSel.prazoExecucao || contratoSel.diasTrabalho || 0} dia(s) úteis</p>
+                    )}
+                    {(contratoSel.dataInicio || contratoSel.dataTermino) && (
+                      <p className="text-blue-400 mt-1 text-xs">
+                        📅 Datas do contrato: {contratoSel.dataInicio || '—'} → {contratoSel.dataTermino || '—'}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
+            )
+          })()}
 
           {/* ── MODO: Contrato manual ── */}
           {modo === 'manual' && (
@@ -298,6 +360,12 @@ function NovaOSModal({ onClose, onSave, contratoIdInicial, tipoInicial }) {
                   onChange={e => setForm(f => ({ ...f, dataInicio: e.target.value, diasAtivos: [] }))} />
               </div>
               <div>
+                <label className="label">Hora de Início</label>
+                <input type="time" className="input" value={form.horaInicio}
+                  onChange={e => setForm(f => ({ ...f, horaInicio: e.target.value }))}
+                  placeholder="08:00" />
+              </div>
+              <div className="col-span-2">
                 <label className="label">Data Prevista de Término</label>
                 <input type="date" className="input" value={form.dataTermino}
                   onChange={e => setForm(f => ({ ...f, dataTermino: e.target.value, diasAtivos: [] }))} />

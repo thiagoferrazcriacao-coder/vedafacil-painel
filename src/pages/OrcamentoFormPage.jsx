@@ -347,7 +347,7 @@ export default function OrcamentoFormPage() {
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Field label="Nº do Orçamento">
-            <input className="input" type="number" value={orc.numero || ''} onChange={e => update({ numero: Number(e.target.value) })} />
+            <input className="input" type="text" value={orc.numero || ''} onChange={e => update({ numero: e.target.value })} />
           </Field>
           <Field label="Data do Orçamento">
             <input className="input" type="text" value={isoToDisplayDate(orc.dataOrcamento) || ''} onChange={updateField('dataOrcamento')} placeholder="dd/mm/aaaa" />

@@ -323,6 +323,7 @@ export default function OSDetailPage() {
         equipeNome: editData.equipeNome,
         dataInicio: editData.dataInicio,
         dataTermino: editData.dataTermino,
+        horaInicio: editData.horaInicio,
         diasAtivos: editData.diasAtivos,
         tecnicoResponsavel: editData.tecnicoResponsavel,
         status: editData.status,
@@ -656,6 +657,11 @@ export default function OSDetailPage() {
                     onChange={e => setEditData(p => ({ ...p, dataInicio: e.target.value, diasAtivos: [] }))} />
                 </div>
                 <div>
+                  <label className="label">Hora</label>
+                  <input type="time" className="input" value={editData.horaInicio || ''}
+                    onChange={e => setEditData(p => ({ ...p, horaInicio: e.target.value }))} />
+                </div>
+                <div className="col-span-2">
                   <label className="label">Término</label>
                   <input type="date" className="input" value={editData.dataTermino || ''}
                     onChange={e => setEditData(p => ({ ...p, dataTermino: e.target.value, diasAtivos: [] }))} />

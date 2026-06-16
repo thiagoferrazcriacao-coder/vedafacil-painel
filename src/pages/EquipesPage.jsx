@@ -426,6 +426,114 @@ function RankingPanel({ periodo }) {
   )
 }
 
+/* ────────────────────────── EstoquePanel ─────────────────────────────────── */
+function getISOWeek(d) {
+  const date = new Date(d); date.setHours(0,0,0,0);
+  date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
+  const week1 = new Date(date.getFullYear(), 0, 4);
+  const w = 1 + Math.round(((date - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+  return `${date.getFullYear()}-W${String(w).padStart(2,'0')}`
+}
+
+function EstoquePanel() {
+  const [semana, setSemana] = useState(() => getISOWeek(new Date()))
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    api.getAdminGestaoEquipes(semana)
+      .then(setData).catch(console.error).finally(() => setLoading(false))
+  }, [semana])
+
+  function navSemana(delta) {
+    const [y, w] = semana.split('-W').map(Number)
+    const d = new Date(y, 0, 1 + (w - 1) * 7 + 1)
+    d.setDate(d.getDate() + delta * 7)
+    setSemana(getISOWeek(d))
+  }
+
+  const equipes = data?.equipes || []
+  const [y, w] = semana.split('-W')
+  const semLabel = `Semana ${w}·${y}`
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={() => navSemana(-1)} className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-gray-400 text-sm font-medium">‹</button>
+        <span className="font-semibold text-gray-700 text-sm">{semLabel}</span>
+        <button onClick={() => navSemana(1)} className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-gray-400 text-sm font-medium">›</button>
+        <button onClick={() => setSemana(getISOWeek(new Date()))} className="px-3 py-1.5 rounded-lg border border-orange-200 bg-orange-50 text-orange-700 text-sm font-medium">Hoje</button>
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-12"><div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" /></div>
+      ) : equipes.length === 0 ? (
+        <div className="text-center py-12 text-gray-400">Sem dados</div>
+      ) : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {equipes.map(eq => {
+            const p = eq.produto || {}
+            const saldoNeg = (p.saldoAtual ?? 0) < 0
+            const discrepancia = Math.abs(p.discrepancia ?? 0) > 0.5
+            return (
+              <div key={eq.equipeId} className="card space-y-3">
+                <div className="font-bold text-gray-800 text-base">{eq.equipeNome}</div>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex justify-between items-center bg-green-50 rounded-lg px-3 py-2">
+                    <span className="text-xs font-semibold text-green-700">Saldo anterior</span>
+                    <span className="font-bold text-green-700">{fmtNum(p.saldoAnterior ?? 0)} L</span>
+                  </div>
+                  <div className="flex justify-between items-center bg-blue-50 rounded-lg px-3 py-2">
+                    <span className="text-xs font-semibold text-blue-700">Encarregado forneceu</span>
+                    <span className="font-bold text-blue-700">{fmtNum(p.forneceu ?? 0)} L</span>
+                  </div>
+                  <div className="flex justify-between items-center bg-red-50 rounded-lg px-3 py-2">
+                    <span className="text-xs font-semibold text-red-700">Consumido</span>
+                    <span className="font-bold text-red-700">{fmtNum(p.consumidoReal ?? 0)} L</span>
+                  </div>
+                  <div className={`flex justify-between items-center rounded-lg px-3 py-2 ${saldoNeg ? 'bg-red-100' : 'bg-orange-50'}`}>
+                    <span className={`text-xs font-bold ${saldoNeg ? 'text-red-700' : 'text-orange-700'}`}>Saldo atual</span>
+                    <span className={`text-lg font-black ${saldoNeg ? 'text-red-600' : 'text-orange-600'}`}>{fmtNum(p.saldoAtual ?? 0)} L</span>
+                  </div>
+                </div>
+                {discrepancia && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700 font-semibold">
+                    ⚠️ Divergência: equipe declarou {fmtNum(p.equipeDeclarou ?? 0)} L, encarregado forneceu {fmtNum(p.forneceu ?? 0)} L
+                  </div>
+                )}
+                {eq.lancamentosProduto?.length > 0 && (
+                  <div className="text-xs space-y-1.5 pt-1 border-t border-gray-50">
+                    <div className="font-semibold text-gray-500 uppercase tracking-wider text-[10px]">Lançamentos da semana</div>
+                    {eq.lancamentosProduto.map(l => (
+                      <div key={l._id} className="rounded-md px-2 py-1.5 bg-gray-50 border border-gray-100">
+                        <div className="flex justify-between items-center">
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${l.fonte === 'transferencia' ? 'bg-teal-100 text-teal-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {l.fonte === 'transferencia' ? '🔄 Transf.' : '🏭 Empresa'}
+                          </span>
+                          <span className="font-bold text-gray-700">{fmtNum(l.quantidade)} L
+                            {l.confirmado === true && <span className="ml-1 text-green-600">✅</span>}
+                            {l.confirmado === false && <span className="ml-1 text-red-500" title={l.divergenciaDesc}>⚠️</span>}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-gray-400 mt-0.5">
+                          {l.fonte === 'transferencia'
+                            ? `de ${l.origemEquipeNome || '—'} · ${new Date(l.ts).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}`
+                            : `${l.encarregadoNome || 'Encarregado'} · ${new Date(l.ts).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}`
+                          }
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ────────────────────────── EquipesPage (main) ───────────────────────────── */
 export default function EquipesPage() {
   const [equipes, setEquipes] = useState([])
@@ -489,9 +597,10 @@ export default function EquipesPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-6 w-fit">
+      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-6 w-fit flex-wrap">
         {[
           { key: 'equipes', label: '📋 Equipes' },
+          { key: 'estoque', label: '📦 Estoque' },
           { key: 'ranking', label: '🏆 Ranking' },
           { key: 'desempenho', label: '📊 Desempenho' },
         ].map(t => (
@@ -606,6 +715,9 @@ export default function EquipesPage() {
           )}
         </>
       )}
+
+      {/* Tab: Estoque */}
+      {activeTab === 'estoque' && <EstoquePanel />}
 
       {/* Tab: Ranking */}
       {activeTab === 'ranking' && <RankingPanel periodo={periodo} />}

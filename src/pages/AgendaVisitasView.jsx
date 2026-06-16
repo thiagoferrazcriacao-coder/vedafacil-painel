@@ -69,7 +69,7 @@ function corClaraMedidor(email) {
 // quando algum campo está faltando (usa placeholders sutis em vez de sumir).
 function VisitaCardCompacto({ v, onClick, modo = 'semana' }) {
   const sc = STATUS_CONFIG[v.status] || STATUS_CONFIG.reservado
-  const corMed = corDoMedidor(v.medidorEmail)
+  const corMed = v.acompanhamento ? '#0d9488' : corDoMedidor(v.medidorEmail) // teal-600 para acompanhamento
   const bgCor = v.status === 'cancelado' ? '#9ca3af'
               : v.status === 'concluido' ? corMed + 'bb'
               : corMed
@@ -111,8 +111,9 @@ function VisitaCardCompacto({ v, onClick, modo = 'semana' }) {
         <div className="text-xs font-semibold leading-tight" style={{ wordBreak: 'break-word' }}>
           {v.nomeCondominio || <span className="opacity-60 italic font-normal">(sem nome)</span>}
         </div>
-        {/* Linha 3: medidor (mesmo quando vazio, mostra placeholder discreto) */}
-        <div className="text-[10px] opacity-95 mt-1 font-medium leading-tight">
+        {/* Linha 3: medidor + badge acompanhamento */}
+        <div className="text-[10px] opacity-95 mt-1 font-medium leading-tight flex items-center gap-1.5 flex-wrap">
+          {v.acompanhamento && <span title="Acompanhamento de Equipes" className="bg-white/25 rounded px-1 py-0.5 font-bold">🔁 Acomp.</span>}
           {v.medidorNome
             ? <>📐 {v.medidorNome}</>
             : <span className="opacity-70 italic">📐 sem medidor</span>}
@@ -218,9 +219,12 @@ export default function AgendaVisitasView() {
     setVisitaEditando(v); setModalAberto(true)
   }
 
-  const onSalvar = async (dados, isEdit) => {
+  const onSalvar = async (dados, isEdit, multiCount) => {
     try {
-      if (isEdit) {
+      if (multiCount) {
+        // Criação múltipla de acompanhamento — visitas já foram criadas no modal
+        setSucesso(`🔁 ${multiCount} visita(s) de acompanhamento criadas!`)
+      } else if (isEdit) {
         await api.updateVisita(visitaEditando._id, dados)
         setSucesso('Visita atualizada!')
       } else {
@@ -229,7 +233,7 @@ export default function AgendaVisitasView() {
       }
       setModalAberto(false)
       await load()
-      setTimeout(() => setSucesso(''), 3000)
+      setTimeout(() => setSucesso(''), 4000)
     } catch (e) { setErro(e.message) }
   }
 
@@ -272,14 +276,30 @@ export default function AgendaVisitasView() {
     finally { setMudandoModo(false) }
   }
 
-  // ── Visitas do mês (para lista abaixo do calendário) ──────────────────────
+  const [filtroTexto, setFiltroTexto] = useState('')
+
+  // ── Visitas do período visível (semana ou mês) — acompanha o toggle de cima ──
   const visitasMes = useMemo(() => {
-    const ini = toStr(monthDate)
-    const fim = toStr(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0))
+    let ini, fim
+    if (viewMode === 'semana') {
+      ini = toStr(weekStart)
+      const fimSem = new Date(weekStart); fimSem.setDate(fimSem.getDate() + 6)
+      fim = toStr(fimSem)
+    } else {
+      ini = toStr(monthDate)
+      fim = toStr(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0))
+    }
+    const txt = filtroTexto.trim().toLowerCase()
     return visitas
-      .filter(v => v.dataHora && v.dataHora.slice(0,10) >= ini && v.dataHora.slice(0,10) <= fim)
-      .sort((a, b) => (a.dataHora || '').localeCompare(b.dataHora || ''))
-  }, [visitas, monthDate])
+      .filter(v => {
+        if (!v.dataHora) return false
+        if (v.dataHora.slice(0,10) < ini || v.dataHora.slice(0,10) > fim) return false
+        if (!txt) return true
+        return [v.nomeCondominio, v.medidorNome, v.bairro, v.cidade, v.nomeResponsavel, v.tecnicoResponsavel]
+          .some(f => (f || '').toLowerCase().includes(txt))
+      })
+      .sort((a, b) => (b.dataHora || '').localeCompare(a.dataHora || '')) // mais recente primeiro
+  }, [visitas, viewMode, monthDate, weekStart, filtroTexto])
 
   // ── Render ─────────────────────────────────────────────────────────────────
   const MODO_LABELS = { google: '📅 Google Calendar', misto: '📅 Google + 📋 Vedafacil', proprio: '📋 Vedafacil (própria)' }
@@ -481,25 +501,52 @@ export default function AgendaVisitasView() {
           })()}
 
           {/* ── Lista do mês ── */}
-          <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide mb-3">
-            📋 Visitas em {MESES[monthDate.getMonth()]} ({visitasMes.length})
-          </h3>
+          <div className="flex items-center gap-3 flex-wrap mb-3">
+            <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">
+              {viewMode === 'semana'
+                ? (() => {
+                    const fim = new Date(weekStart); fim.setDate(fim.getDate() + 6)
+                    const fmt = d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+                    return `📋 Visitas de ${fmt(weekStart)} a ${fmt(fim)} (${visitasMes.length})`
+                  })()
+                : `📋 Visitas em ${MESES[monthDate.getMonth()]} (${visitasMes.length})`
+              }
+            </h3>
+            <input
+              type="search"
+              value={filtroTexto}
+              onChange={e => setFiltroTexto(e.target.value)}
+              placeholder="🔍 Buscar condomínio, medidor, bairro…"
+              className="flex-1 min-w-[200px] border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+            />
+          </div>
           {visitasMes.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <div className="text-4xl mb-2">📅</div>
-              <p>Nenhuma visita neste mês.<br/><button onClick={abrirNova} className="text-primary underline mt-1">Criar nova visita</button></p>
+              <p>{filtroTexto ? 'Nenhuma visita encontrada para essa busca.' : 'Nenhuma visita neste mês.'}<br/>
+                {!filtroTexto && <button onClick={abrirNova} className="text-primary underline mt-1">Criar nova visita</button>}
+              </p>
             </div>
           ) : (
             <div className="space-y-3">
               {visitasMes.map(v => {
                 const sc = STATUS_CONFIG[v.status] || STATUS_CONFIG.reservado
-                const corMed = corDoMedidor(v.medidorEmail)
+                const isAcomp = !!v.acompanhamento
+                const isPast = v.dataHora && new Date(v.dataHora) < new Date() && !['reservado'].includes(v.status)
+                const corMed = isAcomp ? '#0d9488' : corDoMedidor(v.medidorEmail)
+                const bgCard = isAcomp ? '#f0fdfa' : corClaraMedidor(v.medidorEmail)
                 return (
-                  <div key={v._id} className="card p-4 border-l-4" style={{ borderLeftColor: corMed, background: corClaraMedidor(v.medidorEmail) }}>
+                  <div key={v._id} className={`card p-4 border-l-4 transition-opacity ${isPast ? 'opacity-50' : ''}`}
+                    style={{ borderLeftColor: corMed, background: bgCard }}>
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                           <span className="font-bold text-gray-800 text-sm">{v.nomeCondominio}</span>
+                          {isAcomp && (
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200">
+                              🔁 Acomp.
+                            </span>
+                          )}
                           {v.fonte === 'google' ? (
                             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-300">
                               📅 Google Calendar
@@ -574,7 +621,7 @@ export default function AgendaVisitasView() {
                           ✏️ Editar
                         </button>
                         )}
-                        {v.fonte !== 'google' && isAdmin && (
+                        {v.fonte !== 'google' && (
                           <button onClick={() => excluir(v._id)}
                             className="text-xs px-3 py-1.5 bg-red-100 text-red-700 rounded-lg font-semibold hover:bg-red-200 transition-colors">
                             🗑 Excluir
@@ -596,6 +643,16 @@ export default function AgendaVisitasView() {
           visita={visitaEditando}
           onSalvar={onSalvar}
           onFechar={() => setModalAberto(false)}
+          onExcluir={visitaEditando ? async () => {
+            if (!confirm('Excluir esta visita? Ela irá para a lixeira.')) return
+            try {
+              await api.deleteVisita(visitaEditando._id || visitaEditando.id)
+              setModalAberto(false)
+              setSucesso('Visita excluída.')
+              await load()
+              setTimeout(() => setSucesso(''), 3000)
+            } catch (e) { alert('Erro ao excluir: ' + e.message) }
+          } : undefined}
         />
       )}
 

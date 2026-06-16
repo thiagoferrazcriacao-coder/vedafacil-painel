@@ -156,6 +156,7 @@ export const api = {
   // Estoque por Equipe / Semana
   getEstoqueEquipes: (semana) => request('GET', `/estoque-equipes${semana ? '?semana=' + encodeURIComponent(semana) : ''}`),
   getEstoqueEquipesMes: (mes) => request('GET', `/estoque-equipes/mes${mes ? '?mes=' + encodeURIComponent(mes) : ''}`),
+  getEstoqueEquipesDia: (data) => request('GET', `/estoque-equipes/dia${data ? '?data=' + encodeURIComponent(data) : ''}`),
   setEstoqueEquipe: (equipeId, semana, recebido) => request('PUT', `/estoque-equipes/${equipeId}`, { semana, recebido }),
   // Devocional diário
   getDevocional: () => request('GET', '/devocional/hoje'),
@@ -165,6 +166,7 @@ export const api = {
   deleteEncarregadoFornecimento: (id) => request('DELETE', `/encarregado/fornecimento/${id}`),
   getEncarregadoAgendaEquipes: (semana) => request('GET', `/encarregado/agenda-equipes${semana ? '?semana=' + encodeURIComponent(semana) : ''}`),
   addLancamentoManual: (equipeId, data) => request('POST', `/estoque-equipes/${equipeId}/lancamento-manual`, data),
+  getAdminGestaoEquipes: (semana) => request('GET', `/admin/gestao-equipes${semana ? '?semana=' + encodeURIComponent(semana) : ''}`),
   deleteLancamento: (equipeId, idx, semana, descontarTotal) =>
     request('DELETE', `/estoque-equipes/${equipeId}/lancamento/${idx}?semana=${encodeURIComponent(semana)}${descontarTotal ? '&descontarTotal=true' : ''}`),
 

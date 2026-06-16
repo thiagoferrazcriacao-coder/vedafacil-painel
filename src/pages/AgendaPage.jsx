@@ -30,6 +30,24 @@ const WEEK_DAYS_SHORT = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb']
 const WEEK_DAYS_FULL  = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado']
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
+// ── Helper: equipe ativa numa OS em determinado dia (considera redirecionamentos) ─
+// Quando uma OS foi redirecionada, historicoEquipes registra quem trabalhou em cada trecho.
+// Se o histórico estiver vazio ou ausente, usa o equipeId atual da OS.
+function getEquipeIdParaDia(os, dataStr) {
+  const hist = os.historicoEquipes
+  if (!hist || hist.length === 0) return os.equipeId || null
+  const dataMs = new Date(dataStr + 'T12:00:00').getTime()
+  for (const h of hist) {
+    const de  = h.de  || 0
+    const ate = h.ate || Number.MAX_SAFE_INTEGER
+    if (dataMs >= de && dataMs < ate) return h.equipeId
+  }
+  // Última entrada aberta (equipe que ficou)
+  const aberta = [...hist].slice().reverse().find(h => !h.ate)
+  if (aberta && dataMs >= aberta.de) return aberta.equipeId
+  return os.equipeId || null
+}
+
 // ── Helpers de data ───────────────────────────────────────────────────────────
 function parseLocal(str) {
   if (!str) return null
@@ -98,7 +116,12 @@ export default function AgendaPage() {
       if (os.status === 'cancelada' && filtroStatus !== 'cancelada') return false
       if (filtroStatus !== 'todos' && os.status !== filtroStatus) return false
       if (filtroTipo !== 'todos' && (os.tipo || 'normal') !== filtroTipo) return false
-      if (filtroEquipe && (os.equipeId || '') !== filtroEquipe) return false
+      if (filtroEquipe) {
+        // Inclui OS redirecionadas: a equipe pode aparecer no histórico
+        const todasEquipes = new Set([os.equipeId])
+        ;(os.historicoEquipes || []).forEach(h => h.equipeId && todasEquipes.add(h.equipeId))
+        if (!todasEquipes.has(filtroEquipe)) return false
+      }
       return true
     })
   }, [ordens, filtroStatus, filtroTipo, filtroEquipe])
@@ -139,7 +162,7 @@ export default function AgendaPage() {
   const equipesNaSemana = useMemo(() => {
     const semanaKeys = weekDays.map(toStr)
     const ids = new Set()
-    semanaKeys.forEach(k => (osPerDay[k] || []).forEach(os => ids.add(os.equipeId || '__sem_equipe__')))
+    semanaKeys.forEach(k => (osPerDay[k] || []).forEach(os => ids.add(getEquipeIdParaDia(os, k) || '__sem_equipe__')))
     // Também adiciona equipes do filtro se estiver filtrando
     if (filtroEquipe) ids.add(filtroEquipe)
     // Sempre mostra todas as equipes cadastradas no topo, mesmo sem OS na semana
@@ -166,8 +189,8 @@ export default function AgendaPage() {
         const key = toStr(d)
         const dayOS = osPerDay[key] || []
         matrix[eq.id][key] = eq.id === '__sem_equipe__'
-          ? dayOS.filter(os => !os.equipeId)
-          : dayOS.filter(os => os.equipeId === eq.id)
+          ? dayOS.filter(os => !getEquipeIdParaDia(os, key))
+          : dayOS.filter(os => getEquipeIdParaDia(os, key) === eq.id)
       })
     })
     return matrix
@@ -232,20 +255,23 @@ export default function AgendaPage() {
     <div className="p-3 sm:p-4 md:p-6 max-w-7xl mx-auto">
 
       {/* ── Abas: Obras / Visitas ────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 mb-4 sm:mb-6 border-b border-gray-200 overflow-x-auto">
-        {[
-          { key: 'obras',   label: '🏗️ Obras',    desc: 'Obras em andamento e agendadas por equipe' },
-          { key: 'visitas', label: '📅 Visitas',  desc: 'Visitas de medição agendadas pelos operadores' },
-        ].map(({ key, label }) => (
-          <button key={key} onClick={() => setAbaAtiva(key)}
-            className={`px-3 sm:px-5 py-2.5 text-sm font-semibold rounded-t-lg transition-colors border-b-2 -mb-px whitespace-nowrap ${
-              abaAtiva === key
-                ? 'border-primary text-primary bg-white'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-            }`}>
-            {label}
-          </button>
-        ))}
+      <div className="flex items-center gap-3 mb-6 flex-wrap">
+        <button onClick={() => setAbaAtiva('obras')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm whitespace-nowrap ${
+            abaAtiva === 'obras'
+              ? 'bg-gradient-orange text-white shadow-md scale-105'
+              : 'bg-white border-2 border-orange-300 text-orange-600 hover:bg-orange-50'
+          }`}>
+          🏗️ Agenda de Obras
+        </button>
+        <button onClick={() => setAbaAtiva('visitas')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm whitespace-nowrap ${
+            abaAtiva === 'visitas'
+              ? 'bg-purple-600 text-white shadow-md scale-105'
+              : 'bg-white border-2 border-purple-300 text-purple-600 hover:bg-purple-50'
+          }`}>
+          📅 Agenda de Visitas
+        </button>
       </div>
 
       {/* ── Aba: Agenda de Visitas ─────────────────────────────────────────── */}
@@ -412,10 +438,11 @@ export default function AgendaPage() {
                             const chipBg   = os.status === 'cancelada' ? '#9ca3af'
                               : os.status === 'concluida' ? eqCor + 'bb'
                               : eqCor
+                            const foiRedirecionada = os.historicoEquipes?.length > 0
                             return (
                               <div key={id}
                                 onClick={() => navigate(`/ordens-servico/${id}`)}
-                                title={`OS #${String(os.numero||'').padStart(3,'0')} — ${os.cliente}\nStatus: ${STATUS_LABEL[os.status]||os.status}${os.tipoReparo?' — '+os.tipoReparo:''}`}
+                                title={`OS #${String(os.numero||'').padStart(3,'0')} — ${os.cliente}\nStatus: ${STATUS_LABEL[os.status]||os.status}${os.tipoReparo?' — '+os.tipoReparo:''}${foiRedirecionada?' — 🔀 Redirecionada':''}`}
                                 className="cursor-pointer mb-1 hover:brightness-90 transition-all text-xs leading-tight rounded overflow-hidden"
                                 style={{
                                   background: chipBg,
@@ -426,6 +453,7 @@ export default function AgendaPage() {
                                 <div className="px-1.5 py-0.5">
                                   <div className="font-bold text-white truncate leading-tight">
                                     {isReparo ? '🔧 ' : '🏗️ '}#{String(os.numero||'').padStart(3,'0')}
+                                    {foiRedirecionada && <span title="OS redirecionada entre equipes" className="ml-1 opacity-80">🔀</span>}
                                   </div>
                                   <div className="truncate text-white leading-tight" style={{ fontSize: 9, opacity: 0.85 }}>
                                     {os.cliente}

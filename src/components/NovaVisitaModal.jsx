@@ -19,6 +19,26 @@ const CAMPO_VAZIO = {
   medidorNome:         '',
   tecnicoResponsavel:  '',
   status:              'reservado',
+  acompanhamento:      false,
+  repetirTipo:         'semana', // 'semana' | 'mes'
+  repetirAte:          '',       // YYYY-MM-DD — só usado quando acompanhamento=true
+}
+
+// Gera datas recorrentes entre inicio e fim (inclusive), a cada semana ou mês
+function gerarDatasRecorrentes(inicio, fim, tipo) {
+  const datas = []
+  const end = new Date(fim + 'T00:00:00')
+  let cur = new Date(inicio + 'T00:00:00')
+  while (cur <= end) {
+    datas.push(cur.toISOString().slice(0, 10))
+    if (tipo === 'semana') {
+      cur = new Date(cur.getTime() + 7 * 24 * 60 * 60 * 1000)
+    } else {
+      cur = new Date(cur)
+      cur.setMonth(cur.getMonth() + 1)
+    }
+  }
+  return datas
 }
 
 // Comprime imagens enviadas pelo operador (1200px max, JPEG 72%)
@@ -60,7 +80,7 @@ function Field({ label, required, children }) {
   )
 }
 
-export default function NovaVisitaModal({ visita, onSalvar, onFechar }) {
+export default function NovaVisitaModal({ visita, onSalvar, onFechar, onExcluir }) {
   const isEdit = !!visita
   // Extrai data e hora de dataHora/dataHoraFim ao carregar visita existente
   const splitDataHora = (str) => {
@@ -200,13 +220,26 @@ export default function NovaVisitaModal({ visita, onSalvar, onFechar }) {
       setErro(`⚠️ Horário conflita com o almoço do medidor (${almocoInicio} – ${almocoFim}). Ajuste o horário da visita OU altere o horário de almoço logo acima.`)
       return
     }
-    // Monta dataHora e dataHoraFim no formato YYYY-MM-DDTHH:mm
-    const dataHora    = `${form.data}T${form.horaInicio}`
-    const dataHoraFim = form.horaFim ? `${form.data}T${form.horaFim}` : ''
     setErro(''); setSalvando(true)
     try {
-      // remove os campos auxiliares antes de enviar
-      const { data: _d, horaInicio: _hi, horaFim: _hf, ...resto } = form
+      // remove campos auxiliares que não vão pro backend
+      const { data: _d, horaInicio: _hi, horaFim: _hf, repetirTipo: _rt, repetirAte: _ra, ...resto } = form
+      const dataHora    = `${form.data}T${form.horaInicio}`
+      const dataHoraFim = form.horaFim ? `${form.data}T${form.horaFim}` : ''
+
+      // Acompanhamento recorrente: cria uma visita por data gerada
+      if (!isEdit && form.acompanhamento && form.repetirAte) {
+        const datas = gerarDatasRecorrentes(form.data, form.repetirAte, form.repetirTipo)
+        if (!datas.length) { setErro('Nenhuma data gerada. Verifique as datas.'); return }
+        for (const d of datas) {
+          const dh  = `${d}T${form.horaInicio}`
+          const dhf = form.horaFim ? `${d}T${form.horaFim}` : ''
+          await api.createVisita({ ...resto, dataHora: dh, dataHoraFim: dhf, status: statusFinal, acompanhamento: true })
+        }
+        await onSalvar(null, false, datas.length) // sinaliza multi-create com contagem
+        return
+      }
+
       await onSalvar({ ...resto, dataHora, dataHoraFim, status: statusFinal }, isEdit)
     } catch (e) { setErro(e.message) }
     finally { setSalvando(false) }
@@ -233,6 +266,67 @@ export default function NovaVisitaModal({ visita, onSalvar, onFechar }) {
         {/* Corpo */}
         <div className="px-6 py-5 space-y-4">
           {erro && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{erro}</div>}
+
+          {/* Acompanhamento de Equipes — só aparece em novas visitas, posicionado no topo */}
+          {!isEdit && (
+            <div className={`rounded-lg border-2 p-4 transition-colors ${form.acompanhamento ? 'bg-teal-50 border-teal-300' : 'bg-gray-50 border-gray-200'}`}>
+              <label className="flex items-start gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={form.acompanhamento}
+                  onChange={e => upd('acompanhamento', e.target.checked)}
+                  className="mt-0.5 w-5 h-5 cursor-pointer accent-teal-600 flex-shrink-0" />
+                <div>
+                  <div className={`text-sm font-bold ${form.acompanhamento ? 'text-teal-800' : 'text-gray-700'}`}>
+                    🔁 Acompanhamento de Equipes
+                  </div>
+                  <div className={`text-xs mt-0.5 ${form.acompanhamento ? 'text-teal-600' : 'text-gray-500'}`}>
+                    Visitas periódicas para acompanhar equipes em campo — aparece em azul-esverdeado na agenda
+                  </div>
+                </div>
+              </label>
+
+              {form.acompanhamento && (
+                <div className="mt-4 space-y-3 pl-8">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-xs font-semibold text-teal-800 whitespace-nowrap">Repetir:</span>
+                    <div className="flex gap-2">
+                      {[
+                        { v: 'semana', l: 'Toda semana' },
+                        { v: 'mes',    l: 'Todo mês' },
+                      ].map(op => (
+                        <button key={op.v} type="button"
+                          onClick={() => upd('repetirTipo', op.v)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${form.repetirTipo === op.v ? 'bg-teal-600 text-white shadow-sm' : 'bg-white border border-teal-300 text-teal-700 hover:bg-teal-100'}`}>
+                          {op.l}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <Field label="Repetir até (inclusive)">
+                    <input type="date" value={form.repetirAte}
+                      min={form.data || undefined}
+                      onChange={e => upd('repetirAte', e.target.value)}
+                      className="w-full border border-teal-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-300 focus:border-teal-400 bg-white" />
+                  </Field>
+
+                  {form.data && form.repetirAte && form.repetirAte >= form.data && (
+                    <div className="text-xs text-teal-700 bg-teal-100 rounded-lg p-2.5 border border-teal-200">
+                      {(() => {
+                        const datas = gerarDatasRecorrentes(form.data, form.repetirAte, form.repetirTipo)
+                        const exibe = datas.slice(0, 3).map(d => {
+                          const [y, m, dia] = d.split('-')
+                          return `${dia}/${m}`
+                        })
+                        return `📅 ${datas.length} visita(s): ${exibe.join(', ')}${datas.length > 3 ? ` … e mais ${datas.length - 3}` : ''}`
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Data + Hora início + Hora término — campos separados */}
           <div className="grid grid-cols-3 gap-3">
@@ -428,6 +522,7 @@ export default function NovaVisitaModal({ visita, onSalvar, onFechar }) {
               </div>
             )}
           </Field>
+
         </div>
 
         {/* Footer com botões */}
@@ -438,6 +533,12 @@ export default function NovaVisitaModal({ visita, onSalvar, onFechar }) {
                 <p className="text-xs text-gray-500 text-center">
                   ⚠️ <strong>Reservado</strong> não aparece pro medidor. Clique em <strong>Confirmar</strong> para liberar.
                 </p>
+              )}
+              {onExcluir && (
+                <button type="button" onClick={onExcluir}
+                  className="w-full py-2 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-100 transition-colors">
+                  🗑️ Excluir esta visita
+                </button>
               )}
               <div className="flex gap-2">
                 <button onClick={onFechar}

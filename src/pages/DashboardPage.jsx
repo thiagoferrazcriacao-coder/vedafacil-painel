@@ -194,6 +194,9 @@ export default function DashboardPage() {
   const [customEnd, setCustomEnd]       = useState('')
   const [stats, setStats]               = useState(null)
   const [loadingStats, setLoadingStats] = useState(false)
+  const [prodPeriodo, setProdPeriodo]   = useState('semana')
+  const [prodEquipes, setProdEquipes]   = useState([])
+  const [loadingProd, setLoadingProd]   = useState(false)
 
   const { start, end, label } = getPeriodDates(period, customStart, customEnd)
 
@@ -206,6 +209,26 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => { if (start && end) loadStats(start, end) }, [start, end, loadStats])
+
+  useEffect(() => {
+    async function loadProdEquipes() {
+      setLoadingProd(true)
+      try {
+        if (prodPeriodo === 'dia') {
+          const d = await api.getEstoqueEquipesDia()
+          setProdEquipes((d.equipes || []).map(e => ({ nome: e.equipeNome, consumido: e.consumido })))
+        } else if (prodPeriodo === 'semana') {
+          const d = await api.getEstoqueEquipes()
+          setProdEquipes((d.equipes || []).map(e => ({ nome: e.equipeNome, consumido: e.consumido })))
+        } else {
+          const d = await api.getEstoqueEquipesMes()
+          setProdEquipes((d.equipes || []).map(e => ({ nome: e.equipeNome, consumido: e.totaisMes?.consumido ?? 0 })))
+        }
+      } catch (err) { console.error('Prod equipes error:', err) }
+      finally { setLoadingProd(false) }
+    }
+    loadProdEquipes()
+  }, [prodPeriodo])
 
   const S    = stats
   const prev = S?.periodoAnterior
@@ -426,6 +449,57 @@ export default function DashboardPage() {
             </>
           )}
         </div>
+      </div>
+
+      {/* ── Consumo de Produto por Equipe ───────────────────────────────────── */}
+      <div className="card">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 className="font-bold text-gray-800 text-base">GVF Seal por Equipe</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Consumo real de produto por equipe</p>
+          </div>
+          <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5 self-start sm:self-auto">
+            {[['dia','Dia'],['semana','Semana'],['mes','Mês']].map(([val, lbl]) => (
+              <button key={val} onClick={() => setProdPeriodo(val)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150
+                  ${prodPeriodo === val ? 'bg-white text-orange-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
+        {loadingProd ? (
+          <div className="flex items-center justify-center h-20 text-gray-300 text-sm">Carregando...</div>
+        ) : prodEquipes.length === 0 ? (
+          <div className="flex items-center justify-center h-20 text-gray-300 text-sm">Sem dados</div>
+        ) : (() => {
+          const sorted = [...prodEquipes].sort((a, b) => b.consumido - a.consumido)
+          const max = sorted[0]?.consumido || 1
+          return (
+            <div className="space-y-3">
+              {sorted.map(eq => (
+                <div key={eq.nome}>
+                  <div className="flex justify-between items-baseline mb-1">
+                    <span className="text-sm font-medium text-gray-700">{eq.nome}</span>
+                    <span className={`text-sm font-bold ${eq.consumido > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
+                      {eq.consumido.toLocaleString('pt-BR', { minimumFractionDigits: 1 })}L
+                    </span>
+                  </div>
+                  <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all duration-700"
+                      style={{ width: `${max > 0 ? (eq.consumido / max) * 100 : 0}%` }} />
+                  </div>
+                </div>
+              ))}
+              <div className="pt-2 border-t border-gray-50 flex justify-between text-xs text-gray-400">
+                <span>Total</span>
+                <span className="font-semibold text-gray-600">
+                  {sorted.reduce((s, e) => s + e.consumido, 0).toLocaleString('pt-BR', { minimumFractionDigits: 1 })}L
+                </span>
+              </div>
+            </div>
+          )
+        })()}
       </div>
 
       {/* ── Status Breakdown ────────────────────────────────────────────────── */}
