@@ -419,10 +419,15 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
     <span style="width:36px"></span>
   </div>
   <div class="content" style="padding-top:12px">
+    <!-- Toggle Semana / Mês -->
+    <div style="display:flex;gap:4px;padding:4px;background:#f3f4f6;border-radius:10px;margin-bottom:10px">
+      <button id="agenda-tab-semana" onclick="agendaSetView('semana')" style="flex:1;padding:8px;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;background:white;color:#e87722;box-shadow:0 1px 3px rgba(0,0,0,0.08)">📅 Semana</button>
+      <button id="agenda-tab-mes" onclick="agendaSetView('mes')" style="flex:1;padding:8px;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;background:transparent;color:#6b7280">🗓️ Mês</button>
+    </div>
     <div style="display:flex;align-items:center;justify-content:space-between;background:white;border-radius:14px;padding:10px 14px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,0.06)">
-      <button onclick="agendaNavMes(-1)" style="background:#fff5ec;border:1px solid #fed7aa;color:#e87722;width:38px;height:38px;border-radius:10px;font-size:18px;font-weight:700;cursor:pointer">‹</button>
-      <div style="font-size:15px;font-weight:800;color:#1a202c;text-transform:capitalize" id="agenda-mes-label">—</div>
-      <button onclick="agendaNavMes(1)" style="background:#fff5ec;border:1px solid #fed7aa;color:#e87722;width:38px;height:38px;border-radius:10px;font-size:18px;font-weight:700;cursor:pointer">›</button>
+      <button onclick="agendaNav(-1)" style="background:#fff5ec;border:1px solid #fed7aa;color:#e87722;width:38px;height:38px;border-radius:10px;font-size:18px;font-weight:700;cursor:pointer">‹</button>
+      <div style="font-size:15px;font-weight:800;color:#1a202c;text-transform:capitalize;text-align:center;line-height:1.2" id="agenda-mes-label">—</div>
+      <button onclick="agendaNav(1)" style="background:#fff5ec;border:1px solid #fed7aa;color:#e87722;width:38px;height:38px;border-radius:10px;font-size:18px;font-weight:700;cursor:pointer">›</button>
     </div>
     <div id="agenda-content"></div>
   </div>
@@ -462,76 +467,108 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
     <div id="produto-spinner" class="spinner"></div>
     <div id="produto-content" style="display:none">
 
-      <!-- Semana atual -->
-      <div style="margin-bottom:6px">
-        <div class="sec-header">📅 Esta semana <span id="produto-semana-chave" class="sec-count">—</span></div>
-        <div class="stats-row" style="grid-template-columns:repeat(3,1fr)">
-          <div class="stat-box" style="border-top:3px solid #16a34a">
-            <div class="stat-num" style="color:#16a34a" id="ps-recebido">—</div>
-            <div class="stat-lbl">Recebido (L)</div>
+      <!-- Semana atual — 4 linhas de balanço -->
+      <div style="margin-bottom:10px">
+        <div class="sec-header">📅 Semana <span id="produto-semana-chave" class="sec-count">—</span></div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="background:#f0fdf4;border-left:4px solid #16a34a;border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:13px;font-weight:600;color:#166534">TERMINEI A SEMANA PASSADA COM</span>
+            <span id="ps-saldo-anterior" style="font-size:20px;font-weight:800;color:#16a34a">— L</span>
           </div>
-          <div class="stat-box" style="border-top:3px solid #dc2626">
-            <div class="stat-num" style="color:#dc2626" id="ps-gasto">—</div>
-            <div class="stat-lbl">Gasto (L)</div>
+          <div style="background:#eff6ff;border-left:4px solid #2563eb;border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:13px;font-weight:600;color:#1e40af">RECEBI DA EMPRESA ESSA SEMANA</span>
+            <span id="ps-recebido" style="font-size:20px;font-weight:800;color:#2563eb">— L</span>
           </div>
-          <div class="stat-box" style="border-top:3px solid #e87722">
-            <div class="stat-num" style="color:#e87722" id="ps-saldo">—</div>
-            <div class="stat-lbl">Saldo (L)</div>
+          <div style="background:#fef2f2;border-left:4px solid #dc2626;border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:13px;font-weight:600;color:#991b1b">GASTEI</span>
+            <span id="ps-gasto" style="font-size:20px;font-weight:800;color:#dc2626">— L</span>
           </div>
-        </div>
-        <!-- barra de progresso de consumo -->
-        <div style="margin-top:4px;padding:0 2px">
-          <div class="progress-bar" style="height:10px">
-            <div id="ps-barra" class="progress-fill" style="width:0%"></div>
-          </div>
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;margin-top:2px">
-            <span>0L</span>
-            <span id="ps-barra-pct">0% usado</span>
-            <span id="ps-barra-max">—L</span>
+          <div style="background:#fff7ed;border-left:4px solid #e87722;border-radius:8px;padding:14px 14px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:14px;font-weight:700;color:#92400e">ESTOU AGORA COM</span>
+            <span id="ps-saldo" style="font-size:26px;font-weight:900;color:#e87722">— L</span>
           </div>
         </div>
       </div>
 
-      <!-- Mês atual -->
-      <div style="margin-bottom:6px">
-        <div class="sec-header">🗓 Este mês <span id="produto-mes-chave" class="sec-count">—</span></div>
-        <div class="stats-row" style="grid-template-columns:repeat(3,1fr)">
-          <div class="stat-box" style="border-top:3px solid #16a34a">
-            <div class="stat-num" style="color:#16a34a" id="pm-recebido">—</div>
-            <div class="stat-lbl">Recebido (L)</div>
-          </div>
-          <div class="stat-box" style="border-top:3px solid #dc2626">
-            <div class="stat-num" style="color:#dc2626" id="pm-gasto">—</div>
-            <div class="stat-lbl">Gasto (L)</div>
-          </div>
-          <div class="stat-box" style="border-top:3px solid #7c3aed">
-            <div class="stat-num" style="color:#7c3aed" id="pm-saldo">—</div>
-            <div class="stat-lbl">Saldo (L)</div>
-          </div>
-        </div>
-      </div>
+      <!-- Botão transferência produto -->
+      <button onclick="abrirTransferenciaModal('produto')" style="width:100%;background:linear-gradient(135deg,#0369a1,#0ea5e9);color:#fff;border:none;border-radius:12px;padding:18px 20px;font-size:17px;font-weight:800;margin-bottom:10px;cursor:pointer;letter-spacing:0.5px">
+        🔄 TRANSFERÊNCIA DE PRODUTO
+      </button>
 
-      <!-- Botão adicionar -->
-      <div class="card" style="margin-top:8px">
-        <h3 style="font-size:15px;font-weight:700;margin-bottom:4px;color:#1a202c">Receber mais produto</h3>
-        <p style="font-size:13px;color:#6b7280;margin-bottom:14px">Pegou mais GVF Seal? Registre aqui para atualizar seu saldo da semana.</p>
-        <label class="label">Quantidade (litros) *</label>
-        <input id="prod-add-litros" class="input" type="number" min="0.1" step="0.1" placeholder="Ex: 25" style="margin-bottom:10px;font-size:18px;text-align:center;font-weight:700">
-        <div id="prod-add-error" class="alert alert-error" style="display:none;margin-bottom:10px"></div>
-        <button class="btn btn-primary" style="font-size:16px" onclick="confirmarAdicionarProduto()">+ Adicionar produto</button>
-      </div>
-
-      <!-- Declarar injetores recebidos do encarregado -->
-      <div class="card" style="margin-top:8px">
-        <h3 style="font-size:15px;font-weight:700;margin-bottom:4px;color:#1a202c">💉 Recebeu injetores?</h3>
-        <p style="font-size:13px;color:#6b7280;margin-bottom:14px">Toda vez que o encarregado entregar injetores, lance aqui pra bater com o controle dele.</p>
-        <label class="label">Quantidade de injetores *</label>
-        <input id="inj-add-qtd" class="input" type="number" min="1" step="1" placeholder="Ex: 50" style="margin-bottom:10px;font-size:18px;text-align:center;font-weight:700">
-        <div id="inj-add-error" class="alert alert-error" style="display:none;margin-bottom:10px"></div>
-        <button class="btn btn-primary" style="font-size:16px;background:#7c3aed" onclick="confirmarAdicionarInjetores()">+ Lançar injetores</button>
-      </div>
+      <!-- Botão transferência injetores -->
+      <button onclick="abrirTransferenciaModal('injetores')" style="width:100%;background:linear-gradient(135deg,#6d28d9,#8b5cf6);color:#fff;border:none;border-radius:12px;padding:18px 20px;font-size:17px;font-weight:800;cursor:pointer;letter-spacing:0.5px">
+        💉 TRANSFERÊNCIA DE INJETORES
+      </button>
     </div>
   </div>
+</div>
+
+<!-- ── MODAL: Transferência de produto/injetores ──────────────────────────── -->
+<div id="transferencia-modal" class="modal-overlay hidden" onclick="if(event.target===this)fecharTransferenciaModal()">
+  <div class="modal-box" style="max-width:360px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 id="transf-titulo" style="font-size:16px;font-weight:700;margin:0">Transferir</h3>
+      <button onclick="fecharTransferenciaModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button>
+    </div>
+    <label class="label">Equipe destino *</label>
+    <select id="transf-equipe-sel" class="input" style="margin-bottom:12px"></select>
+    <label class="label" id="transf-qtd-label">Quantidade *</label>
+    <input id="transf-qtd" class="input" type="number" min="0.1" step="0.1" placeholder="Ex: 25" style="margin-bottom:10px;font-size:18px;text-align:center;font-weight:700">
+    <div id="transf-error" class="alert alert-error" style="display:none;margin-bottom:10px"></div>
+    <button class="btn btn-primary" style="font-size:16px" onclick="confirmarTransferencia()">✅ Confirmar transferência</button>
+  </div>
+</div>
+
+<!-- ── MODAL: Novo ponto de problema (reparo avulso) ─────────────────────── -->
+<div id="novo-ponto-modal" class="modal-overlay hidden" onclick="if(event.target===this)fecharNovoPontoModal()">
+  <div class="modal-box" style="max-width:380px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="font-size:16px;font-weight:700;margin:0">🔧 Novo Ponto de Problema</h3>
+      <button onclick="fecharNovoPontoModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button>
+    </div>
+    <label class="label">Local / Nome do ponto *</label>
+    <input id="np-nome" class="input" type="text" placeholder="Ex: Calha norte, Cobertura 3" style="margin-bottom:10px">
+    <label class="label">Tipo de problema</label>
+    <select id="np-tipo" class="input" style="margin-bottom:10px">
+      <option value="">Selecione...</option>
+      <option value="Trinca">Trinca</option>
+      <option value="Junta fria">Junta fria</option>
+      <option value="Ralo">Ralo</option>
+      <option value="Junta de dilatação">Junta de dilatação</option>
+      <option value="Ferragem exposta">Ferragem exposta</option>
+      <option value="Cortina">Cortina</option>
+      <option value="Infiltração">Infiltração</option>
+      <option value="Outro">Outro</option>
+    </select>
+    <label class="label">Item / Detalhe</label>
+    <input id="np-item" class="input" type="text" placeholder="Ex: Viga 2, Pilar sudeste" style="margin-bottom:10px">
+    <label class="label">Fotos do problema</label>
+    <input id="np-fotos-input" type="file" accept="image/*" capture="environment" multiple style="display:none">
+    <button onclick="document.getElementById('np-fotos-input').click()" style="width:100%;background:#f3f4f6;border:1.5px dashed #d1d5db;border-radius:10px;padding:12px;font-size:13px;cursor:pointer;margin-bottom:8px;color:#374151">
+      📷 Adicionar fotos
+    </button>
+    <div id="np-fotos-preview" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px"></div>
+    <div id="np-error" class="alert alert-error" style="display:none;margin-bottom:10px"></div>
+    <button class="btn btn-primary" onclick="confirmarNovoPonto()">✅ Adicionar ponto</button>
+  </div>
+</div>
+
+<!-- ── MODAL: Confirmação de entrega de produto (Edson enviou) ───────────── -->
+<div id="confirmacao-produto-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:linear-gradient(180deg,#14532d,#166534);flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center">
+  <div style="font-size:56px;margin-bottom:12px">📦</div>
+  <h2 style="color:#fff;font-size:22px;font-weight:900;margin-bottom:8px">Produto Recebido!</h2>
+  <p style="color:#bbf7d0;font-size:14px;margin-bottom:20px" id="confirm-prod-desc">O encarregado registrou uma entrega para sua equipe.</p>
+  <div id="confirm-prod-cards" style="width:100%;max-width:340px;margin-bottom:24px"></div>
+  <div id="confirm-prod-divergencia" style="display:none;width:100%;max-width:340px;margin-bottom:16px">
+    <p style="color:#fef9c3;font-size:13px;margin-bottom:8px">Quanto você realmente recebeu?</p>
+    <input id="confirm-prod-qtd-real" type="number" min="0" step="0.1" placeholder="Qtd real recebida" style="width:100%;padding:14px;border-radius:10px;border:none;font-size:18px;font-weight:700;text-align:center;margin-bottom:8px">
+    <input id="confirm-prod-desc-div" type="text" placeholder="Descreva a diferença (opcional)" style="width:100%;padding:12px;border-radius:10px;border:none;font-size:14px">
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:340px" id="confirm-prod-btns">
+    <button id="confirm-prod-btn-confirmar" onclick="_confirmarProdutoAceitar()" style="background:#16a34a;border:2px solid #4ade80;color:#fff;border-radius:14px;padding:18px;font-size:18px;font-weight:800;cursor:pointer">✅ CONFIRMAR RECEBIMENTO</button>
+    <button onclick="_confirmarProdutoNaoAceitar()" style="background:rgba(255,255,255,0.15);border:2px solid rgba(255,255,255,0.3);color:#fff;border-radius:14px;padding:16px;font-size:15px;font-weight:700;cursor:pointer">⚠️ NÃO CONFIRMAR — quantidade diferente</button>
+  </div>
+  <button id="confirm-prod-btn-enviar-div" onclick="_confirmarProdutoEnviarDivergencia()" style="display:none;background:#dc2626;border:none;color:#fff;border-radius:14px;padding:18px;width:100%;max-width:340px;font-size:16px;font-weight:800;cursor:pointer;margin-top:4px">📤 Enviar divergência</button>
 </div>
 
 <!-- ── SCREEN: OS LIST ───────────────────────────────────────────────────── -->
@@ -1022,8 +1059,90 @@ function fecharDevocional() {
 function irParaHome() {
   atualizarHomeGreeting();
   showScreen('screen-home');
-  // Versículo diário (não bloqueia o resto — mostra por cima quando carregar)
   mostrarVersiculoDoDia();
+  // Verifica confirmações pendentes do encarregado (após versículo)
+  setTimeout(_verificarConfirmacoesPendentes, 800);
+}
+
+// ─── Confirmações de produto do encarregado ───────────────────────────────────
+let _confirmacoesPendentes = [];
+let _confirmacaoAtualIdx = 0;
+
+async function _verificarConfirmacoesPendentes() {
+  if (!getAppToken()) return;
+  try {
+    const r = await apiFetch(`${API}/confirmacoes-pendentes`);
+    if (!r.ok) return;
+    const data = await r.json();
+    _confirmacoesPendentes = data.pendentes || [];
+    _confirmacaoAtualIdx = 0;
+    if (_confirmacoesPendentes.length > 0) _mostrarConfirmacaoAtual();
+  } catch (e) { /* silencioso */ }
+}
+
+function _mostrarConfirmacaoAtual() {
+  const modal = document.getElementById('confirmacao-produto-modal');
+  if (!modal || _confirmacaoAtualIdx >= _confirmacoesPendentes.length) {
+    if (modal) modal.style.display = 'none';
+    return;
+  }
+  const item = _confirmacoesPendentes[_confirmacaoAtualIdx];
+  const unid = item.tipo === 'injetores' ? 'unid' : 'L';
+  const icone = item.tipo === 'injetores' ? '💉' : '📦';
+  document.querySelector('#confirmacao-produto-modal div:first-child').textContent = icone;
+  document.getElementById('confirm-prod-desc').textContent =
+    `${item.encarregadoNome || 'O encarregado'} registrou uma entrega para sua equipe.`;
+  document.getElementById('confirm-prod-cards').innerHTML = `
+    <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:16px;margin-bottom:8px">
+      <div style="font-size:13px;color:#bbf7d0;margin-bottom:4px">${item.tipo === 'injetores' ? 'INJETORES ENTREGUES' : 'PRODUTO ENTREGUE'}</div>
+      <div style="font-size:36px;font-weight:900;color:#fff">${item.quantidade} ${unid}</div>
+      <div style="font-size:11px;color:#86efac;margin-top:4px">${new Date(item.ts).toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}</div>
+    </div>
+    ${_confirmacoesPendentes.length > 1 ? `<div style="color:#bbf7d0;font-size:12px">${_confirmacaoAtualIdx+1} de ${_confirmacoesPendentes.length} entregas pendentes</div>` : ''}
+  `;
+  document.getElementById('confirm-prod-divergencia').style.display = 'none';
+  document.getElementById('confirm-prod-btn-confirmar').style.display = '';
+  document.getElementById('confirm-prod-btns').style.display = 'flex';
+  document.getElementById('confirm-prod-btn-enviar-div').style.display = 'none';
+  modal.style.display = 'flex';
+}
+
+async function _confirmarProdutoAceitar() {
+  const item = _confirmacoesPendentes[_confirmacaoAtualIdx];
+  if (!item) return;
+  try {
+    await apiFetch(`${API}/confirmacoes-pendentes/${item._id}/responder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aceita: true }),
+    });
+  } catch (e) { /* continua mesmo offline */ }
+  showToast('✅ Recebimento confirmado!');
+  _confirmacaoAtualIdx++;
+  _mostrarConfirmacaoAtual();
+}
+
+function _confirmarProdutoNaoAceitar() {
+  document.getElementById('confirm-prod-divergencia').style.display = '';
+  document.getElementById('confirm-prod-btns').style.display = 'none';
+  document.getElementById('confirm-prod-btn-enviar-div').style.display = '';
+}
+
+async function _confirmarProdutoEnviarDivergencia() {
+  const item = _confirmacoesPendentes[_confirmacaoAtualIdx];
+  if (!item) return;
+  const qtdReal = parseFloat(document.getElementById('confirm-prod-qtd-real').value) || null;
+  const descDiv = document.getElementById('confirm-prod-desc-div').value.trim();
+  try {
+    await apiFetch(`${API}/confirmacoes-pendentes/${item._id}/responder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aceita: false, qtdReal, divergenciaDesc: descDiv }),
+    });
+  } catch (e) { /* continua mesmo offline */ }
+  showToast('⚠️ Divergência registrada');
+  _confirmacaoAtualIdx++;
+  _mostrarConfirmacaoAtual();
 }
 
 function irParaLista(tab) {
@@ -1035,19 +1154,58 @@ function irParaLista(tab) {
 // ── Agenda da Equipe ─────────────────────────────────────────────────────
 let _agendaMesRef = null; // primeiro dia do mês exibido
 
+// Modo de visualização: 'semana' (padrão) ou 'mes'.
+// Persistido em localStorage pra a equipe não precisar trocar toda vez.
+let _agendaView = localStorage.getItem('vfa_agenda_view') || 'semana';
+let _agendaSemanaRef = null;  // data de referência pra view semanal (domingo)
+
 function abrirAgendaEquipe() {
   if (!_agendaMesRef) {
     const hoje = new Date();
     _agendaMesRef = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
   }
+  if (!_agendaSemanaRef) {
+    _agendaSemanaRef = _agendaWeekStart(new Date());
+  }
   showScreen('screen-agenda');
+  // Sincroniza estilo dos botões com a view salva (ex: localStorage = 'mes')
+  const semBtn = document.getElementById('agenda-tab-semana');
+  const mesBtn = document.getElementById('agenda-tab-mes');
+  const ativa = 'background:white;color:#e87722;box-shadow:0 1px 3px rgba(0,0,0,0.08)';
+  const inativa = 'background:transparent;color:#6b7280';
+  if (semBtn) semBtn.style.cssText = `flex:1;padding:8px;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;${_agendaView==='semana'?ativa:inativa}`;
+  if (mesBtn) mesBtn.style.cssText = `flex:1;padding:8px;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;${_agendaView==='mes'?ativa:inativa}`;
   renderAgendaEquipe();
 }
 
-function agendaNavMes(delta) {
-  _agendaMesRef = new Date(_agendaMesRef.getFullYear(), _agendaMesRef.getMonth() + delta, 1);
+function agendaSetView(view) {
+  if (view === _agendaView) return;
+  _agendaView = view;
+  localStorage.setItem('vfa_agenda_view', view);
+  // Atualiza estilo dos botões
+  const semBtn = document.getElementById('agenda-tab-semana');
+  const mesBtn = document.getElementById('agenda-tab-mes');
+  const ativa = 'background:white;color:#e87722;box-shadow:0 1px 3px rgba(0,0,0,0.08)';
+  const inativa = 'background:transparent;color:#6b7280';
+  if (semBtn) semBtn.style.cssText = `flex:1;padding:8px;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;${view==='semana'?ativa:inativa}`;
+  if (mesBtn) mesBtn.style.cssText = `flex:1;padding:8px;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;${view==='mes'?ativa:inativa}`;
   renderAgendaEquipe();
 }
+
+// Navegação unificada: vai pra semana anterior/próxima ou mês anterior/próximo
+function agendaNav(delta) {
+  if (_agendaView === 'semana') {
+    const d = new Date(_agendaSemanaRef);
+    d.setDate(d.getDate() + delta * 7);
+    _agendaSemanaRef = d;
+  } else {
+    _agendaMesRef = new Date(_agendaMesRef.getFullYear(), _agendaMesRef.getMonth() + delta, 1);
+  }
+  renderAgendaEquipe();
+}
+
+// Alias legado pra retrocompatibilidade (caso algum onclick antigo tenha sobrado)
+function agendaNavMes(delta) { agendaNav(delta); }
 
 function _agendaParseDate(s) {
   if (!s) return null;
@@ -1096,6 +1254,11 @@ function _agendaStatusFaixa(status) {
 }
 
 function renderAgendaEquipe() {
+  if (_agendaView === 'semana') return renderAgendaSemana();
+  return renderAgendaMes();
+}
+
+function renderAgendaMes() {
   const mesRef  = _agendaMesRef;
   const mesNome = mesRef.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
   document.getElementById('agenda-mes-label').textContent = mesNome;
@@ -1179,7 +1342,13 @@ function renderAgendaEquipe() {
     const di = _agendaParseDate(os.dataInicio);
     const df = _agendaParseDate(os.dataTermino) || di;
     return di && df >= inicioMes && di <= fimMes;
-  }).sort((a,b) => _agendaParseDate(a.dataInicio) - _agendaParseDate(b.dataInicio));
+  }).sort((a,b) => {
+    // Ordena por data; em caso de mesmo dia, ordena por hora (vazias vão por último)
+    const dA = _agendaParseDate(a.dataInicio), dB = _agendaParseDate(b.dataInicio);
+    if (dA - dB) return dA - dB;
+    const hA = a.horaInicio || '99:99', hB = b.horaInicio || '99:99';
+    return hA.localeCompare(hB);
+  });
 
   if (osDoMes.length) {
     html += `<div style="margin-top:16px;font-size:12px;font-weight:800;color:#e87722;text-transform:uppercase;letter-spacing:0.5px;padding-left:4px">📋 ${osDoMes.length} OS no mês</div>`;
@@ -1200,6 +1369,87 @@ function renderAgendaEquipe() {
         <div class="os-sub" style="margin-top:3px">📅 ${_agendaFmtRange(dI, dF || dI)}</div>
       </div>`;
     });
+  }
+
+  document.getElementById('agenda-content').innerHTML = html;
+}
+
+// ─── Visualização semanal: 7 dias detalhados, sem hierarquia de chip ───────────
+function renderAgendaSemana() {
+  const ini = _agendaWeekStart(_agendaSemanaRef);
+  const fim = new Date(ini); fim.setDate(fim.getDate() + 6);
+  const label = `${_agendaFmtRange(ini, fim)}<br><span style="font-size:11px;font-weight:600;color:#9ca3af">${ini.toLocaleDateString('pt-BR',{month:'long',year:'numeric'})}</span>`;
+  document.getElementById('agenda-mes-label').innerHTML = label;
+
+  const todasOS = [...(S_osTabs.ativas || []), ...(S_osTabs.concluidas || [])];
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const corEqu = '#e87722';
+  const DIAS_SEMANA = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+
+  // Agrupa OSes por dia da semana
+  const porDia = {};
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(ini); d.setDate(d.getDate() + i);
+    porDia[d.toISOString().slice(0,10)] = [];
+  }
+  todasOS.forEach(os => {
+    const di = _agendaParseDate(os.dataInicio);
+    if (!di) return;
+    const df = _agendaParseDate(os.dataTermino) || di;
+    const cur = new Date(di);
+    while (cur <= df) {
+      const key = cur.toISOString().slice(0,10);
+      if (porDia[key] !== undefined) porDia[key].push(os);
+      cur.setDate(cur.getDate() + 1);
+    }
+  });
+
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(ini); d.setDate(d.getDate() + i);
+    const key = d.toISOString().slice(0,10);
+    const osDay = porDia[key] || [];
+    // Ordena por hora
+    osDay.sort((a,b) => (a.horaInicio || '99:99').localeCompare(b.horaInicio || '99:99'));
+
+    const isToday = _agendaSameDay(d, hoje);
+    const isWE   = d.getDay() === 0 || d.getDay() === 6;
+    const headBg = isToday ? corEqu : (isWE ? '#fef3c7' : '#f9fafb');
+    const headColor = isToday ? 'white' : (isWE ? '#92400e' : '#374151');
+
+    html += `<div style="background:white;border-radius:12px;overflow:hidden;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,0.05)">
+      <div style="background:${headBg};padding:8px 14px;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:14px;font-weight:800;color:${headColor};text-transform:capitalize">
+          ${DIAS_SEMANA[d.getDay()]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}
+          ${isToday ? '<span style="font-size:10px;font-weight:700;background:white;color:#e87722;padding:1px 6px;border-radius:8px;margin-left:6px">HOJE</span>' : ''}
+        </div>
+        <div style="font-size:11px;font-weight:700;color:${headColor};opacity:0.8">${osDay.length ? `${osDay.length} OS` : ''}</div>
+      </div>`;
+
+    if (!osDay.length) {
+      html += `<div style="padding:12px 14px;font-size:12px;color:#9ca3af;font-style:italic">Sem agendamentos</div>`;
+    } else {
+      osDay.forEach(os => {
+        const isReparo = (os.tipo||'normal') === 'reparo';
+        const status = os.status || 'agendada';
+        html += `<div onclick="openOS('${os._id}')" style="padding:10px 14px;border-top:1px solid #f3f4f6;cursor:pointer;display:flex;gap:10px;align-items:flex-start">
+          ${os.horaInicio
+            ? `<div style="background:#fff5ec;border:1px solid #fed7aa;color:#e87722;border-radius:8px;padding:4px 8px;font-size:13px;font-weight:800;flex-shrink:0;min-width:54px;text-align:center">${os.horaInicio}</div>`
+            : `<div style="background:#f3f4f6;color:#9ca3af;border-radius:8px;padding:4px 8px;font-size:11px;font-weight:700;flex-shrink:0;min-width:54px;text-align:center">—</div>`
+          }
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:2px">
+              <span style="font-size:13px;font-weight:800;color:#1a202c">#${String(os.numero||'').padStart(3,'0')}</span>
+              ${isReparo ? `<span class="badge-reparo" style="font-size:9px">🔧 REPARO</span>` : ''}
+              <span class="os-status status-${status}" style="font-size:9px">${statusLabel(status)}</span>
+            </div>
+            <div style="font-size:13px;font-weight:700;color:#1a202c;line-height:1.25">${os.cliente||'—'}</div>
+            ${os.endereco ? `<div style="font-size:11px;color:#6b7280;margin-top:2px;line-height:1.3">📍 ${[os.endereco, os.cidade].filter(Boolean).join(' · ')}</div>` : ''}
+          </div>
+        </div>`;
+      });
+    }
+    html += `</div>`;
   }
 
   document.getElementById('agenda-content').innerHTML = html;
@@ -1240,11 +1490,7 @@ async function boot() {
   if (S.equipeId && S.membro && authed) {
     document.getElementById('equipe-badge').textContent = S.equipeNome || S.membro;
     loadOSList(); // carrega em background; updateHomeCounts() é chamado ao final
-    if (isPrimeiroAcessoSemana()) {
-      showScreen('screen-lancamento-semanal');
-    } else {
-      irParaHome();
-    }
+    irParaHome();
   } else {
     hideLoading();
   }
@@ -1487,12 +1733,8 @@ async function doLogin() {
     }
 
     localStorage.setItem('vfa_authed', 'true');
-    loadOSList(); // em background
-    if (isPrimeiroAcessoSemana()) {
-      showScreen('screen-lancamento-semanal');
-    } else {
-      irParaHome();
-    }
+    loadOSList();
+    irParaHome();
   } catch (e) {
     hideLoading();
     errEl.textContent = 'Erro de conexão. Tente novamente.';
@@ -1531,11 +1773,7 @@ async function trocarSenha() {
     if (data.token) setAppToken(data.token);
     localStorage.setItem('vfa_authed', 'true');
     loadOSList();
-    if (isPrimeiroAcessoSemana()) {
-      showScreen('screen-lancamento-semanal');
-    } else {
-      irParaHome();
-    }
+    irParaHome();
   } catch (e) {
     hideLoading();
     errEl.textContent = 'Erro de conexão. Tente novamente.';
@@ -1581,7 +1819,7 @@ function renderOSCard(os) {
         </div>
         <div class="os-title" style="font-size:14px;font-weight:600;margin-bottom:1px">${os.cliente||'—'}</div>
         ${os.endereco ? `<div class="os-sub">${[os.endereco, os.cidade].filter(Boolean).join(' · ')}</div>` : ''}
-        ${os.dataInicio ? `<div class="os-sub" style="margin-top:2px">📅 ${formatDate(os.dataInicio)}</div>` : ''}
+        ${os.dataInicio ? `<div class="os-sub" style="margin-top:2px">📅 ${formatDate(os.dataInicio)}${os.horaInicio ? ` <span style="color:#e87722;font-weight:700">🕗 ${os.horaInicio}</span>` : ''}</div>` : ''}
         ${isReparo && os.equipeOriginalNome ? `<div class="os-sub" style="margin-top:2px;color:#b91c1c">⚠️ Equipe original: ${os.equipeOriginalNome}</div>` : ''}
         ${!isReparo && os.tecnicoResponsavel ? `<div class="os-sub" style="margin-top:2px">👷 Resp: ${os.tecnicoResponsavel}</div>` : ''}
       </div>
@@ -1694,9 +1932,16 @@ async function loadOSList() {
       apiFetch(`${API}/os?equipeId=${encodeURIComponent(S.equipeId)}&historico=1`).then(r=>r.json()).catch(()=>[]),
       apiFetch(`${API}/os/compartilhadas?equipeId=${encodeURIComponent(S.equipeId)}`).then(r=>r.json()).catch(()=>[]),
     ]);
-    S_osTabs.ativas         = Array.isArray(d1) ? d1 : [];
-    S_osTabs.concluidas     = Array.isArray(d2) ? d2 : [];
-    S_osTabs.compartilhadas = Array.isArray(d3) ? d3 : [];
+    // Ordena por dataInicio + horaInicio: OSes do mesmo dia aparecem em ordem
+    // cronológica de horário (sem hora vai pro final do dia).
+    const sortByDataHora = (a, b) => {
+      const da = (a.dataInicio || '9999-99-99'), db = (b.dataInicio || '9999-99-99');
+      if (da !== db) return da.localeCompare(db);
+      return (a.horaInicio || '99:99').localeCompare(b.horaInicio || '99:99');
+    };
+    S_osTabs.ativas         = (Array.isArray(d1) ? d1 : []).sort(sortByDataHora);
+    S_osTabs.concluidas     = (Array.isArray(d2) ? d2 : []).sort(sortByDataHora);
+    S_osTabs.compartilhadas = (Array.isArray(d3) ? d3 : []).sort(sortByDataHora);
     S.osList = S_osTabs.ativas;
 
     spinner.style.display = 'none';
@@ -1879,7 +2124,7 @@ function renderOSDetail() {
         <div style="font-size:16px;font-weight:700;">${os.cliente||'—'}</div>
       </div>
       ${os.endereco ? `<div style="font-size:13px;color:#6b7280">${os.endereco}${os.cidade?', '+os.cidade:''}</div>` : ''}
-      ${os.dataInicio ? `<div style="font-size:13px;color:#6b7280;margin-top:2px">📅 ${formatDate(os.dataInicio)}${os.dataTermino?' → '+formatDate(os.dataTermino):''}</div>` : ''}
+      ${os.dataInicio ? `<div style="font-size:13px;color:#6b7280;margin-top:2px">📅 ${formatDate(os.dataInicio)}${os.dataTermino?' → '+formatDate(os.dataTermino):''}${os.horaInicio ? ` <span style="color:#e87722;font-weight:700">🕗 ${os.horaInicio}</span>` : ''}</div>` : ''}
       ${os.tecnicoResponsavel ? `<div style="font-size:13px;color:#6b7280;margin-top:2px">👷 Técnico: <strong>${os.tecnicoResponsavel}</strong></div>` : ''}
       ${(mapsUrl || wazeUrl || waUrl) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
         ${mapsUrl ? `<a href="${mapsUrl}" target="_blank" class="info-link link-maps">🗺️ Google Maps</a>` : ''}
@@ -1943,8 +2188,11 @@ function renderOSDetail() {
           }).join('')}
         </div>` : ''
     }
-    <div class="section-title">Locais de Serviço</div>
-    ${!pontos.length ? '<div class="empty"><div class="empty-icon">📍</div><p>Nenhum local</p></div>' : ''}
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Locais de Serviço</span>
+      ${isReparo && !jaConcluida ? `<button onclick="abrirNovoPontoModal()" style="background:#dc2626;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer">+ Novo Ponto</button>` : ''}
+    </div>
+    ${!pontos.length ? '<div class="empty"><div class="empty-icon">📍</div><p>Nenhum local ainda</p></div>' : ''}
     ${pontos.map((p, i) => {
       const sl    = p.statusLocal || (p.status === 'concluido' ? 'concluido' : 'pendente');
       const subs  = p.subPontos || [];
@@ -2050,14 +2298,24 @@ function abrirMapaServico() {
     }).join('');
   }
 
+  // Registra fotos no array global ANTES de gerar HTML — onclick usa índice
+  // em vez do src inline (base64 grande estoura parser de atributos).
+  window._fotosVisiveis = [];
+  const pushFoto = (f) => {
+    const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.thumb || f.full || '') : (f || '');
+    if (!src) return -1;
+    window._fotosVisiveis.push(src);
+    return window._fotosVisiveis.length - 1;
+  };
+
   // Fotos de referência da medição (se existirem)
   if (fotosRef.length > 0) {
     html += `<div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-top:16px;margin-bottom:10px">📷 Fotos da Medição (referência)</div>`;
     html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">`;
     fotosRef.forEach(f => {
-      const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.thumb || f.full || '') : (f || '');
-      if (!src) return;
-      html += `<a href="${src}" target="_blank"><img src="${src}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb"></a>`;
+      const i = pushFoto(f);
+      if (i < 0) return;
+      html += `<img src="${window._fotosVisiveis[i]}" onclick="abrirLightboxIdx(${i})" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;cursor:zoom-in">`;
     });
     html += `</div>`;
   }
@@ -2068,9 +2326,9 @@ function abrirMapaServico() {
     html += `<div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-top:16px;margin-bottom:10px">${antesTitle} (${fotosAntes.length})</div>`;
     html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">`;
     fotosAntes.forEach(f => {
-      const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.thumb || f.full || '') : (f || '');
-      if (!src) return;
-      html += `<a href="${src}" target="_blank"><img src="${src}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #fca5a5"></a>`;
+      const i = pushFoto(f);
+      if (i < 0) return;
+      html += `<img src="${window._fotosVisiveis[i]}" onclick="abrirLightboxIdx(${i})" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #fca5a5;cursor:zoom-in">`;
     });
     html += `</div>`;
   }
@@ -2080,9 +2338,9 @@ function abrirMapaServico() {
     html += `<div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-top:16px;margin-bottom:10px">📸 Fotos DEPOIS (${fotosDepois.length})</div>`;
     html += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">`;
     fotosDepois.forEach(f => {
-      const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.thumb || f.full || '') : (f || '');
-      if (!src) return;
-      html += `<a href="${src}" target="_blank"><img src="${src}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #86efac"></a>`;
+      const i = pushFoto(f);
+      if (i < 0) return;
+      html += `<img src="${window._fotosVisiveis[i]}" onclick="abrirLightboxIdx(${i})" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #86efac;cursor:zoom-in">`;
     });
     html += `</div>`;
   }
@@ -2116,6 +2374,9 @@ function abrirMapaServicoTotal() {
   if (!os) return;
   const pontos = os.pontos || [];
   const isReparoOS = (os.tipo || 'normal') === 'reparo';
+  // Zera registro global — thumbs vão usar índice em vez de src inline
+  // (base64 grande estoura o atributo HTML do onclick)
+  window._fotosVisiveis = [];
 
   // Totais agregados
   let totalSubs = 0, feitosSubs = 0, totalFotosRef = 0, totalFotosAntes = 0, totalFotosDepois = 0;
@@ -2199,8 +2460,9 @@ function abrirMapaServicoTotal() {
       fotos.forEach(f => {
         const src = (f && typeof f === 'object') ? (f.data || f.base64 || f.thumb || f.full || '') : (f || '');
         if (!src) return;
-        const safeSrc = src.replace(/'/g, "\\'");
-        h += `<img src="${src}" onclick="abrirLightboxFoto('${safeSrc}')" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1.5px solid ${borderColor};cursor:zoom-in">`;
+        window._fotosVisiveis.push(src);
+        const i = window._fotosVisiveis.length - 1;
+        h += `<img src="${src}" onclick="abrirLightboxIdx(${i})" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1.5px solid ${borderColor};cursor:zoom-in">`;
       });
       h += `</div></div>`;
       return h;
@@ -2236,13 +2498,32 @@ function fecharMapaTotal() {
   document.body.style.overflow = '';
 }
 
-// Lightbox simples para foto em tela cheia
+// Lightbox simples para foto em tela cheia.
+// Setamos o src via JS depois do append em vez de no template porque base64
+// de fotos do celular pode ter MBs e estoura o parser HTML quando vai inline.
 function abrirLightboxFoto(src) {
-  const html = `<div id="foto-lightbox" onclick="this.remove()" style="position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out">
-    <img src="${src}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 4px 30px rgba(0,0,0,0.5)">
-    <button onclick="event.stopPropagation();document.getElementById('foto-lightbox').remove()" style="position:fixed;top:20px;right:20px;background:rgba(255,255,255,0.2);border:none;border-radius:50%;width:44px;height:44px;font-size:24px;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center">×</button>
-  </div>`;
-  document.body.insertAdjacentHTML('beforeend', html);
+  if (!src) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'foto-lightbox';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out';
+  const img = document.createElement('img');
+  img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 4px 30px rgba(0,0,0,0.5)';
+  img.src = src; // setProperty, sem passar pelo parser HTML
+  const btn = document.createElement('button');
+  btn.textContent = '×';
+  btn.style.cssText = 'position:fixed;top:20px;right:20px;background:rgba(255,255,255,0.2);border:none;border-radius:50%;width:44px;height:44px;font-size:24px;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center';
+  btn.onclick = (e) => { e.stopPropagation(); overlay.remove(); };
+  overlay.onclick = () => overlay.remove();
+  overlay.appendChild(img);
+  overlay.appendChild(btn);
+  document.body.appendChild(overlay);
+}
+
+// Registro global de fotos visíveis no momento — usado pelos onclicks dos thumbs
+// pra abrir o lightbox sem precisar passar a base64 inteira pelo atributo HTML.
+window._fotosVisiveis = [];
+function abrirLightboxIdx(i) {
+  abrirLightboxFoto(window._fotosVisiveis[i]);
 }
 
 async function acaoReabrir() {
@@ -2920,39 +3201,30 @@ async function confirmarFecharDia() {
 }
 
 // ─── Tela de Produto ──────────────────────────────────────────────────────────
+let _produtoEquipes = []; // cache das equipes para o modal de transferência
+
 async function abrirTelaProduto() {
   showScreen('screen-produto');
   document.getElementById('produto-spinner').style.display = '';
   document.getElementById('produto-content').style.display = 'none';
-  document.getElementById('prod-add-litros').value = '';
-  document.getElementById('prod-add-error').style.display = 'none';
   try {
     const res = await apiFetch(`${API}/estoque-summary?equipeId=${encodeURIComponent(S.equipeId)}`);
     const d = await res.json();
     document.getElementById('produto-spinner').style.display = 'none';
     if (!res.ok) { showToast('⚠️ Erro ao carregar estoque'); showScreen('screen-home'); return; }
-    // Semana
+
     document.getElementById('produto-semana-chave').textContent = d.semana.chave;
-    document.getElementById('ps-recebido').textContent = d.semana.recebido;
-    document.getElementById('ps-gasto').textContent = d.semana.gasto;
-    document.getElementById('ps-saldo').textContent = d.semana.saldo;
-    // barra de consumo semanal
-    const pct = d.semana.recebido > 0 ? Math.min(100, Math.round(d.semana.gasto / d.semana.recebido * 100)) : 0;
-    const barra = document.getElementById('ps-barra');
-    barra.style.width = pct + '%';
-    barra.className = 'progress-fill' + (pct >= 90 ? ' done' : '');
-    barra.style.background = pct >= 90 ? '#dc2626' : pct >= 70 ? '#d97706' : '#16a34a';
-    document.getElementById('ps-barra-pct').textContent = pct + '% usado';
-    document.getElementById('ps-barra-max').textContent = d.semana.recebido + 'L';
-    // Mês
-    const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-    const [ano, mesNum] = d.mes.chave.split('-');
-    document.getElementById('produto-mes-chave').textContent = `${meses[parseInt(mesNum)-1]}/${ano}`;
-    document.getElementById('pm-recebido').textContent = d.mes.recebido;
-    document.getElementById('pm-gasto').textContent = d.mes.gasto;
-    document.getElementById('pm-saldo').textContent = d.mes.saldo;
+    document.getElementById('ps-saldo-anterior').textContent = (d.semana.saldoAnterior ?? 0) + ' L';
+    document.getElementById('ps-recebido').textContent = d.semana.recebido + ' L';
+    document.getElementById('ps-gasto').textContent = d.semana.gasto + ' L';
+    document.getElementById('ps-saldo').textContent = d.semana.saldo + ' L';
+
     // Atualiza contador na HOME
     document.getElementById('home-count-produto').textContent = d.semana.saldo + 'L';
+
+    // Cache das equipes para o modal de transferência
+    _produtoEquipes = d.equipes || [];
+
     document.getElementById('produto-content').style.display = '';
   } catch(e) {
     document.getElementById('produto-spinner').style.display = 'none';
@@ -2961,52 +3233,127 @@ async function abrirTelaProduto() {
   }
 }
 
-async function confirmarAdicionarInjetores() {
-  const qtd = parseInt(document.getElementById('inj-add-qtd').value, 10);
-  const errEl = document.getElementById('inj-add-error');
-  if (!qtd || qtd <= 0) { errEl.textContent = 'Informe uma quantidade válida'; errEl.style.display = ''; return; }
+// ─── Modal de Transferência ────────────────────────────────────────────────────
+let _transfTipo = 'produto';
+
+function abrirTransferenciaModal(tipo) {
+  _transfTipo = tipo;
+  const isProduto = tipo === 'produto';
+  document.getElementById('transf-titulo').textContent = isProduto ? '🔄 Transferir Produto' : '💉 Transferir Injetores';
+  document.getElementById('transf-qtd-label').textContent = isProduto ? 'Quantidade (litros) *' : 'Quantidade (unidades) *';
+  document.getElementById('transf-qtd').step = isProduto ? '0.1' : '1';
+  document.getElementById('transf-qtd').placeholder = isProduto ? 'Ex: 25' : 'Ex: 50';
+  document.getElementById('transf-qtd').value = '';
+  document.getElementById('transf-error').style.display = 'none';
+
+  const sel = document.getElementById('transf-equipe-sel');
+  sel.innerHTML = '<option value="">— Escolha a equipe —</option>';
+  (_produtoEquipes || []).forEach(eq => {
+    const opt = document.createElement('option');
+    opt.value = eq.id;
+    opt.textContent = eq.nome;
+    sel.appendChild(opt);
+  });
+
+  document.getElementById('transferencia-modal').classList.remove('hidden');
+}
+
+function fecharTransferenciaModal() {
+  document.getElementById('transferencia-modal').classList.add('hidden');
+}
+
+async function confirmarTransferencia() {
+  const equipeIdDestino = document.getElementById('transf-equipe-sel').value;
+  const rawQtd = document.getElementById('transf-qtd').value;
+  const errEl = document.getElementById('transf-error');
+  const quantidade = _transfTipo === 'produto' ? parseFloat(rawQtd) : parseInt(rawQtd, 10);
+
+  if (!equipeIdDestino) { errEl.textContent = 'Escolha a equipe de destino'; errEl.style.display = ''; return; }
+  if (!quantidade || quantidade <= 0) { errEl.textContent = 'Informe uma quantidade válida'; errEl.style.display = ''; return; }
   errEl.style.display = 'none';
-  showLoading('Registrando injetores...');
+
+  fecharTransferenciaModal();
+  showLoading('Transferindo...');
   try {
-    const res = await apiFetch(`${API}/injetores-recebidos`, {
+    const res = await apiFetch(`${API}/transferencia`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ equipeId: S.equipeId, quantidade: qtd, membro: S.membro || 'Equipe' })
+      body: JSON.stringify({ equipeIdDestino, quantidade, tipo: _transfTipo, membro: S.membro || 'Equipe' })
     });
     const data = await res.json();
     hideLoading();
-    if (!res.ok) { errEl.textContent = data.error || 'Erro ao registrar'; errEl.style.display = ''; return; }
-    showToast(`💉 +${qtd} injetores! Semana: ${data.injetoresRecebidos}`);
-    document.getElementById('inj-add-qtd').value = '';
+    if (!res.ok) { showToast('⚠️ ' + (data.error || 'Erro ao transferir')); return; }
+    const unid = _transfTipo === 'produto' ? 'L' : ' injetores';
+    showToast(`✅ ${quantidade}${unid} transferidos!`);
+    abrirTelaProduto(); // Recarrega para mostrar novo saldo
   } catch (e) {
     hideLoading();
-    errEl.textContent = 'Erro de conexão';
-    errEl.style.display = '';
+    showToast('⚠️ Erro de conexão');
   }
 }
 
-async function confirmarAdicionarProduto() {
-  const litros = parseFloat(document.getElementById('prod-add-litros').value);
-  const errEl = document.getElementById('prod-add-error');
-  if (!litros || litros <= 0) { errEl.textContent = 'Informe uma quantidade válida em litros'; errEl.style.display = ''; return; }
+// ─── Novo Ponto (reparo avulso) ───────────────────────────────────────────────
+let _npFotos = [];
+
+function abrirNovoPontoModal() {
+  _npFotos = [];
+  document.getElementById('np-nome').value = '';
+  document.getElementById('np-tipo').value = '';
+  document.getElementById('np-item').value = '';
+  document.getElementById('np-fotos-preview').innerHTML = '';
+  document.getElementById('np-error').style.display = 'none';
+  document.getElementById('novo-ponto-modal').classList.remove('hidden');
+
+  // listener de fotos
+  const inp = document.getElementById('np-fotos-input');
+  inp.value = '';
+  inp.onchange = async () => {
+    for (const file of inp.files) {
+      const b64 = await new Promise(res => {
+        const r = new FileReader();
+        r.onload = e => res(e.target.result);
+        r.readAsDataURL(file);
+      });
+      _npFotos.push(b64);
+      const img = document.createElement('img');
+      img.src = b64;
+      img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb';
+      document.getElementById('np-fotos-preview').appendChild(img);
+    }
+  };
+}
+
+function fecharNovoPontoModal() {
+  document.getElementById('novo-ponto-modal').classList.add('hidden');
+}
+
+async function confirmarNovoPonto() {
+  const nome = document.getElementById('np-nome').value.trim();
+  const errEl = document.getElementById('np-error');
+  if (!nome) { errEl.textContent = 'Informe o nome do local'; errEl.style.display = ''; return; }
   errEl.style.display = 'none';
-  showLoading('Registrando produto...');
+  fecharNovoPontoModal();
+  showLoading('Adicionando ponto...');
   try {
-    const res = await apiFetch(`${API}/estoque-recebido`, {
+    const res = await apiFetch(`${API}/os/${S.currentOS._id}/ponto`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ equipeId: S.equipeId, litros, membro: S.membro || 'Equipe' })
+      body: JSON.stringify({
+        nome,
+        tipoProblema: document.getElementById('np-tipo').value,
+        item: document.getElementById('np-item').value.trim(),
+        fotos: _npFotos,
+      }),
     });
     const data = await res.json();
     hideLoading();
-    if (!res.ok) { errEl.textContent = data.error || 'Erro ao registrar'; errEl.style.display = ''; return; }
-    showToast(`📦 +${litros}L adicionados! Semana: ${data.recebido}L`);
-    // Recarrega a tela com os novos dados
-    abrirTelaProduto();
+    if (!res.ok) { showToast('⚠️ ' + (data.error || 'Erro ao adicionar ponto')); return; }
+    S.currentOS = data.os;
+    renderOSDetail();
+    showToast('✅ Ponto adicionado!');
   } catch (e) {
     hideLoading();
-    errEl.textContent = 'Erro de conexão';
-    errEl.style.display = '';
+    showToast('⚠️ Sem conexão. Tente novamente.');
   }
 }
 
@@ -3093,7 +3440,7 @@ function renderHistorico() {
     return `<div class="os-item ${statusOS}" style="cursor:default">
       <div class="os-title">OS #${String(os.numero||'').padStart(3,'0')} — ${os.cliente||'—'}</div>
       <div class="os-sub">${[os.endereco, os.cidade].filter(Boolean).join(' · ')}</div>
-      ${os.dataInicio ? `<div class="os-sub" style="margin-top:2px">📅 Início: ${formatDate(os.dataInicio)}</div>` : ''}
+      ${os.dataInicio ? `<div class="os-sub" style="margin-top:2px">📅 Início: ${formatDate(os.dataInicio)}${os.horaInicio ? ` <span style="color:#e87722;font-weight:700">🕗 ${os.horaInicio}</span>` : ''}</div>` : ''}
       ${os.concluidaEm ? `<div class="os-sub" style="margin-top:2px">✅ Concluída: ${conclEm}</div>` : ''}
       ${consumo ? `<div class="os-sub" style="margin-top:2px">${consumo} de GVF Seal</div>` : ''}
       <span class="os-status ${statusClass(statusOS)}">${statusLabel(statusOS)}</span>
