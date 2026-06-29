@@ -471,9 +471,9 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
       <div style="margin-bottom:10px">
         <div class="sec-header">📅 Semana <span id="produto-semana-chave" class="sec-count">—</span></div>
         <div style="display:flex;flex-direction:column;gap:8px">
-          <div style="background:#f0fdf4;border-left:4px solid #16a34a;border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:13px;font-weight:600;color:#166534">TERMINEI A SEMANA PASSADA COM</span>
-            <span id="ps-saldo-anterior" style="font-size:20px;font-weight:800;color:#16a34a">— L</span>
+          <div style="background:#fff7ed;border-left:4px solid #e87722;border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:13px;font-weight:600;color:#92400e">TERMINEI A SEMANA PASSADA COM</span>
+            <span id="ps-saldo-anterior" style="font-size:20px;font-weight:800;color:#e87722">— L</span>
           </div>
           <div style="background:#eff6ff;border-left:4px solid #2563eb;border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
             <span style="font-size:13px;font-weight:600;color:#1e40af">RECEBI DA EMPRESA ESSA SEMANA</span>
@@ -483,9 +483,9 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
             <span style="font-size:13px;font-weight:600;color:#991b1b">GASTEI</span>
             <span id="ps-gasto" style="font-size:20px;font-weight:800;color:#dc2626">— L</span>
           </div>
-          <div style="background:#fff7ed;border-left:4px solid #e87722;border-radius:8px;padding:14px 14px;display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:14px;font-weight:700;color:#92400e">ESTOU AGORA COM</span>
-            <span id="ps-saldo" style="font-size:26px;font-weight:900;color:#e87722">— L</span>
+          <div style="background:#f0fdf4;border-left:4px solid #16a34a;border-radius:8px;padding:14px 14px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:14px;font-weight:700;color:#166534">ESTOU AGORA COM</span>
+            <span id="ps-saldo" style="font-size:26px;font-weight:900;color:#16a34a">— L</span>
           </div>
         </div>
       </div>
@@ -499,6 +499,12 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
       <button onclick="abrirTransferenciaModal('injetores')" style="width:100%;background:linear-gradient(135deg,#6d28d9,#8b5cf6);color:#fff;border:none;border-radius:12px;padding:18px 20px;font-size:17px;font-weight:800;cursor:pointer;letter-spacing:0.5px">
         💉 TRANSFERÊNCIA DE INJETORES
       </button>
+
+      <!-- Lançamentos da semana -->
+      <div id="ps-lancamentos-wrap" style="display:none;margin-top:14px">
+        <div style="font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">📋 Movimentações da semana</div>
+        <div id="ps-lancamentos-list" style="display:flex;flex-direction:column;gap:6px"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -716,8 +722,8 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
       <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 1px"></div>
       <input type="color" id="croqui-color" value="#000000" style="width:28px;height:28px;border:none;border-radius:50%;padding:2px;cursor:pointer;flex-shrink:0" title="Cor">
       <select id="croqui-size" style="font-size:12px;padding:4px 6px;border:1.5px solid #d1d5db;border-radius:6px;background:white;min-width:54px">
-        <option value="2">Fino</option>
-        <option value="4" selected>Médio</option>
+        <option value="2" selected>Fino</option>
+        <option value="4">Médio</option>
         <option value="8">Grosso</option>
       </select>
       <div style="width:1px;height:24px;background:#d1d5db;flex-shrink:0;margin:0 1px"></div>
@@ -2134,7 +2140,7 @@ function renderOSDetail() {
       ${pontos.length ? `<div class="progress-bar" style="margin-top:10px"><div class="progress-fill${pct===100?' done':''}" style="width:${pct}%"></div></div>
         <div style="font-size:12px;color:#6b7280;margin-top:2px">${totalSubs > 0 ? `${feitosSubs}/${totalSubs} pontos executados (${pct}%)` : `${concl}/${pontos.length} locais (${pct}%)`}</div>` : ''}
       ${(os.totalConsumoReal > 0) ? `<div style="font-size:12px;color:#6b7280;margin-top:6px">🧪 ${os.totalConsumoReal.toLocaleString('pt-BR',{minimumFractionDigits:1})}L de GVF Seal registrado</div>` : ''}
-      ${ultFd ? `<div style="font-size:11px;color:#6b7280;margin-top:4px">📅 Último fechamento: ${ultFd.data} — ${ultFd.litros}L</div>` : ''}
+      ${ultFd ? `<div style="font-size:11px;color:#6b7280;margin-top:4px">📅 Último fechamento: ${formatDate(ultFd.data)} — ${ultFd.litros}L</div>` : ''}
     </div>
     ${pontos.length ? `<button onclick="abrirMapaServicoTotal()" style="width:100%;background:linear-gradient(135deg,#c45d12 0%,#e87722 50%,#f59340 100%);border:none;color:white;padding:14px;border-radius:14px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(232,119,34,0.35);display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:14px">
       <span style="font-size:22px">🗺️</span>
@@ -3222,6 +3228,41 @@ async function abrirTelaProduto() {
     // Atualiza contador na HOME
     document.getElementById('home-count-produto').textContent = d.semana.saldo + 'L';
 
+    // Renderizar lançamentos/movimentações da semana
+    const lancs = (d.semana.lancamentos || []).filter(l => l.tipo && l.tipo !== 'produto');
+    const allLancs = d.semana.lancamentos || [];
+    const wrapEl = document.getElementById('ps-lancamentos-wrap');
+    const listEl = document.getElementById('ps-lancamentos-list');
+    if (allLancs.length > 0) {
+      wrapEl.style.display = '';
+      listEl.innerHTML = [...allLancs].reverse().map(l => {
+        const isSaida = l.tipo === 'produto_transferido' || l.tipo === 'injetores_transferido';
+        const isEntrada = l.tipo === 'produto_recebido' || l.tipo === 'injetores_recebido';
+        const isInjetor = l.tipo === 'injetores' || l.tipo === 'injetores_transferido' || l.tipo === 'injetores_recebido';
+        const qtd = isInjetor ? (l.injetores || 0) : (l.litros || 0);
+        const unidade = isInjetor ? ' inj' : 'L';
+        const label = isSaida
+          ? `Transferido para ${l.equipeDestinoNome || 'outra equipe'}`
+          : isEntrada
+            ? (l.membro || 'Recebido de outra equipe')
+            : (l.membro || 'Equipe');
+        const bg = isSaida ? '#fff7ed' : isEntrada ? '#f0fdf4' : '#eff6ff';
+        const border = isSaida ? '#e87722' : isEntrada ? '#16a34a' : '#2563eb';
+        const valColor = isSaida ? '#c2410c' : isEntrada ? '#166534' : '#1e40af';
+        const valStr = isSaida ? `-${qtd}${unidade}` : `+${qtd}${unidade}`;
+        const hora = l.ts ? new Date(l.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + ' · ' + new Date(l.ts).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '';
+        return `<div style="background:${bg};border-left:3px solid ${border};border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#1f2937">${label}</div>
+            ${hora ? `<div style="font-size:11px;color:#9ca3af;margin-top:2px">${hora}</div>` : ''}
+          </div>
+          <div style="font-size:16px;font-weight:900;color:${valColor}">${valStr}</div>
+        </div>`;
+      }).join('');
+    } else {
+      wrapEl.style.display = 'none';
+    }
+
     // Cache das equipes para o modal de transferência
     _produtoEquipes = d.equipes || [];
 
@@ -3584,7 +3625,7 @@ function initCroquiCanvas() {
     if (CQ.tool === 'ralo') {
       pushHistory();
       const {x, y} = getPos(e);
-      const r = getSize() * 2.5 + 6;
+      const r = getSize() * 1.5 + 3;
       ctx.save();
       ctx.fillStyle = '#dc2626';
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
