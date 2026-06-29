@@ -2098,6 +2098,7 @@ function buildRepararBanner(os) {
 
 function renderOSDetail() {
   const os     = S.currentOS;
+  const isReparo = (os.tipo || 'normal') === 'reparo';
   const pontos = os.pontos || [];
   const concl  = pontos.filter(p => (p.statusLocal||p.status) === 'concluido').length;
   // Progresso por sub-pontos executados (ticados pelo aplicador)
@@ -2108,7 +2109,10 @@ function renderOSDetail() {
     else { totalSubs += 1; feitosSubs += (p.statusLocal||p.status) === 'concluido' ? 1 : 0; }
   });
   const pct = totalSubs > 0 ? Math.round(feitosSubs / totalSubs * 100) : (os.progresso || 0);
-  const todosConcluidos = pontos.length > 0 && concl === pontos.length;
+  // Reparo sem pontos = pronto para finalizar; OS normal precisa ter pontos E todos concluídos
+  const todosConcluidos = isReparo
+    ? (pontos.length === 0 || concl === pontos.length)
+    : (pontos.length > 0 && concl === pontos.length);
   const jaConcluida = os.status === 'concluida';
   const aguardandoAssinatura = os.status === 'aguardando_assinatura';
   const prontoParaFinalizar = (todosConcluidos || aguardandoAssinatura) && !jaConcluida;
@@ -2121,7 +2125,6 @@ function renderOSDetail() {
   // Último fechamento registrado
   const ultFd = (os.fechamentosDia||[]).sort((a,b)=>(b.ts||0)-(a.ts||0))[0];
 
-  const isReparo = (os.tipo || 'normal') === 'reparo';
   const content = document.getElementById('os-detail-content');
   content.innerHTML = `
     ${isReparo ? buildRepararBanner(os) : ''}
