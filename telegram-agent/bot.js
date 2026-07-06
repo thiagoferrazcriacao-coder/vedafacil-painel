@@ -1,6 +1,7 @@
 const { Telegraf } = require('telegraf');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 const { executarAgente } = require('./agent');
 
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
@@ -153,31 +154,28 @@ bot.command('removeuser', ctx => {
   ctx.reply(`✅ Usuário ${remId} removido.`);
 });
 
-// Mensagens de texto — aciona o agente
-bot.on('text', async ctx => {
-  const userId = ctx.from.id;
-  const user = verificarAcesso(userId);
+// Baixa foto do Telegram como base64
+async function baixarFotoBase64(ctx, fileId) {
+  const fileInfo = await ctx.telegram.getFile(fileId);
+  const url = `https://api.telegram.org/file/bot${process.env.TELEGRAM_TOKEN}/${fileInfo.file_path}`;
+  return new Promise((resolve, reject) => {
+    https.get(url, res => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
+      res.on('error', reject);
+    }).on('error', reject);
+  });
+}
 
-  if (!user) {
-    ctx.reply(`Acesso negado. Seu ID é: ${userId}\nPeça ao administrador para te adicionar.`);
-    return;
-  }
-
-  const solicitacao = ctx.message.text;
-
-  // Ignora comandos que não foram tratados acima
-  if (solicitacao.startsWith('/')) {
-    ctx.reply('Comando desconhecido. Use /start para ver os comandos disponíveis.');
-    return;
-  }
-
+// Lógica comum: recebe solicitação (texto + foto opcional) e aciona o agente
+async function acionarAgente(ctx, user, solicitacao, imageBase64) {
   const msgEspera = await ctx.reply(
     `⏳ Entendi, ${user.nome}! Analisando o problema...\n\n` +
     `_Isso pode levar 1-3 minutos. Avisarei assim que pronto._`,
     { parse_mode: 'Markdown' }
   );
 
-  // Função que atualiza a mensagem de progresso
   let progressoAtual = '';
   const onProgresso = async (passo) => {
     progressoAtual += `\n${passo}`;
@@ -189,15 +187,14 @@ bot.on('text', async ctx => {
         `⏳ Trabalhando...\n${progressoAtual.slice(-500)}`,
         { parse_mode: 'Markdown' }
       );
-    } catch {
-      // Ignora erros de edição (mensagem pode ter mudado muito rápido)
-    }
+    } catch { }
   };
 
   try {
     const resultado = await executarAgente(
       `Solicitação do operador ${user.nome}:\n\n${solicitacao}`,
-      onProgresso
+      onProgresso,
+      imageBase64
     );
 
     // Apaga a mensagem de progresso e envia o resultado final
@@ -221,6 +218,48 @@ bot.on('text', async ctx => {
     );
     console.error('[bot] Erro no agente:', err);
   }
+}
+
+// Mensagens de texto — aciona o agente
+bot.on('text', async ctx => {
+  const userId = ctx.from.id;
+  const user = verificarAcesso(userId);
+
+  if (!user) {
+    ctx.reply(`Acesso negado. Seu ID é: ${userId}\nPeça ao administrador para te adicionar.`);
+    return;
+  }
+
+  const solicitacao = ctx.message.text;
+  if (solicitacao.startsWith('/')) {
+    ctx.reply('Comando desconhecido. Use /start para ver os comandos disponíveis.');
+    return;
+  }
+
+  await acionarAgente(ctx, user, solicitacao, null);
+});
+
+// Fotos — baixa e passa pro agente junto com a legenda
+bot.on('photo', async ctx => {
+  const userId = ctx.from.id;
+  const user = verificarAcesso(userId);
+
+  if (!user) {
+    ctx.reply(`Acesso negado. Seu ID é: ${userId}\nPeça ao administrador para te adicionar.`);
+    return;
+  }
+
+  const caption = ctx.message.caption || '(sem descrição — analise a imagem e identifique o problema)';
+  const foto = ctx.message.photo[ctx.message.photo.length - 1]; // maior resolução
+
+  let imageBase64 = null;
+  try {
+    imageBase64 = await baixarFotoBase64(ctx, foto.file_id);
+  } catch (e) {
+    console.error('[bot] Erro ao baixar foto:', e.message);
+  }
+
+  await acionarAgente(ctx, user, caption, imageBase64);
 });
 
 module.exports = { bot };

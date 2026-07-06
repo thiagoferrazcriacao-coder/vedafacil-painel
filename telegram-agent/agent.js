@@ -54,8 +54,18 @@ Se não conseguir resolver, responda:
 - Deploy aplicador: \`cd aplicador-app && npx vercel --prod\`
 `;
 
-async function executarAgente(mensagem, onProgresso) {
-  const mensagens = [{ role: 'user', content: mensagem }];
+async function executarAgente(mensagem, onProgresso, imageBase64) {
+  // Monta o conteúdo da primeira mensagem (texto + imagem opcional)
+  let conteudoInicial;
+  if (imageBase64) {
+    conteudoInicial = [
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 } },
+      { type: 'text', text: mensagem },
+    ];
+  } else {
+    conteudoInicial = mensagem;
+  }
+  const mensagens = [{ role: 'user', content: conteudoInicial }];
   let iteracoes = 0;
   const MAX_ITERACOES = 20;
 
