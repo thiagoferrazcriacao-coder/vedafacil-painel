@@ -1,0 +1,15 @@
+{
+  "name": "vedafacil-telegram-agent",
+  "version": "1.0.0",
+  "description": "Agente de manutenção Vedafacil via Telegram",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "dotenv": "^16.4.5",
+    "telegraf": "^4.16.3"
+  }
+}

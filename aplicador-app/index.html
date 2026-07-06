@@ -479,6 +479,18 @@ select.input{appearance:none;-webkit-appearance:none;background-image:url("data:
             <span style="font-size:13px;font-weight:600;color:#1e40af">RECEBI DA EMPRESA ESSA SEMANA</span>
             <span id="ps-recebido" style="font-size:20px;font-weight:800;color:#2563eb">— L</span>
           </div>
+          <div id="ps-transfs-rec-row" style="display:none">
+            <div style="background:#f0fdf4;border-left:4px solid #16a34a;border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:13px;font-weight:600;color:#166534">RECEBI DE OUTRA EQUIPE</span>
+              <span id="ps-transfs-rec" style="font-size:20px;font-weight:800;color:#16a34a">— L</span>
+            </div>
+          </div>
+          <div id="ps-transfs-env-row" style="display:none">
+            <div style="background:#fff7ed;border-left:4px solid #d97706;border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:13px;font-weight:600;color:#92400e">ENVIEI PARA OUTRA EQUIPE</span>
+              <span id="ps-transfs-env" style="font-size:20px;font-weight:800;color:#d97706">— L</span>
+            </div>
+          </div>
           <div style="background:#fef2f2;border-left:4px solid #dc2626;border-radius:8px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
             <span style="font-size:13px;font-weight:600;color:#991b1b">GASTEI</span>
             <span id="ps-gasto" style="font-size:20px;font-weight:800;color:#dc2626">— L</span>
@@ -2295,7 +2307,7 @@ function abrirMapaServico() {
     html += `<div style="font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Itens a Executar</div>`;
     html += subs.map((sp, si) => {
       const execInfo = sp.feito && sp.executadoEm
-        ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px">✅ ${sp.executadoEm}${sp.executadoPorMembro ? ` · ${sp.executadoPorMembro}` : ''}</div>`
+        ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px">✅ ${formatDate(sp.executadoEm)}${sp.executadoPorMembro ? ` · ${sp.executadoPorMembro}` : ''}</div>`
         : '';
       return `<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:8px;margin-bottom:6px;background:${sp.feito?'#f0fdf4':'#f9fafb'};border:1.5px solid ${sp.feito?'#86efac':'#e5e7eb'}">
         <div style="width:22px;height:22px;border-radius:50%;background:${sp.feito?'#16a34a':'white'};border:2px solid ${sp.feito?'#16a34a':'#d1d5db'};flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:white;margin-top:1px">${sp.feito?'✓':''}</div>
@@ -2657,7 +2669,7 @@ function renderLocal() {
     html += subs.map((sp, si) => {
       const podeToggle = sl === 'em_andamento';
       const infoExec = sp.feito && sp.executadoEm
-        ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px">📅 ${sp.executadoEm}${sp.executadoPorMembro ? ` · ${sp.executadoPorMembro}` : ''}</div>`
+        ? `<div style="font-size:10px;color:#9ca3af;margin-top:2px">📅 ${formatDate(sp.executadoEm)}${sp.executadoPorMembro ? ` · ${sp.executadoPorMembro}` : ''}</div>`
         : '';
       return `<div class="subponto-item ${sp.feito ? 'feito' : ''}" ${podeToggle ? `onclick="toggleSubponto(${si})"` : 'style="cursor:default"'}>
         <div class="subponto-checkbox">${sp.feito ? '✓' : ''}</div>
@@ -3227,6 +3239,20 @@ async function abrirTelaProduto() {
     document.getElementById('ps-recebido').textContent = d.semana.recebido + ' L';
     document.getElementById('ps-gasto').textContent = d.semana.gasto + ' L';
     document.getElementById('ps-saldo').textContent = d.semana.saldo + ' L';
+
+    // Linhas de transferência — só aparecem quando há movimento
+    const transfsRec = d.semana.transfsRecebidas || 0;
+    const transfsEnv = d.semana.transfsEnviadas || 0;
+    const recRow = document.getElementById('ps-transfs-rec-row');
+    const envRow = document.getElementById('ps-transfs-env-row');
+    if (transfsRec > 0) {
+      document.getElementById('ps-transfs-rec').textContent = transfsRec + ' L';
+      recRow.style.display = '';
+    } else { recRow.style.display = 'none'; }
+    if (transfsEnv > 0) {
+      document.getElementById('ps-transfs-env').textContent = transfsEnv + ' L';
+      envRow.style.display = '';
+    } else { envRow.style.display = 'none'; }
 
     // Atualiza contador na HOME
     document.getElementById('home-count-produto').textContent = d.semana.saldo + 'L';
