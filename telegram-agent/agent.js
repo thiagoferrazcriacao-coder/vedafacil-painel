@@ -4,7 +4,9 @@ const path = require('path');
 const os = require('os');
 
 const REPO_PATH = process.env.REPO_PATH || path.join(__dirname, '..');
-const CLAUDE_BIN = process.env.CLAUDE_PATH || 'claude';
+// No Windows, scripts .cmd precisam de shell:true ou do caminho explícito
+const isWindows = process.platform === 'win32';
+const CLAUDE_BIN = process.env.CLAUDE_PATH || (isWindows ? 'claude.cmd' : 'claude');
 
 async function executarAgente(mensagem, onProgresso, imageBase64) {
   let tempImagePath = null;
@@ -29,8 +31,9 @@ async function executarAgente(mensagem, onProgresso, imageBase64) {
 
     const child = spawn(CLAUDE_BIN, args, {
       cwd: REPO_PATH,
-      shell: true,
+      shell: isWindows,
       env: { ...process.env },
+      windowsHide: true,
     });
 
     let outputFinal = '';
