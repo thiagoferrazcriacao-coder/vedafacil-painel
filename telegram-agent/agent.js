@@ -23,6 +23,7 @@ async function executarAgente(mensagem, onProgresso, imageBase64) {
       '--permission-mode', 'bypassPermissions',
       '--add-dir', REPO_PATH,
       '--output-format', 'stream-json',
+      '--verbose',
       '--no-session-persistence',
     ];
 
