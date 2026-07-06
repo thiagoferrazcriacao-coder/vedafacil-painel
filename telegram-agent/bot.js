@@ -53,7 +53,7 @@ bot.command('start', ctx => {
     `• "A data está mostrando no formato errado"\n\n` +
     `Comandos:\n` +
     `/status — verificar status do sistema\n` +
-    (ehAdmin(userId) ? `/adduser ID NOME — adicionar usuário\n/removeuser ID — remover usuário\n' : '')
+    (ehAdmin(userId) ? `/adduser ID NOME — adicionar usuário\n/removeuser ID — remover usuário\n` : '')
   );
 });
 

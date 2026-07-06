@@ -1,6 +1,6 @@
 {
   "autorizados": [
-    { "id": 0, "nome": "Thiago (admin)", "nivel": "admin" }
+    { "id": 8869739417, "nome": "Thiago (admin)", "nivel": "admin" }
   ],
   "instrucoes": "Para saber seu ID do Telegram, mande /start pro bot e ele responde com o ID. Substitua o 0 pelo ID real."
 }

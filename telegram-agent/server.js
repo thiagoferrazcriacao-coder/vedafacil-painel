@@ -12,15 +12,14 @@ if (missing.length > 0) {
 
 console.log('🤖 Vedafacil Telegram Agent iniciando...');
 
-bot.launch()
-  .then(() => {
-    console.log('✅ Bot online e aguardando mensagens');
-    console.log(`📁 Repo: ${process.env.REPO_PATH || 'pasta pai (padrão)'}`);
-  })
-  .catch(err => {
-    console.error('❌ Erro ao iniciar bot:', err.message);
-    process.exit(1);
-  });
+bot.launch().catch(err => {
+  console.error('❌ Erro ao iniciar bot:', err.message);
+  process.exit(1);
+});
+
+// Em Telegraf v4, launch() não resolve durante operação normal
+console.log('✅ Bot online e aguardando mensagens');
+console.log(`📁 Repo: ${process.env.REPO_PATH || 'pasta pai (padrão)'}`);
 
 // Graceful shutdown
 process.once('SIGINT', () => bot.stop('SIGINT'));
