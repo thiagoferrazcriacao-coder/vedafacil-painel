@@ -21,6 +21,14 @@ bot.launch().catch(err => {
 console.log('✅ Bot online e aguardando mensagens');
 console.log(`📁 Repo: ${process.env.REPO_PATH || 'pasta pai (padrão)'}`);
 
+// Erros não tratados não derrubam o processo
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err.message);
+});
+
 // Graceful shutdown
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

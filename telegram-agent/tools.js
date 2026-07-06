@@ -150,9 +150,11 @@ async function executarFerramenta(nome, input) {
         const cwd = input.cwd
           ? resolverCaminho(input.cwd)
           : REPO_PATH;
+        const isWindows = process.platform === 'win32';
         const { stdout, stderr } = await execAsync(input.command, {
           cwd,
-          timeout: 180000, // 3 minutos
+          timeout: 180000,
+          shell: isWindows ? 'cmd.exe' : '/bin/sh',
           env: { ...process.env, VERCEL_TOKEN: process.env.VERCEL_TOKEN }
         });
         const saida = [stdout, stderr ? `STDERR: ${stderr}` : ''].filter(Boolean).join('\n');
