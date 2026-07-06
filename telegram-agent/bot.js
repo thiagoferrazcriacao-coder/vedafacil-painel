@@ -4,7 +4,9 @@ const path = require('path');
 const https = require('https');
 const { executarAgente } = require('./agent');
 
-const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
+const bot = new Telegraf(process.env.TELEGRAM_TOKEN, {
+  handlerTimeout: Infinity,
+});
 const WHITELIST_PATH = path.join(__dirname, 'whitelist.json');
 
 // Impede que erros em handlers derrubem o processo
@@ -175,26 +177,52 @@ async function baixarFotoBase64(ctx, fileId) {
 }
 
 // Lógica comum: recebe solicitação (texto + foto opcional) e aciona o agente
+async function enviarTexto(ctx, texto) {
+  const MAX = 4000;
+  const pedacos = [];
+  for (let i = 0; i < texto.length; i += MAX) pedacos.push(texto.slice(i, i + MAX));
+  for (const pedaco of pedacos) {
+    try {
+      await ctx.reply(pedaco, { parse_mode: 'Markdown' });
+    } catch {
+      // Markdown inválido (backtick/underscore sem fechar) — tenta texto puro
+      try { await ctx.reply(pedaco); } catch (e2) {
+        console.error('[bot] Falha ao enviar mensagem:', e2.message);
+      }
+    }
+  }
+}
+
 async function acionarAgente(ctx, user, solicitacao, imageBase64) {
   const msgEspera = await ctx.reply(
     `⏳ Entendi, ${user.nome}! Analisando o problema...\n\n` +
-    `_Isso pode levar 1-3 minutos. Avisarei assim que pronto._`,
-    { parse_mode: 'Markdown' }
+    `Isso pode levar alguns minutos. Avisarei assim que pronto.`
   );
 
   let progressoAtual = '';
+  let msgJaApagada = false;
+
   const onProgresso = async (passo) => {
     progressoAtual += `\n${passo}`;
+    if (msgJaApagada) return;
     try {
       await ctx.telegram.editMessageText(
-        ctx.chat.id,
-        msgEspera.message_id,
-        undefined,
-        `⏳ Trabalhando...\n${progressoAtual.slice(-500)}`,
-        { parse_mode: 'Markdown' }
+        ctx.chat.id, msgEspera.message_id, undefined,
+        `⏳ Trabalhando...\n${progressoAtual.slice(-500)}`
       );
     } catch { }
   };
+
+  // Heartbeat a cada 60s para o usuário saber que ainda está rodando
+  const heartbeat = setInterval(async () => {
+    if (msgJaApagada) { clearInterval(heartbeat); return; }
+    try {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id, msgEspera.message_id, undefined,
+        `⏳ Ainda trabalhando... (pode demorar mais um pouco)\n${progressoAtual.slice(-400)}`
+      );
+    } catch { }
+  }, 60000);
 
   try {
     const resultado = await executarAgente(
@@ -203,25 +231,16 @@ async function acionarAgente(ctx, user, solicitacao, imageBase64) {
       imageBase64
     );
 
-    // Apaga a mensagem de progresso e envia o resultado final
+    clearInterval(heartbeat);
+    msgJaApagada = true;
     await ctx.telegram.deleteMessage(ctx.chat.id, msgEspera.message_id).catch(() => {});
 
-    // Telegram tem limite de 4096 chars por mensagem
-    const MAX = 4000;
-    if (resultado.length <= MAX) {
-      ctx.reply(resultado, { parse_mode: 'Markdown' });
-    } else {
-      // Divide em pedaços
-      for (let i = 0; i < resultado.length; i += MAX) {
-        ctx.reply(resultado.slice(i, i + MAX), { parse_mode: 'Markdown' });
-      }
-    }
+    await enviarTexto(ctx, resultado);
   } catch (err) {
+    clearInterval(heartbeat);
+    msgJaApagada = true;
     await ctx.telegram.deleteMessage(ctx.chat.id, msgEspera.message_id).catch(() => {});
-    ctx.reply(
-      `❌ Erro inesperado ao processar a solicitação:\n\`${err.message}\`\n\nTente novamente ou contate o admin.`,
-      { parse_mode: 'Markdown' }
-    );
+    await enviarTexto(ctx, `❌ Erro ao processar: ${err.message}\n\nTente novamente ou contate o admin.`);
     console.error('[bot] Erro no agente:', err);
   }
 }
