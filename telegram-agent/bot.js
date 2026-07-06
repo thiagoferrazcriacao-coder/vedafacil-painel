@@ -7,6 +7,12 @@ const { executarAgente } = require('./agent');
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
 const WHITELIST_PATH = path.join(__dirname, 'whitelist.json');
 
+// Impede que erros em handlers derrubem o processo
+bot.catch((err, ctx) => {
+  console.error('[bot.catch] Erro ao processar update:', err.message);
+  try { ctx.reply('❌ Erro interno. Tente novamente.'); } catch {}
+});
+
 function carregarWhitelist() {
   try {
     return JSON.parse(fs.readFileSync(WHITELIST_PATH, 'utf8'));
