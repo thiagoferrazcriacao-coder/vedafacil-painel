@@ -1,121 +1,108 @@
-const Anthropic = require('@anthropic-ai/sdk');
-const { DEFINICAO_FERRAMENTAS, executarFerramenta } = require('./tools');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-const CLAUDE_MD = (() => {
-  try {
-    return fs.readFileSync(path.join(__dirname, '..', 'CLAUDE.md'), 'utf8');
-  } catch {
-    return '(CLAUDE.md não encontrado)';
-  }
-})();
-
-const SYSTEM_PROMPT = `Você é um agente de manutenção do sistema Vedafacil, acionado via Telegram por operadores da empresa.
-
-Seu trabalho é: entender o problema relatado, localizar o código correto, aplicar a correção, fazer commit e deploy, e reportar o resultado.
-
-# Regras de governança (INVIOLÁVEIS)
-
-${CLAUDE_MD}
-
-# Comportamento esperado
-
-1. Antes de qualquer alteração, leia os arquivos relevantes para entender o contexto.
-2. Faça apenas o necessário para resolver o problema relatado — sem refatorações extras.
-3. Nunca altere comportamentos não mencionados na solicitação.
-4. Ao fazer commit: use a convenção Conventional Commits (feat/fix/chore etc.), em português, no imperativo. Ex: "fix(aplicador): corrigir botão de fechar dia"
-5. Após o commit, rode o deploy do componente afetado (painel, medidor ou aplicador).
-6. Reporte o resultado com: o que foi alterado, arquivo e linha, commit SHA, e URL de produção.
-
-# Formato de resposta final
-
-Ao concluir, responda com:
-- ✅ O que foi corrigido (1-2 linhas)
-- 📁 Arquivo(s) alterado(s) com linha
-- 🔖 Commit: \`<sha curto>\` — \`<mensagem do commit>\`
-- 🚀 Deploy: aguarde ~30s e acesse <URL do app afetado>
-
-Se não conseguir resolver, responda:
-- ❌ O que tentou
-- 🤔 Por que não resolveu
-- 💡 O que o operador deve fazer manualmente
-
-# Contexto do projeto
-
-- Repositório em: ${process.env.REPO_PATH || 'raiz pai desta pasta'}
-- Painel (backend + frontend): pasta \`painel/\`
-- PWA Medidor: pasta \`medidor-app/\`
-- App Aplicador: pasta \`aplicador-app/\`
-- Deploy painel: \`cd painel && npx vercel --prod\`
-- Deploy medidor: \`cd medidor-app && npx vercel --prod\`
-- Deploy aplicador: \`cd aplicador-app && npx vercel --prod\`
-`;
+const REPO_PATH = process.env.REPO_PATH || path.join(__dirname, '..');
+const CLAUDE_BIN = process.env.CLAUDE_PATH || 'claude';
 
 async function executarAgente(mensagem, onProgresso, imageBase64) {
-  // Monta o conteúdo da primeira mensagem (texto + imagem opcional)
-  let conteudoInicial;
+  let tempImagePath = null;
+  let promptFinal = mensagem;
+
+  // Se veio imagem, salva em temp e avisa o Claude onde está
   if (imageBase64) {
-    conteudoInicial = [
-      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 } },
-      { type: 'text', text: mensagem },
-    ];
-  } else {
-    conteudoInicial = mensagem;
+    tempImagePath = path.join(os.tmpdir(), `vf-img-${Date.now()}.jpg`);
+    fs.writeFileSync(tempImagePath, Buffer.from(imageBase64, 'base64'));
+    promptFinal += `\n\nO operador enviou uma imagem de referência. Use a ferramenta Read para visualizá-la: ${tempImagePath}`;
   }
-  const mensagens = [{ role: 'user', content: conteudoInicial }];
-  let iteracoes = 0;
-  const MAX_ITERACOES = 20;
 
-  while (iteracoes < MAX_ITERACOES) {
-    iteracoes++;
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-p',
+      '--permission-mode', 'bypassPermissions',
+      '--add-dir', REPO_PATH,
+      '--output-format', 'stream-json',
+      '--no-session-persistence',
+    ];
 
-    const resposta = await anthropic.messages.create({
-      model: 'claude-opus-4-8',
-      max_tokens: 8192,
-      system: SYSTEM_PROMPT,
-      tools: DEFINICAO_FERRAMENTAS,
-      messages: mensagens,
+    const child = spawn(CLAUDE_BIN, args, {
+      cwd: REPO_PATH,
+      shell: true,
+      env: { ...process.env },
     });
 
-    mensagens.push({ role: 'assistant', content: resposta.content });
+    let outputFinal = '';
+    let buffer = '';
+    let ultimoProgresso = Date.now();
 
-    if (resposta.stop_reason === 'end_turn') {
-      const textoFinal = resposta.content
-        .filter(b => b.type === 'text')
-        .map(b => b.text)
-        .join('');
-      return textoFinal;
-    }
+    // Envia o prompt via stdin
+    child.stdin.write(promptFinal, 'utf8');
+    child.stdin.end();
 
-    if (resposta.stop_reason === 'tool_use') {
-      const toolUseBlocks = resposta.content.filter(b => b.type === 'tool_use');
-      const toolResults = [];
+    // Parseia stream-json para extrair texto e atualizar Telegram
+    child.stdout.on('data', chunk => {
+      buffer += chunk.toString();
+      const linhas = buffer.split('\n');
+      buffer = linhas.pop(); // última linha pode estar incompleta
 
-      for (const block of toolUseBlocks) {
-        if (onProgresso) {
-          onProgresso(`🔧 Executando: \`${block.name}\`(${JSON.stringify(block.input).slice(0, 80)}...)`);
+      for (const linha of linhas) {
+        if (!linha.trim()) continue;
+        try {
+          const evento = JSON.parse(linha);
+
+          // Texto parcial do assistente
+          if (evento.type === 'assistant' && Array.isArray(evento.message?.content)) {
+            for (const bloco of evento.message.content) {
+              if (bloco.type === 'text' && bloco.text) {
+                outputFinal = bloco.text;
+              }
+              // Mostra qual ferramenta está usando
+              if (bloco.type === 'tool_use' && Date.now() - ultimoProgresso > 5000) {
+                ultimoProgresso = Date.now();
+                const label = bloco.input?.command || bloco.input?.path || bloco.input?.pattern || '';
+                onProgresso(`🔧 \`${bloco.name}\` ${String(label).slice(0, 60)}`);
+              }
+            }
+          }
+
+          // Resultado final
+          if (evento.type === 'result' && evento.result) {
+            outputFinal = evento.result;
+          }
+        } catch {
+          // linha não é JSON válido, ignora
         }
-
-        const resultado = await executarFerramenta(block.name, block.input);
-
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: block.id,
-          content: String(resultado),
-        });
       }
+    });
 
-      mensagens.push({ role: 'user', content: toolResults });
-    } else {
-      // stop_reason inesperado (ex: max_tokens)
-      break;
-    }
-  }
+    child.stderr.on('data', data => {
+      console.error('[claude stderr]', data.toString().slice(0, 200));
+    });
 
-  return '❌ O agente atingiu o limite de iterações sem concluir. Por favor, tente novamente com uma solicitação mais específica.';
+    child.on('close', code => {
+      if (tempImagePath) { try { fs.unlinkSync(tempImagePath); } catch {} }
+
+      if (outputFinal) {
+        resolve(outputFinal);
+      } else if (code === 0) {
+        resolve('✅ Concluído (sem texto de saída).');
+      } else {
+        reject(new Error(`claude saiu com código ${code}`));
+      }
+    });
+
+    child.on('error', err => {
+      if (tempImagePath) { try { fs.unlinkSync(tempImagePath); } catch {} }
+      reject(err);
+    });
+
+    // Timeout de 10 minutos
+    setTimeout(() => {
+      child.kill();
+      reject(new Error('Timeout: o agente demorou mais de 10 minutos.'));
+    }, 600000);
+  });
 }
 
 module.exports = { executarAgente };
