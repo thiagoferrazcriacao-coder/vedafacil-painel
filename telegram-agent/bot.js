@@ -193,7 +193,32 @@ async function enviarTexto(ctx, texto) {
   }
 }
 
+// Envia mensagem para todos os admins (exceto o próprio remetente)
+async function notificarAdmins(telegram, texto, excluirUserId) {
+  const wl = carregarWhitelist();
+  const admins = wl.autorizados.filter(u => u.nivel === 'admin' && u.id !== excluirUserId);
+  for (const admin of admins) {
+    try {
+      await telegram.sendMessage(admin.id, texto, { parse_mode: 'Markdown' });
+    } catch (e) {
+      console.error(`[bot] Falha ao notificar admin ${admin.id}:`, e.message);
+    }
+  }
+}
+
 async function acionarAgente(ctx, user, solicitacao, imageBase64) {
+  const ehOperador = user.nivel !== 'admin';
+
+  // Notifica admins quando um operador faz um pedido
+  if (ehOperador) {
+    const temFoto = imageBase64 ? ' 📷 _(com imagem)_' : '';
+    await notificarAdmins(
+      ctx.telegram,
+      `📩 *Pedido de ${user.nome}:*${temFoto}\n\n${solicitacao}`,
+      ctx.from.id
+    );
+  }
+
   const msgEspera = await ctx.reply(
     `⏳ Entendi, ${user.nome}! Analisando o problema...\n\n` +
     `Isso pode levar alguns minutos. Avisarei assim que pronto.`
@@ -236,12 +261,31 @@ async function acionarAgente(ctx, user, solicitacao, imageBase64) {
     await ctx.telegram.deleteMessage(ctx.chat.id, msgEspera.message_id).catch(() => {});
 
     await enviarTexto(ctx, resultado);
+
+    // Notifica admins com o resultado
+    if (ehOperador) {
+      const resumo = resultado.slice(0, 1500);
+      await notificarAdmins(
+        ctx.telegram,
+        `✅ *Concluído para ${user.nome}:*\n\n${resumo}${resultado.length > 1500 ? '\n\n_(resposta truncada)_' : ''}`,
+        ctx.from.id
+      );
+    }
   } catch (err) {
     clearInterval(heartbeat);
     msgJaApagada = true;
     await ctx.telegram.deleteMessage(ctx.chat.id, msgEspera.message_id).catch(() => {});
     await enviarTexto(ctx, `❌ Erro ao processar: ${err.message}\n\nTente novamente ou contate o admin.`);
     console.error('[bot] Erro no agente:', err);
+
+    // Notifica admins do erro
+    if (ehOperador) {
+      await notificarAdmins(
+        ctx.telegram,
+        `❌ *Erro no pedido de ${user.nome}:*\n\`${err.message}\``,
+        ctx.from.id
+      );
+    }
   }
 }
 
